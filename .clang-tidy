@@ -1,0 +1,117 @@
+---
+# Based on https://cs.opensource.google/googleapis/google-cloud-cpp/+/main:.clang-tidy
+#
+# Use this file with https://clangd.llvm.org/ during local development and tools/check_clang_tidy.py in CI.
+#
+# Here is an explanation for why some of the checks are disabled:
+#
+#  -abseil-no-namespace: false positives when using ABSL_FLAG
+#
+#  -bugprone-narrowing-conversions: too many false positives around
+#      `std::size_t`  vs. `*::difference_type`.
+#  -bugprone-easily-swappable-parameters: too many false positives.
+#  -bugprone-implicit-widening-of-multiplication-result: too many false positives.
+#       Almost any expression of the form `2 * variable` or `long x = a_int * b_int;`
+#       generates an error.
+#  -bugprone-unchecked-optional-access: too many false positives in tests.
+#       Despite what the documentation says, this warning appears after
+#       `ASSERT_TRUE(variable)` or `ASSERT_TRUE(variable.has_value())`.
+#  -bugprone-exception-escape: too pedantic for main() since many Metabit codebases
+#       do not use exceptions widely. Consider turning this on if your codebase
+#       does use exceptions.
+#
+#  -google-readability-casting: too many false positives. See:
+#       https://bugs.chromium.org/p/chromium/issues/detail?id=1282228
+#       https://github.com/llvm/llvm-project/issues/57959
+#
+#  -readability-identifier-length: disallows reasonable names like "it".
+#  -readability-use-anyofallof: too many false positives
+#  -readability-named-parameter: we allow unused parameters to be unnamed
+#  -readability-simplify-boolean-expr: too many false positives with glog macros,
+#       probably has a bug that doesn't ignore macros correctly
+#
+#  -modernize-use-trailing-return-type: makes code less readable
+#  -modernize-return-braced-init-list: makes code less readable
+#  -modernize-avoid-c-arrays: necessary for C API, std::array can be less readable
+#  -modernize-use-nodiscard: overly pedantic
+#  -modernize-concat-nested-namespaces: overly pedantic
+#  -modernize-replace-disallow-copy-and-assign-macro: clutters code. We think
+#       the DISALLOW_ macros work well, as long as they are under the "public:" section.
+#
+#  -misc-confusable-identifiers: slow and not very useful
+#  -misc-const-correctness: overly pedantic
+#  -misc-non-private-member-variables-in-classes: complains about protected members
+#      in test fixtures, which we'd like to keep
+#  -misc-use-anonymous-namespace: complains about "static" expanded from macros
+#
+#  cppcoreguidelines: we don't always follow C++ Core Guidelines, so we selectively
+#      enable the useful ones.
+Checks: >
+  abseil-*,
+  bugprone-*,
+  google-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-virtual-class-destructor,
+  cppcoreguidelines-prefer-member-initializer,
+
+  -abseil-no-namespace,
+
+  -bugprone-narrowing-conversions,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-unchecked-optional-access,
+  -bugprone-exception-escape,
+
+  -google-readability-casting,
+
+  -readability-named-parameter,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-use-anyofallof,
+  -readability-simplify-boolean-expr,
+
+  -modernize-avoid-c-arrays,
+  -modernize-concat-nested-namespaces,
+  -modernize-return-braced-init-list,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-replace-disallow-copy-and-assign-macro,
+
+  -misc-const-correctness,
+  -misc-confusable-identifiers,
+  -misc-non-private-member-variables-in-classes,
+  -misc-use-anonymous-namespace,
+
+  -readability-static-accessed-through-instance,
+  -google-readability-todo,
+
+FormatStyle: file
+CheckOptions:
+  - { key: readability-identifier-naming.NamespaceCase, value: lower_case }
+  - { key: readability-identifier-naming.ClassCase, value: CamelCase }
+  - { key: readability-identifier-naming.StructCase, value: CamelCase }
+  - { key: readability-identifier-naming.TypeAliasCase, value: CamelCase }
+  - { key: readability-identifier-naming.TypeTemplateParameterCase, value: CamelCase }
+  - { key: readability-identifier-naming.ValueTemplateParameterCase, value: CamelCase }
+  - { key: readability-identifier-naming.ValueTemplateParameterPrefix, value: k }
+  - { key: readability-identifier-naming.FunctionCase, value: aNy_CasE }
+  - { key: readability-identifier-naming.VariableCase, value: lower_case }
+  - { key: readability-identifier-naming.ClassMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.ClassMemberSuffix, value: _ }
+  - { key: readability-identifier-naming.PrivateMemberSuffix, value: _ }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix, value: _ }
+  - { key: readability-identifier-naming.EnumConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantPrefix, value: k }
+  - { key: readability-identifier-naming.ConstexprVariableCase, value: CamelCase }
+  - { key: readability-identifier-naming.ConstexprVariablePrefix, value: k }
+  - { key: readability-identifier-naming.GlobalConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.GlobalConstantPrefix, value: k }
+  - { key: readability-identifier-naming.StaticConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.StaticConstantPrefix, value: k }
+  - { key: readability-function-cognitive-complexity.IgnoreMacros, value: 1 }
+  - { key: readability-braces-around-statements.ShortStatementLines, value: 1 }
+  - { key: readability-simplify-boolean-expr.IgnoreMacros, value: 1 }

@@ -1,0 +1,31 @@
+---
+# Only differences from Google style should be included below.
+Language: Cpp
+BasedOnStyle: Google
+DerivePointerAlignment: false
+# "Regroup" automatically regroups includes. This assumes that all test files
+# end with `_test.cc`. Otherwise, the main header file for a unit test may not
+# be recognized correctly.
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Direct headers automatically get priority 0.
+  # C headers (no slash, ends with .h).
+  - Regex: '^<[a-zA-Z0-9_]*\.h>'
+    Priority: 1
+  # C++ standard headers (does not end with .h).
+  - Regex: "^<[a-zA-Z0-9_/]*>"
+    Priority: 2
+  # Other system headers (e.g. third-party).
+  - Regex: "^<.*"
+    Priority: 3
+  # Regular includes.
+  - Regex: ".*"
+    Priority: 4
+# Suffix regex used to match test files to main header files. Tests must end
+# with <header_name>_test.
+IncludeIsMainRegex: "(_test)?$"
+SpaceBeforeCpp11BracedList: true
+ColumnLimit: 120
+---
+Language: Proto
+BasedOnStyle: Google

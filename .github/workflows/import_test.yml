@@ -13,9 +13,20 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Test CPM
+    - name: Set up GITHUB_TOKEN
       run: |
         git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+    - name: Test CPM
+      run: |
         cd test/import_test/cmake_cpm
+        ./build.sh
+
+    - name: Test Install and Find Package
+      run: |
+        ./regen_build_dir.sh
+        cmake --build build --config Release
+        cmake --install build --prefix ~/.cmake/packages/
+        cd test/import_test/cmake_install_find_package
         ./build.sh
 

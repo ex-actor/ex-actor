@@ -9,4 +9,4 @@ cmake --build build --config Release
 cmake --install build --prefix <your_install_prefix>
 ```
 
-then, you can use `find_package` to add ex_actor as your dependencies, don't forget to set `CMAKE_PREFIX_PATH` to your install prefix, see [CMakeLists.txt](CMakeLists.txt).
+then, you can use `find_package` to add ex_actor as your dependencies, don't forget to set `CMAKE_PREFIX_PATH` to your install prefix, see [CMakeLists.txt](CMakeLists.txt) in this directory example.

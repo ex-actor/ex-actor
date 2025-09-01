@@ -6,7 +6,7 @@ include(cmake/CPM.cmake)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-add_compile_options(-Wno-subobject-linkage) # to suppress subobject linkage warnings in stdexec
+add_compile_options(-Wno-subobject-linkage) 
 
 # ------------------- dependencies -------------------
 CPMAddPackage(
@@ -27,6 +27,9 @@ target_link_libraries(
   ex_actor
   INTERFACE STDEXEC::stdexec
 )
+# to suppress subobject linkage warnings in stdexec
+target_compile_options(ex_actor INTERFACE -Wno-subobject-linkage)
+add_library(ex_actor::ex_actor ALIAS ex_actor)
 
 # ------------------- tests -------------------
 option(EX_ACTOR_BUILD_TESTS "Build tests" ON)

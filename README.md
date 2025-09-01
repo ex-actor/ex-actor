@@ -49,5 +49,75 @@ int main() {
 }
 ```
 
-# Installation
+# Using `ex_actor`
 
+## CMake Projects
+
+### Use [CMake Package Manager (CPM)](https://github.com/cpm-cmake/CPM.cmake)
+```cmake
+cmake_minimum_required(VERSION 3.25.0 FATAL_ERROR)
+project(your_project)
+
+# For more information on how to add CPM to your project, see: https://github.com/cpm-cmake/CPM.cmake#adding-cpm
+include(CPM.cmake)
+
+CPMAddPackage(
+  NAME ex_actor
+  GITHUB_REPOSITORY ex-actor/ex-actor
+  GIT_TAG main # This will always pull the latest code from the `main` branch. You may also use a specific commit ID
+  OPTIONS "EX_ACTOR_BUILD_TESTS OFF"
+)
+
+add_executable(main example.cpp)
+target_link_libraries(main ex_actor::ex_actor)
+```
+
+### CMake Install & find_package
+
+First install ex_actor to your system
+```bash
+git clone --depth=1 https://github.com/ex-actor/ex-actor.git && cd ex-actor
+./regen_build_dir.sh && cd build
+cmake --build . --config Release
+cmake --install . --config Release --prefix=<your install path>
+```
+
+Then include to your project using find_package
+
+```cmake
+find_package(ex_actor)
+if(ex_actor_FOUND)
+    message(STATUS "ex_actor include dir: ${ex_actor_INCLUDE_DIRS}")
+    message(STATUS "ex_actor libraries: ${ex_actor_LIBRARIES}")
+endif()
+add_executable(MyApp main.cpp)
+target_include_directories(MyApp PRIVATE ${ex_actor_INCLUDE_DIRS})
+target_link_libraries(MyApp PRIVATE ${ex_actor_LIBRARIES})
+```
+
+## Bazel Projects
+
+Use [rules_foreign_cc](https://bazel-contrib.github.io/rules_foreign_cc/cmake.html)
+
+WORKSPACE:
+```python
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+http_archive(
+    name = "ex_actor",
+    # This will always pulls the latest source code, you may need to set a fixed version
+    urls = ["https://github.com/ex-actor/ex-actor/archive/refs/heads/main.zip"],
+    # Run sha256sum on the downloaded file to get it
+    sha256 = "...",
+)
+```
+
+BUILD file:
+```python
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+cmake(
+    name = "ex_actor",
+    lib_source = "@ex_actor//:all_srcs",
+    generate_args = ["-GNinja"],
+)
+```

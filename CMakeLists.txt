@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.25.0 FATAL_ERROR)
 project(ex_actor VERSION 0.1)
 include(cmake/CPM.cmake)
+include(CMakePackageConfigHelpers)
 
 # ------------------- global setups -------------------
 set(CMAKE_CXX_STANDARD 20)
@@ -39,10 +40,21 @@ if(EX_ACTOR_BUILD_TESTS)
 endif()
 
 # ------------------- install -------------------
-install(TARGETS ex_actor EXPORT ex_actor_targets)
+install(TARGETS ex_actor EXPORT ex_actor-targets)
 install(DIRECTORY include/ DESTINATION include)
 install(
-  EXPORT ex_actor_targets
+  EXPORT ex_actor-targets
   NAMESPACE ex_actor::
+  DESTINATION lib/cmake/ex_actor
+)
+
+configure_package_config_file(
+  cmake/ex_actor-config.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/ex_actor-config.cmake
+  INSTALL_DESTINATION lib/cmake/ex_actor
+)
+
+install(
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/ex_actor-config.cmake
   DESTINATION lib/cmake/ex_actor
 )

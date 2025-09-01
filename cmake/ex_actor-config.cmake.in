@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+# Let consumers also find our dependencies
+include(CMakeFindDependencyMacro)
+
+find_dependency(stdexec REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ex_actor-targets.cmake")

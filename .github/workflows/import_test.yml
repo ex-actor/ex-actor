@@ -17,6 +17,16 @@ jobs:
       run: |
         git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
+    - name: Setup Bazel environment
+      uses: bazel-contrib/setup-bazel@0.8.1
+          
+    - name: Test Bazel Workspace
+      run: |
+        cd test/import_test/bazel_workspace
+        ./build.sh
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Test CPM
       run: |
         cd test/import_test/cmake_cpm

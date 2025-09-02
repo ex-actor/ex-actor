@@ -7,7 +7,8 @@ include(CPM.cmake)
 CPMAddPackage(
   NAME ex_actor
   GITHUB_REPOSITORY ex-actor/ex-actor
-  GIT_TAG main # This will always pull the latest code from the `main` branch. You may also use a specific commit ID
+  # For CI test, we use the current commit ID. You should use a fixed commit ID.
+  GIT_TAG $ENV{GITHUB_REF}
   OPTIONS "EX_ACTOR_BUILD_TESTS OFF"
 )
 

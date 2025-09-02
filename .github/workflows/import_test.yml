@@ -24,9 +24,6 @@ jobs:
 
     - name: Test Install and Find Package
       run: |
-        ./regen_build_dir.sh
-        cmake --build build --config Release
-        cmake --install build --prefix ~/.cmake/packages/
         cd test/import_test/cmake_install_find_package
         ./build.sh
 

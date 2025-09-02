@@ -70,4 +70,3 @@ We provide examples of different build systems, check them at [`test/import_test
 Can't find your build system? Open an issue to let us know. Welcome to open a PR to contribute!
 
 # Thread Model
-

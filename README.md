@@ -58,12 +58,12 @@ Once C++26 is ready, we'll add a check for your C++ version, and switch dependen
 
 # How to Get `ex_actor`
 
-We provide examples of different build systems, check them at [`test/import_test`](test/import_test).
+We provide examples of different build systems.
 
 * For CMake project:
   * [Use CMake Package Manager (CPM)](test/import_test/cmake_cpm) (recommended)
   * [Install & find_package](test/import_test/cmake_install_find_package)
-* For Bazel project, you can use [rules_foreign_cc](https://bazel-contrib.github.io/rules_foreign_cc/cmake.html):
+* For Bazel project:
   * [Bzlmod sytle](test/import_test/bazel_bzlmod)
   * [Legacy WORKSPACE style](test/import_test/bazel_workspace)
 

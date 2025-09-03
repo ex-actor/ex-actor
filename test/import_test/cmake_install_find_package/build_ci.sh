@@ -11,6 +11,12 @@ set -e -x
 # Clone ex-actor repository
 git clone https://github.com/ex-actor/ex-actor.git --depth 1
 pushd ex-actor
+  if [ -n "$GITHUB_ACTIONS" ]; then
+    # For CI test only, checkout to the current commit. You don't need to do this in your project.
+    git fetch --depth 1 origin "$GITHUB_SHA"
+    git checkout "$GITHUB_SHA"
+  fi
+
   # Build & install ex-actor
   ./regen_build_dir.sh
   cmake --build build --config Release

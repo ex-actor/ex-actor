@@ -11,5 +11,6 @@ set -e -x
 wget -O CPM.cmake https://github.com/cpm-cmake/CPM.cmake/releases/latest/download/get_cpm.cmake
 
 rm -rf build
-cmake -S . -B build -G "Ninja Multi-Config"
+
+cmake -S . -B build -G "Ninja Multi-Config" -DCPM_ex_actor_SOURCE="$GITHUB_WORKSPACE"
 cmake --build build --config Release

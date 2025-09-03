@@ -1,7 +1,7 @@
-workspace(name = "rules_foreign_cc_usage_example")
+workspace(name = "my_workspace")
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 # ------------------------ rules_foreign_cc setup ------------------------
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 http_archive(
     name = "rules_foreign_cc",
     sha256 = "32759728913c376ba45b0116869b71b68b1c2ebf8f2bcf7b41222bc07b773d73",
@@ -23,6 +23,4 @@ py_repositories()
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 protobuf_deps()
 
-
-
-# ------------------------ ex-actor source code ------------------------
+# ------------------------ ex-actor source code(to be filled) ------------------------

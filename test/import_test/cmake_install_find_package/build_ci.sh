@@ -18,7 +18,7 @@ pushd ex-actor
   fi
 
   # Build & install ex-actor
-  ./regen_build_dir.sh
+  ./scripts/regen_build_dir.sh
   cmake --build build --config Release
   cmake --install build --prefix "${HOME}/.cmake/packages/"
 popd

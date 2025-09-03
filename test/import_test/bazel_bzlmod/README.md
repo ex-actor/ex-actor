@@ -6,6 +6,7 @@ MODULE.bazel:
 
 ```bazel
 bazel_dep(name = "ex_actor", version = "0.1")
+bazel_dep(name = "rules_cc", version = "0.2.3")
 archive_override(
     module_name = "ex_actor",
 
@@ -26,9 +27,10 @@ note the commit ID should be a full commit ID like `acd385cd467253385b44b382a166
 Finally, use can `@ex_actor//:ex_actor` as your dependencies.
 
 ```bazel
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 cc_binary(
     name = "main",
     srcs = ["main.cc"],
-    deps = ["@ex_actor//:ex_actor"],
+    deps = ["@ex_actor"],
 )
 ```

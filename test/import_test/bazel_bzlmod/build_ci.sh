@@ -8,20 +8,21 @@ cd "$SRC" || exit
 set -e -x
 
 pushd "${GITHUB_WORKSPACE}"/..
-  zip -r /tmp/code_after_merge.zip ex-actor
+  zip -r /tmp/code_after_merge.zip ex-actor -x "*.git*"
   zip_sha256=$(sha256sum /tmp/code_after_merge.zip | awk '{print $1}')
 popd
 
 {
-  echo "http_archive("
-  echo "    name = \"ex_actor\","
+  echo "archive_override("
+  echo "    module_name = \"ex_actor\","
   echo "    strip_prefix = \"ex-actor\","
   echo "    urls = [\"file:///tmp/code_after_merge.zip\"],"
   echo "    sha256 = \"${zip_sha256}\","
   echo ")"
-} >> WORKSPACE
+} >> MODULE.bazel
 
-echo "Final WORKSPACE:"
-cat WORKSPACE
+echo "Final MODULE.bazel:"
+cat MODULE.bazel
 
 bazel build //:main
+bazel clean

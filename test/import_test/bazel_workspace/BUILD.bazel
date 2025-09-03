@@ -1,0 +1,5 @@
+cc_binary(
+    name = "main",
+    srcs = ["main.cc"],
+    deps = ["@ex_actor//:ex_actor"],
+)

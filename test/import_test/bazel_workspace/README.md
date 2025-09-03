@@ -43,27 +43,17 @@ http_archive(
     strip_prefix = "ex-actor-<latest_commit_id>",
     urls = ["https://github.com/ex-actor/ex-actor/archive/<latest_commit_id>.zip"],
 
-    # Download it to your local machine, run `sha256sum <zip_file_name>` to get the sha256 of the zip file.
+    # Download zip file to your local machine, run `sha256sum <zip_file_name>` to get the sha256 of the zip file.
     sha256 = "<sha256_of_the_zip_file>",
 )
 ```
 
-Then, use `cmake` rule to transform `ex_actor` as a cc_library.
-
-```bazel
-cmake(
-    name = "ex_actor",
-    lib_source = "@ex_actor//:all_srcs",
-    out_headers_only = True,
-)
-```
-
-Finally, use it as your dependencies.
+Finally, use `@ex_actor//:ex_actor` as your dependencies.
 
 ```bazel
 cc_binary(
     name = "main",
     srcs = ["main.cc"],
-    deps = [":ex_actor"],
+    deps = ["@ex_actor//:ex_actor"],
 )
 ```

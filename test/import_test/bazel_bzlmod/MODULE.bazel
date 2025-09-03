@@ -1,0 +1,5 @@
+module(name = "my_module", version = "1.0")
+
+bazel_dep(name = "ex_actor", version = "0.1")
+
+# ------------------------ ex-actor archive_override(to be filled) ------------------------

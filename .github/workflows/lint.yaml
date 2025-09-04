@@ -1,0 +1,43 @@
+name: Lint
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup buildifier
+        uses: jbajic/setup-buildifier@v1
+        with:
+          buildifier-version: 8.2.1
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          version: v0.11.0
+
+      - name: Generate compile_commands.json
+        run: |
+          ./scripts/regen_build_dir.sh
+          ln -s build/compile_commands.json compile_commands.json
+
+      - uses: cpp-linter/cpp-linter-action@v2.16.2
+        id: linter
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          style: "file" # Use .clang-format config file
+          tidy-checks: "" # Use .clang-tidy config file
+          version: "20"
+          ignore-tidy: "test/import_test"
+
+      - name: Fail fast?!
+        if: steps.linter.outputs.checks-failed > 0
+        run: exit 1

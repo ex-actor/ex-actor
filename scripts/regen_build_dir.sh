@@ -4,7 +4,7 @@ SRC=$(
     cd "$(dirname "$0")" || exit
     pwd
 )
-cd "$SRC" || exit
+cd "$SRC"/.. || exit
 
 set -e -x
 

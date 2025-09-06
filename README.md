@@ -3,11 +3,11 @@
 [![License: Apache](https://img.shields.io/badge/License-Apache-blue.svg)](https://opensource.org/licenses/MIT)
 [![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
 
-![image](assets/ex_actor_banner.png)
+![image](assets/ex_actor_banner.jpg)
 
-**ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) based on `std::execution`, **only requires C++20 ([detail](#requirements-and-dependencies))**.
+**ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) based on `std::execution`. **Only requires C++20([detail](#faqs))**.
 
-An actor framework turns your class into a remote server - 'actor'. All method calls will be queued to the actor's mailbox, and executed sequentially. You can easily write distributed applications with it, without caring about thread synchronization and network.
+An actor framework turns your class into a remote service. All method calls will be queued to the actor's mailbox and executed sequentially. You can easily write distributed applications with it, without caring about thread synchronization and network.
 
 Key Features:
 1. **Easy to Use** - Make your class an actor by **one line**. No arcane macros and templates.
@@ -15,7 +15,7 @@ Key Features:
 3. **Sender-Based API** - Compatible with everything in the std::execution ecosystem - you can `co_await` it, pass to async algorithms, transfer to other execution resources and so on.
 
 
-# Example
+# API Glance
 
 ```cpp
 #include "ex_actor/api.h"
@@ -36,7 +36,7 @@ exec::task<void> TestBasicUseCase() {
 
   // Use any std::execution scheduler you like!
   ex_actor::WorkStealingThreadPool thread_pool(10);
-  ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.get_scheduler()); 
+  ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.get_scheduler());
 
   // Coroutine support!
   std::cout << co_await counter.Call<&Counter::Add>(1) << '\n';
@@ -48,15 +48,7 @@ int main() {
 }
 ```
 
-# Requirements and Dependencies
-
-C++26 is not finalized, now we depends on an early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), which only requires C++20.
-
-Once C++26 is ready, we'll add a check for your C++ version, and switch dependencies automatically:
-* If your compiler supports C++26, we'll switch to the real `std::execution`, and enable some fancy reflection-based APIs.
-* If not, we'll keep using `nvidia/stdexec`. Don't worry we won't give up C++20 :)
-
-# How to Get `ex_actor`
+# How to Add `ex_actor` to Your Project
 
 We provide examples of different build systems.
 
@@ -69,4 +61,10 @@ We provide examples of different build systems.
 
 Can't find your build system? Open an issue to let us know. Welcome to open a PR to contribute!
 
-# Thread Model
+# FAQs
+
+## `std::execution` is in C++26, how can you compile with C++20?
+
+C++26 is not finalized, now we depends on an early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), which only requires C++20. (it's like `fmtlib` vs `std::format` and `ranges-v3` vs `std::ranges`)
+
+Once C++26 is ready, we'll add a build option to switch to C++26, and use the real `std::execution`. **We'll keep our code compatible with both `nvidia/stdexec` and `std::execution`**.

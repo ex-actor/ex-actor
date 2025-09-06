@@ -1,6 +1,6 @@
 # Using ex_actor with [CMake Package Manager (CPM)](test/import_test/cmake_cpm)
 
-Run the following commands to get latest CPM.cmake:
+Run the following commands to get latest CPM.cmake, it's essentially a wrapper of CMake's `FetchContent`:
 ```bash
 wget -O CPM.cmake https://github.com/cpm-cmake/CPM.cmake/releases/latest/download/get_cpm.cmake
 ```

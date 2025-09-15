@@ -88,6 +88,7 @@ Checks: >
 
   -readability-static-accessed-through-instance,
   -google-readability-todo,
+  -misc-include-cleaner,
 
 FormatStyle: file
 CheckOptions:

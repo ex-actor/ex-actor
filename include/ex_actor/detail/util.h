@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -8,6 +10,86 @@
 #include <stdexec/execution.hpp>
 
 #include "ex_actor/detail/alias.h"  // IWYU pragma: keep
+
+namespace ex_actor::util {
+
+/**
+ * @brief A std::execution style semaphore. support on_negative sender.
+ */
+class Semaphore {
+ public:
+  explicit Semaphore(int64_t initial_count) : count_(initial_count) {}
+
+  int64_t Acquire(int64_t n) {
+    auto prev = count_.fetch_sub(n, std::memory_order_release);
+    if (prev <= n) {
+      std::unique_lock lock(waiters_mu_);
+      auto waiters = std::move(waiters_);
+      lock.unlock();
+      for (auto* waiter : waiters) {
+        waiter->Complete();
+      }
+    }
+    return prev - n;
+  }
+
+  int64_t Release(int64_t n) {
+    auto prev = count_.fetch_add(n, std::memory_order_release);
+    return prev + n;
+  }
+
+  int64_t CurrentValue() const { return count_.load(std::memory_order_acquire); }
+
+  struct OnDrainedSender;
+
+  /**
+   * @brief Return a sender that will be completed when the semaphore is drained(value <= 0).
+   */
+  OnDrainedSender OnDrained() { return OnDrainedSender {.semaphore = this}; }
+
+  struct TypeErasedOnDrainedOperation {
+    virtual ~TypeErasedOnDrainedOperation() = default;
+    virtual void Complete() = 0;
+  };
+
+  template <ex::receiver R>
+  struct OnDrainedOperation : public TypeErasedOnDrainedOperation {
+    OnDrainedOperation(Semaphore* semaphore, R receiver) : semaphore(semaphore), receiver(std::move(receiver)) {}
+    Semaphore* semaphore;
+    R receiver;
+
+    void start() noexcept {
+      // must get lock before checking count_, or if the count_ is drained before the waiter is queued but after
+      // counter_ is checked, the waiter will never be completed
+      std::scoped_lock lock(semaphore->waiters_mu_);
+      if (semaphore->count_.load(std::memory_order_acquire) <= 0) {
+        Complete();
+      } else {
+        semaphore->waiters_.push_back(this);
+      }
+    }
+
+    void Complete() override { receiver.set_value(); }
+  };
+
+  struct OnDrainedSender : ex::sender_t {
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    using completion_signatures = ex::completion_signatures<ex::set_value_t()>;
+    Semaphore* semaphore;
+
+    template <ex::receiver R>
+    OnDrainedOperation<R> connect(R receiver) {
+      return {semaphore, std::move(receiver)};
+    }
+  };
+
+ private:
+  mutable std::mutex waiters_mu_;
+  std::vector<TypeErasedOnDrainedOperation*> waiters_;
+  std::atomic_int64_t count_;
+};
+
+};  // namespace ex_actor::util
 
 namespace ex_actor::detail {
 template <class T>

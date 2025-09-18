@@ -43,12 +43,12 @@ class Proxy {
 template <>
 constexpr auto ex_actor::reflect::kActorMethods<Proxy> = std::make_tuple(&Proxy::GetValue, &Proxy::GetValue2);
 
-static ex_actor::WorkStealingThreadPool thread_pool(10);
+static ex_actor::WorkSharingThreadPool thread_pool(10);
 
 static exec::task<void> TestBasicUsage() {
   ex_actor::ActorRegistry registry;
 
-  ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.get_scheduler());
+  ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
   exec::async_scope scope;
   for (int i = 0; i < 100; ++i) {
     scope.spawn(counter.Call<&Counter::Add>(1));
@@ -56,7 +56,7 @@ static exec::task<void> TestBasicUsage() {
   auto res = co_await counter.Call<&Counter::GetValue>();
   std::cout << "after add1*100 : " << res << '\n';
 
-  ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(thread_pool.get_scheduler(), counter);
+  ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(thread_pool.GetScheduler(), counter);
   auto res2 = co_await proxy.Call<&Proxy::GetValue>();
   auto res3 = co_await proxy.Call<&Proxy::GetValue2>();
 
@@ -67,10 +67,10 @@ static exec::task<void> TestBasicUsage() {
 
 static exec::task<void> TestConfig() {
   ex_actor::ActorRegistry registry;
-  auto counter = registry.CreateActor<Counter>(ex_actor::ActorConfig {.scheduler = thread_pool.get_scheduler()});
+  auto counter = registry.CreateActor<Counter>(ex_actor::ActorConfig {.scheduler = thread_pool.GetScheduler()});
   registry.CreateActor<Counter>(
-      ex_actor::ActorConfig {.scheduler = thread_pool.get_scheduler(), .actor_name = "counter"});
-  registry.CreateActor<Proxy>(ex_actor::ActorConfig {.scheduler = thread_pool.get_scheduler()}, counter);
+      ex_actor::ActorConfig {.scheduler = thread_pool.GetScheduler(), .actor_name = "counter"});
+  registry.CreateActor<Proxy>(ex_actor::ActorConfig {.scheduler = thread_pool.GetScheduler()}, counter);
   registry.GetActorByName<Counter>("counter");
   registry.DestroyActor(counter);
   co_return;

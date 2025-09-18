@@ -35,8 +35,8 @@ exec::task<void> TestBasicUseCase() {
   ex_actor::ActorRegistry registry;
 
   // Use any std::execution scheduler you like!
-  ex_actor::WorkStealingThreadPool thread_pool(10);
-  ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.get_scheduler());
+  ex_actor::WorkSharingThreadPool thread_pool(10);
+  ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
 
   // Coroutine support!
   std::cout << co_await counter.Call<&Counter::Add>(1) << '\n';

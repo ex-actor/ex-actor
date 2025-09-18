@@ -17,6 +17,16 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
+      - name: Test CPM
+        run: |
+          cd test/import_test/cmake_cpm
+          ./build_ci.sh
+
+      - name: Test Install and Find Package
+        run: |
+          cd test/import_test/cmake_install_find_package
+          ./build_ci.sh
+
       - name: Setup Bazel environment
         uses: bazel-contrib/setup-bazel@0.8.1
 
@@ -28,14 +38,4 @@ jobs:
       - name: Test Bazel Workspace
         run: |
           cd test/import_test/bazel_workspace
-          ./build_ci.sh
-
-      - name: Test CPM
-        run: |
-          cd test/import_test/cmake_cpm
-          ./build_ci.sh
-
-      - name: Test Install and Find Package
-        run: |
-          cd test/import_test/cmake_install_find_package
           ./build_ci.sh

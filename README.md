@@ -12,40 +12,44 @@ An actor framework turns your class into a remote service. All method calls will
 Key Features:
 1. **Easy to Use** - Make your class an actor by **one line**. No arcane macros and templates.
 2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work stealing, work sharing, custom priority...
-3. **Standard-Compliant API** - All actor methods returns a std::execution sender, compatible with everything in the std::execution ecosystem - you can `co_await` the result, pass to async algorithms, transfer to other execution resources and so on.
+3. **Standard-Compliant API** - Our actor returns a standard sender, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
 
 
 # API Glance
 
 ```cpp
 #include "ex_actor/api.h"
+namespace ex = stdexec;
 
 class Counter {
- public:
-  int Add(int x) { return count_ += x; }
-  
-  // Tell me your methods - it's all you need to make your class an actor.
-  constexpr static auto kActorMethods = std::make_tuple(&Counter::Add);
-
- private:
-  int count_ = 0;
-};
-
-exec::task<void> TestBasicUseCase() {
-  ex_actor::ActorRegistry registry;
-
-  // Use any std::execution scheduler you like!
-  ex_actor::WorkSharingThreadPool thread_pool(10);
-  ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
-
-  // Coroutine support!
-  std::cout << co_await counter.Send<&Counter::Add>(1) << '\n';
-}
-
-int main() {
-  stdexec::sync_wait(TestBasicUseCase());
-  return 0;
-}
+  public:
+   int Add(int x) { return count_ += x; }
+   
+   // 1. Tell me your methods - the only line intrudes into your class.
+   constexpr static auto kActorMethods = std::make_tuple(&Counter::Add);
+ 
+  private:
+   int count_ = 0;
+ };
+ 
+ exec::task<int> Test() {
+   ex_actor::ActorRegistry registry;
+ 
+   // 2. Create the actor. Use any std::execution scheduler you like!
+   ex_actor::WorkSharingThreadPool thread_pool(10);
+   ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
+ 
+   // 3. Call it! It returns a standard sender.
+   auto sender = counter.Send<&Counter::Add>(1) 
+                 | ex::then([](int value) { return value + 1; });
+   co_return co_await sender;
+ }
+ 
+ int main() {
+   auto [res] = ex::sync_wait(Test()).value();
+   std::cout << "res: " << res << '\n';
+   return 0;
+ }
 ```
 
 # How to Add `ex_actor` to Your Project
@@ -61,6 +65,16 @@ We provide examples of different build systems.
 
 Can't find your build system? Open an issue to let us know. Welcome to open a PR to contribute!
 
+# Dependencies
+
+We know it's hard to resolve dependency conflicts, so we carefully choose minimal dependencies:
+
+1. [stdexec](https://github.com/NVIDIA/stdexec)
+2. [concurrentqueue](https://github.com/cameron314/concurrentqueue)
+3. [gRPC](https://github.com/grpc/grpc)
+
+For specific versions, please check [CMakeLists.txt](CMakeLists.txt), search for `CPMAddPackage`. If you meet any dependency conflict, please open an issue to let us know, we're happy to help.
+
 # FAQs
 
 ## `std::execution` is in C++26, why you only requires C++20?
@@ -70,3 +84,13 @@ C++26 is not finalized, now we depends on an early implementation of `std::execu
 Once C++26 is ready, we'll add a build option to switch to the real `std::execution` in C++26, allow you to remove the dependency on `stdexec`. And it'll only be an option, you can still use `stdexec` because all senders based on `stdexec` will work well with `std::execution`.
 
 **From our side, we'll keep our code compatible with both `stdexec` and `std::execution`**. So don't worry about the dependency.
+
+## Is it production-ready?
+
+The single-process mode is heavily tested in our company's production environment. Feel free to use it.
+
+The distributed mode is still in early stage. Welcome to have a try and give us feedback!
+
+# The Team Behind `ex_actor`
+
+We are ...

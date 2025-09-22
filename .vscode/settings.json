@@ -4,6 +4,7 @@
                 "endfunction",
                 "GITHUB",
                 "googletest",
-                "gtest"
+                "gtest",
+                "NOLINTNEXTLINE"
         ]
 }

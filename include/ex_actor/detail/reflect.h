@@ -9,6 +9,13 @@
 
 namespace ex_actor::reflect {
 
+template <class UserClass>
+constexpr std::tuple kActorMethods = UserClass::kActorMethods;
+
+}  // namespace ex_actor::reflect
+
+namespace ex_actor::detail::reflect {
+
 template <typename T>
 struct Signature;
 
@@ -21,9 +28,18 @@ struct Signature<R (C::*)(Args...)> {
 template <typename R, typename C, typename... Args>
 struct Signature<R (C::*)(Args...) const> : Signature<R (C::*)(Args...)> {};
 template <typename R, typename C, typename... Args>
-struct Signature<R (C::*const)(Args...)> : Signature<R (C::*)(Args...)> {};
+struct Signature<R (C::* const)(Args...)> : Signature<R (C::*)(Args...)> {};
 template <typename R, typename C, typename... Args>
-struct Signature<R (C::*const)(Args...) const> : Signature<R (C::*)(Args...)> {};
+struct Signature<R (C::* const)(Args...) const> : Signature<R (C::*)(Args...)> {};
+
+template <class This, template <class...> class Other>
+constexpr bool kIsSpecializationOf = false;
+
+template <template <class...> class Template, class... Args>
+constexpr bool kIsSpecializationOf<Template<Args...>, Template> = true;
+
+template <class This, template <class...> class Other>
+concept SpecializationOf = kIsSpecializationOf<std::decay_t<This>, Other>;
 
 template <auto kF1, auto kF2>
 constexpr bool IsSameMemberFn() {
@@ -42,18 +58,8 @@ struct ExTaskTraits<exec::task<T>> {
   using InnerType = T;
 };
 
-template <class This, template <class...> class Other>
-constexpr bool kIsSpecializationOf = false;
-
-template <template <class...> class Template, class... Args>
-constexpr bool kIsSpecializationOf<Template<Args...>, Template> = true;
-
-template <class This, template <class...> class Other>
-concept SpecializationOf = kIsSpecializationOf<std::decay_t<This>, Other>;
-
 // ---------------- Actor Methods Related ----------------
-template <class UserClass>
-constexpr std::tuple kActorMethods = UserClass::kActorMethods;
+using ::ex_actor::reflect::kActorMethods;
 
 template <class T>
 concept HasActorMethods = (std::tuple_size_v<decltype(kActorMethods<T>)> > 0);
@@ -84,4 +90,4 @@ auto InvokeActorMethod(UserClass& user_class_instance, Args&&... args) {
   return (user_class_instance.*kMethodPtr)(std::forward<Args>(args)...);
 }
 
-}  // namespace ex_actor::reflect
+}  // namespace ex_actor::detail::reflect

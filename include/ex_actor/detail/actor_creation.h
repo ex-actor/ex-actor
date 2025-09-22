@@ -27,29 +27,27 @@ class ActorRef {
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
   }
 
+  struct SendRequest {
+    const ActorRef* actor_ref;
+    size_t mailbox_partition_index;
+
+    template <auto kMethod, class... Args>
+    ex::sender auto Send(Args&&... args) const {
+      if (!actor_ref->IsValid()) [[unlikely]] {
+        throw std::runtime_error("Empty ActorRef, cannot call method on it.");
+      }
+      return detail::CallTypeErasedActorMethod<UserClass, kMethod>(actor_ref->actor_, mailbox_partition_index,
+                                                                   std::forward<Args>(args)...);
+    }
+  };
+
+  SendRequest SubMailbox(size_t mailbox_partition_index) const {
+    return SendRequest {.actor_ref = this, .mailbox_partition_index = mailbox_partition_index};
+  }
+
   template <auto kMethod, class... Args>
-  ex::sender auto Call(Args&&... args) const {
-    if (!is_valid_) [[unlikely]] {
-      throw std::runtime_error("Empty ActorRef, cannot call method on it.");
-    }
-
-    constexpr size_t kMethodIndex = reflect::GetActorMethodIndex<kMethod>();
-    using ReturnType = reflect::Signature<decltype(kMethod)>::ReturnType;
-    constexpr bool kIsNested = ex::sender<ReturnType>;
-    auto start = ex::schedule(detail::StdExecSchedulerForActorMessageSubmission {.actor = actor_});
-
-    auto* user_class_instance = static_cast<UserClass*>(actor_->GetUserClassAddress());
-
-    if constexpr (kIsNested) {
-      return std::move(start) |
-             ex::let_value([user_class_instance, ... args = std::move(args), kMethodIndex]() mutable {
-               return reflect::InvokeActorMethod<UserClass, kMethodIndex>(*user_class_instance, std::move(args)...);
-             });
-    } else {
-      return std::move(start) | ex::then([user_class_instance, ... args = std::move(args), kMethodIndex]() mutable {
-               return reflect::InvokeActorMethod<UserClass, kMethodIndex>(*user_class_instance, std::move(args)...);
-             });
-    }
+  ex::sender auto Send(Args&&... args) const {
+    return SubMailbox(0).template Send<kMethod>(std::forward<Args>(args)...);
   }
 
   bool IsValid() const { return is_valid_; }
@@ -71,7 +69,7 @@ class ActorRegistry {
     random_num_generator_ = std::mt19937(rd());
   }
 
-  template <class UserClass, reflect::SpecializationOf<ActorConfig> Config, class... Args>
+  template <class UserClass, detail::reflect::SpecializationOf<ActorConfig> Config, class... Args>
   ActorRef<UserClass> CreateActor(Config&& config, Args&&... args) {
     std::scoped_lock locker(mu_);
     auto actor_id = GenerateRandomActorId();

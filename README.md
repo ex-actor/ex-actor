@@ -1,18 +1,18 @@
 # ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) ex_actor
 
-[![License: Apache](https://img.shields.io/badge/License-Apache-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-blue.svg)](https://opensource.org/licenses/apache-2.0)
 [![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
 
 ![image](assets/ex_actor_banner.jpg)
 
-**ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) based on `std::execution`. **Only requires C++20([detail](#faqs))**.
+**ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) following `std::execution`'s design. **Only requires C++20 ([detail](#faqs))**.
 
 An actor framework turns your class into a remote service. All method calls will be queued to the actor's mailbox and executed sequentially. You can easily write distributed applications with it, without caring about thread synchronization and network.
 
 Key Features:
 1. **Easy to Use** - Make your class an actor by **one line**. No arcane macros and templates.
 2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work stealing, work sharing, custom priority...
-3. **Sender-Based API** - Compatible with everything in the std::execution ecosystem - you can `co_await` it, pass to async algorithms, transfer to other execution resources and so on.
+3. **Standard-Compliant API** - All actor methods returns a std::execution sender, compatible with everything in the std::execution ecosystem - you can `co_await` the result, pass to async algorithms, transfer to other execution resources and so on.
 
 
 # API Glance
@@ -39,7 +39,7 @@ exec::task<void> TestBasicUseCase() {
   ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
 
   // Coroutine support!
-  std::cout << co_await counter.Call<&Counter::Add>(1) << '\n';
+  std::cout << co_await counter.Send<&Counter::Add>(1) << '\n';
 }
 
 int main() {
@@ -63,8 +63,10 @@ Can't find your build system? Open an issue to let us know. Welcome to open a PR
 
 # FAQs
 
-## `std::execution` is in C++26, how can you compile with C++20?
+## `std::execution` is in C++26, why you only requires C++20?
 
 C++26 is not finalized, now we depends on an early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), which only requires C++20. (it's like `fmtlib` vs `std::format` and `ranges-v3` vs `std::ranges`)
 
-Once C++26 is ready, we'll add a build option to switch to C++26, and use the real `std::execution`. **We'll keep our code compatible with both `nvidia/stdexec` and `std::execution`**.
+Once C++26 is ready, we'll add a build option to switch to the real `std::execution` in C++26, allow you to remove the dependency on `stdexec`. And it'll only be an option, you can still use `stdexec` because all senders based on `stdexec` will work well with `std::execution`.
+
+**From our side, we'll keep our code compatible with both `stdexec` and `std::execution`**. So don't worry about the dependency.

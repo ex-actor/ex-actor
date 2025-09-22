@@ -1,9 +1,12 @@
 #pragma once
 
+// see https://github.com/cameron314/concurrentqueue/issues/391
 #if __has_include(<blockingconcurrentqueue.h>)
 #include <blockingconcurrentqueue.h>
 #elif __has_include(<moodycamel/blockingconcurrentqueue.h>)
 #include <moodycamel/blockingconcurrentqueue.h>
+#elif __has_include(<concurrentqueue/blockingconcurrentqueue.h>)
+#include <concurrentqueue/blockingconcurrentqueue.h>
 #else
 #include <concurrentqueue/moodycamel/blockingconcurrentqueue.h>
 #endif

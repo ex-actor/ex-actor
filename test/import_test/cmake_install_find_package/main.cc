@@ -21,7 +21,7 @@ exec::task<void> TestBasicUseCase() {
   ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
 
   // Coroutine support!
-  std::cout << co_await counter.Call<&Counter::Add>(1) << '\n';
+  std::cout << co_await counter.Send<&Counter::Add>(1) << '\n';
 }
 
 int main() {

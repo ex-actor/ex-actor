@@ -23,14 +23,14 @@ class Proxy {
   explicit Proxy(ex_actor::ActorRef<Counter> actor_ref) : actor_ref_(actor_ref) {}
 
   exec::task<int> GetValue() {
-    int res = co_await actor_ref_.template Call<&Counter::GetValue>();
+    int res = co_await actor_ref_.template Send<&Counter::GetValue>();
     std::cout << "This line runs on the current actor(Proxy), because coroutine has scheduler affinity\n";
     co_return res;
   }
 
   ex::sender auto GetValue2() {
     // TODO find a way to get parent scheduler, so we can call continues_on
-    return actor_ref_.template Call<&Counter::GetValue>() | ex::then([](int value) {
+    return actor_ref_.template Send<&Counter::GetValue>() | ex::then([](int value) {
              std::cout << "This line runs on the target actor(Counter), unless you call continue_on explicitly.\n";
              return value;
            });
@@ -51,14 +51,14 @@ static exec::task<void> TestBasicUsage() {
   ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
   exec::async_scope scope;
   for (int i = 0; i < 100; ++i) {
-    scope.spawn(counter.Call<&Counter::Add>(1));
+    scope.spawn(counter.Send<&Counter::Add>(1));
   }
-  auto res = co_await counter.Call<&Counter::GetValue>();
+  auto res = co_await counter.Send<&Counter::GetValue>();
   std::cout << "after add1*100 : " << res << '\n';
 
   ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(thread_pool.GetScheduler(), counter);
-  auto res2 = co_await proxy.Call<&Proxy::GetValue>();
-  auto res3 = co_await proxy.Call<&Proxy::GetValue2>();
+  auto res2 = co_await proxy.Send<&Proxy::GetValue>();
+  auto res3 = co_await proxy.Send<&Proxy::GetValue2>();
 
   std::cout << "value through broker: " << res2 << "," << res3 << '\n';
 

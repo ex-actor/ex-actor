@@ -91,7 +91,7 @@ class Semaphore {
 
 };  // namespace ex_actor::util
 
-namespace ex_actor::detail {
+namespace ex_actor::detail::util {
 template <class T>
 struct ThreadSafeQueue {
  public:
@@ -154,4 +154,4 @@ class MoveOnlyAny {
   std::unique_ptr<AnyValueHolder> value_holder_;
 };
 
-}  // namespace ex_actor::detail
+}  // namespace ex_actor::detail::util

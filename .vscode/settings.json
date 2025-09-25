@@ -1,10 +1,16 @@
 {
         "cSpell.words": [
                 "blockingconcurrentqueue",
+                "ctest",
+                "cxxflags",
+                "DCMAKE",
                 "endfunction",
+                "fsanitize",
+                "github",
                 "GITHUB",
                 "googletest",
                 "gtest",
+                "MSVC",
                 "NOLINTNEXTLINE"
         ]
 }

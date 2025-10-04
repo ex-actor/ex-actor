@@ -70,8 +70,6 @@ Can't find your build system? Open an issue to let us know. Welcome to open a PR
 We know it's hard to resolve dependency conflicts, so we carefully choose minimal dependencies:
 
 1. [stdexec](https://github.com/NVIDIA/stdexec)
-2. [concurrentqueue](https://github.com/cameron314/concurrentqueue)
-3. [gRPC](https://github.com/grpc/grpc)
 
 For specific versions, please check [CMakeLists.txt](CMakeLists.txt), search for `CPMAddPackage`. If you meet any dependency conflict, please open an issue to let us know, we're happy to help.
 

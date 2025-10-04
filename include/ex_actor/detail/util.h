@@ -100,19 +100,15 @@ struct ThreadSafeQueue {
     queue_.push(std::move(value));
   }
 
-  T Pop() {
+  std::optional<T> TryPop() {
     std::lock_guard lock(mutex_);
+    if (queue_.empty()) {
+      return std::nullopt;
+    }
     auto value = std::move(queue_.front());
     queue_.pop();
     return value;
   }
-
-  size_t Size() const {
-    std::lock_guard lock(mutex_);
-    return queue_.size();
-  }
-
-  bool Empty() const { return Size() == 0; }
 
  private:
   std::queue<T> queue_;

@@ -180,8 +180,8 @@ class Actor : public TypeErasedActor {
     for (size_t offset = 0; offset < actor_config_.mailbox_partition_size; ++offset) {
       size_t partition_index = (mailbox_partition_hint + offset) % actor_config_.mailbox_partition_size;
       auto& mailbox = mailboxes_[partition_index];
-      while (!mailbox.Empty()) {
-        auto* msg = mailbox.Pop();
+      while (auto optional_msg = mailbox.TryPop()) {
+        auto* msg = optional_msg.value();
         if (msg->GetType() == ActorMessage::Type::kDestroy) [[unlikely]] {
           user_class_instance_.reset();
           return;

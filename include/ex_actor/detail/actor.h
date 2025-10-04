@@ -47,6 +47,9 @@ struct TypeErasedActor {
   virtual void PushMessage(ActorMessage* task, size_t mailbox_partition_index) = 0;
   virtual void* GetUserClassAddress() = 0;
   virtual std::optional<std::string> GetActorName() const = 0;
+
+  template <class UserClass, auto kMethod, class... Args>
+  ex::sender auto CallActorMethod(size_t mailbox_partition_index, Args&&... args);
 };
 
 // ---------------std::execution Scheduler Adaption-----------------
@@ -124,12 +127,19 @@ class Actor : public TypeErasedActor {
         user_class_instance_(std::make_unique<UserClass>(std::forward<Args>(args)...)) {}
 
   ~Actor() override {
+    if (destroy_message_pushed_.load(std::memory_order_acquire)) {
+      ex::sync_wait(async_scope_.on_empty());
+      return;
+    }
     auto destroy_msg = std::make_unique<DestroyMessage>();
     PushMessage(destroy_msg.get(), /*mailbox_partition_index=*/0);
     ex::sync_wait(async_scope_.on_empty());
   }
 
   void PushMessage(ActorMessage* task, size_t mailbox_partition_index) override {
+    if (task->GetType() == ActorMessage::Type::kDestroy) [[unlikely]] {
+      destroy_message_pushed_.store(true, std::memory_order_release);
+    }
     mailboxes_[mailbox_partition_index].Push(task);
     pending_message_count_.fetch_add(1, std::memory_order_release);
     last_push_mailbox_partition_index_.store(mailbox_partition_index, std::memory_order_release);
@@ -148,6 +158,7 @@ class Actor : public TypeErasedActor {
   std::unique_ptr<UserClass> user_class_instance_;
   exec::async_scope async_scope_;
   std::atomic_bool activated_ = false;
+  std::atomic_bool destroy_message_pushed_ = false;
 
   // push self to the executor
   void TryActivate() {
@@ -208,13 +219,13 @@ class Actor : public TypeErasedActor {
 };  // class Actor
 
 template <class UserClass, auto kMethod, class... Args>
-ex::sender auto CallTypeErasedActorMethod(TypeErasedActor* actor, size_t mailbox_partition_index, Args&&... args) {
+ex::sender auto TypeErasedActor::CallActorMethod(size_t mailbox_partition_index, Args&&... args) {
   constexpr size_t kMethodIndex = reflect::GetActorMethodIndex<kMethod>();
   using ReturnType = reflect::Signature<decltype(kMethod)>::ReturnType;
   constexpr bool kIsNested = ex::sender<ReturnType>;
-  auto start = ex::schedule(detail::StdExecSchedulerForActorMessageSubmission(actor, mailbox_partition_index));
+  auto start = ex::schedule(StdExecSchedulerForActorMessageSubmission(this, mailbox_partition_index));
 
-  auto* user_class_instance = static_cast<UserClass*>(actor->GetUserClassAddress());
+  auto* user_class_instance = static_cast<UserClass*>(GetUserClassAddress());
 
   if constexpr (kIsNested) {
     return std::move(start) | ex::let_value([user_class_instance, ... args = std::move(args), kMethodIndex]() mutable {

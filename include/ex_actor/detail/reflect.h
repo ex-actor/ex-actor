@@ -58,6 +58,9 @@ struct ExTaskTraits<exec::task<T>> {
   using InnerType = T;
 };
 
+template <class R, class T>
+concept RangeOf = std::ranges::range<R> && std::same_as<std::ranges::range_value_t<R>, T>;
+
 // ---------------- Actor Methods Related ----------------
 using ::ex_actor::reflect::kActorMethods;
 

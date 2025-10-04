@@ -18,7 +18,7 @@ class ActorRef {
   ActorRef() : is_valid_(false) {}
 
   ActorRef(uint32_t node_index, uint64_t actor_id, detail::TypeErasedActor* actor)
-      : is_valid_(true), node_id_(node_index), actor_id_(actor_id), actor_(actor) {}
+      : is_valid_(true), node_id_(node_index), actor_id_(actor_id), type_erased_actor_(actor) {}
 
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
     if (lhs.is_valid_ == false && rhs.is_valid_ == false) {
@@ -36,8 +36,8 @@ class ActorRef {
       if (!actor_ref->IsValid()) [[unlikely]] {
         throw std::runtime_error("Empty ActorRef, cannot call method on it.");
       }
-      return detail::CallTypeErasedActorMethod<UserClass, kMethod>(actor_ref->actor_, mailbox_partition_index,
-                                                                   std::forward<Args>(args)...);
+      return actor_ref->type_erased_actor_->template CallActorMethod<UserClass, kMethod>(mailbox_partition_index,
+                                                                                         std::forward<Args>(args)...);
     }
   };
 
@@ -59,7 +59,7 @@ class ActorRef {
   bool is_valid_;
   uint32_t node_id_ = 0;
   uint64_t actor_id_ = 0;
-  detail::TypeErasedActor* actor_ = nullptr;
+  detail::TypeErasedActor* type_erased_actor_ = nullptr;
 };
 
 class ActorRegistry {
@@ -67,6 +67,16 @@ class ActorRegistry {
   explicit ActorRegistry(uint32_t this_node_id = 0) : this_node_id_(this_node_id) {
     std::random_device rd;
     random_num_generator_ = std::mt19937(rd());
+  }
+
+  ~ActorRegistry() {
+    std::scoped_lock locker(mu_);
+    // bulk destroy actors
+    auto destroy_msg = std::make_unique<detail::DestroyMessage>();
+    for (auto& [_, actor] : actor_id_to_actor_) {
+      actor->PushMessage(destroy_msg.get(), /*mailbox_partition_index=*/0);
+    }
+    actor_id_to_actor_.clear();
   }
 
   template <class UserClass, detail::reflect::SpecializationOf<ActorConfig> Config, class... Args>

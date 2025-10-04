@@ -174,6 +174,7 @@ class Actor : public TypeErasedActor {
       // already destroyed
       return;
     }
+
     size_t mailbox_partition_hint = last_push_mailbox_partition_index_.load(std::memory_order_acquire);
     size_t message_executed = 0;
     for (size_t offset = 0; offset < actor_config_.mailbox_partition_size; ++offset) {
@@ -191,9 +192,15 @@ class Actor : public TypeErasedActor {
           break;
         }
       }
+      if (message_executed >= actor_config_.max_message_executed_per_activation) [[unlikely]] {
+        break;
+      }
     }
     pending_message_count_.fetch_sub(message_executed, std::memory_order_release);
-    activated_.store(false, std::memory_order_release);
+
+    // use seq_cst to prevent reordering activated_.store() and pending_message_count_.load()
+    // or the actor might not be activated correctly
+    activated_.store(false, std::memory_order_seq_cst);
     if (pending_message_count_.load(std::memory_order_acquire) > 0) {
       TryActivate();
     }

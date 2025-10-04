@@ -40,7 +40,7 @@ jobs:
           style: "file" # Use .clang-format config file
           tidy-checks: "" # Use .clang-tidy config file
           version: "20"
-          ignore-tidy: "test/import_test"
+          ignore: "test/import_test|include/ex_actor/3rd_lib"
           thread-comments: ${{ github.event_name == 'pull_request' && 'update' }}
 
       - name: Fail fast?!

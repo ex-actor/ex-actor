@@ -1,20 +1,10 @@
 #pragma once
 
-// see https://github.com/cameron314/concurrentqueue/issues/391
-#if __has_include(<blockingconcurrentqueue.h>)
-#include <blockingconcurrentqueue.h>
-#elif __has_include(<moodycamel/blockingconcurrentqueue.h>)
-#include <moodycamel/blockingconcurrentqueue.h>
-#elif __has_include(<concurrentqueue/blockingconcurrentqueue.h>)
-#include <concurrentqueue/blockingconcurrentqueue.h>
-#else
-#include <concurrentqueue/moodycamel/blockingconcurrentqueue.h>
-#endif
-
 #include <thread>
 
 #include <exec/static_thread_pool.hpp>
 
+#include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
 #include "ex_actor/detail/util.h"
 
 namespace ex_actor {
@@ -77,7 +67,7 @@ class WorkSharingThreadPool {
   void EnqueueOperation(TypeEasedOperation* operation) { queue_.enqueue(operation); }
 
  private:
-  moodycamel::BlockingConcurrentQueue<TypeEasedOperation*> queue_;
+  ex_actor::embedded_3rd::moodycamel::BlockingConcurrentQueue<TypeEasedOperation*> queue_;
   std::vector<std::jthread> workers_;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {

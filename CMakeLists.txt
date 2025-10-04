@@ -7,7 +7,7 @@ include(CMakePackageConfigHelpers)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
   add_compile_options(-Wno-subobject-linkage)
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -22,12 +22,6 @@ CPMAddPackage(
   OPTIONS "BUILD_TESTING OFF"
   OPTIONS "STDEXEC_BUILD_EXAMPLES OFF"
 )
-CPMAddPackage(
-  NAME concurrentqueue
-  GITHUB_REPOSITORY cameron314/concurrentqueue
-  GIT_TAG c68072129c8a5b4025122ca5a0c82ab14b30cb03
-)
-add_library(concurrentqueue::concurrentqueue ALIAS concurrentqueue)
 # ------------------- targets -------------------
 add_library(ex_actor INTERFACE)
 target_include_directories(ex_actor INTERFACE
@@ -36,7 +30,7 @@ target_include_directories(ex_actor INTERFACE
 )
 target_link_libraries(
   ex_actor
-  INTERFACE STDEXEC::stdexec concurrentqueue::concurrentqueue
+  INTERFACE STDEXEC::stdexec
 )
 # to suppress subobject linkage warnings in stdexec
 target_compile_options(ex_actor INTERFACE -Wno-subobject-linkage)

@@ -10,7 +10,7 @@
 An actor framework turns your class into a remote service. All method calls will be queued to the actor's mailbox and executed sequentially. You can easily write distributed applications with it, without caring about thread synchronization and network.
 
 Key Features:
-1. **Easy to Use** - Make your class an actor by **one line**. No arcane macros and templates.
+1. **Easy to Use** - Turn your existing class into an actor by **one line**. No arcane macros, templates and inheritance.
 2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work stealing, work sharing, custom priority...
 3. **Standard-Compliant API** - Our actor returns a standard sender, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
 
@@ -70,8 +70,6 @@ Can't find your build system? Open an issue to let us know. Welcome to open a PR
 We know it's hard to resolve dependency conflicts, so we carefully choose minimal dependencies:
 
 1. [stdexec](https://github.com/NVIDIA/stdexec)
-2. [concurrentqueue](https://github.com/cameron314/concurrentqueue)
-3. [gRPC](https://github.com/grpc/grpc)
 
 For specific versions, please check [CMakeLists.txt](CMakeLists.txt), search for `CPMAddPackage`. If you meet any dependency conflict, please open an issue to let us know, we're happy to help.
 

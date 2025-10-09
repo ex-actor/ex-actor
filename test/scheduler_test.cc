@@ -28,8 +28,8 @@ struct TestActor {
 };
 SCENARIO("Actor task should be stoppable") {
   ex_actor::WorkSharingThreadPool thread_pool(1);
-  ex_actor::ActorRegistry registry;
-  auto actor = registry.CreateActor<TestActor>(thread_pool.GetScheduler());
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  auto actor = registry.CreateActor<TestActor>();
   exec::async_scope scope;
   for (int i = 0; i < 100000; ++i) {
     scope.spawn(actor.Send<&TestActor::Foo>());

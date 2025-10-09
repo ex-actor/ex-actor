@@ -62,9 +62,10 @@ class ActorRef {
   detail::TypeErasedActor* type_erased_actor_ = nullptr;
 };
 
+template <ex::scheduler Scheduler>
 class ActorRegistry {
  public:
-  explicit ActorRegistry(uint32_t this_node_id = 0) : this_node_id_(this_node_id) {
+  explicit ActorRegistry(Scheduler scheduler) : scheduler_(std::move(scheduler)) {
     std::random_device rd;
     random_num_generator_ = std::mt19937(rd());
   }
@@ -79,24 +80,29 @@ class ActorRegistry {
     actor_id_to_actor_.clear();
   }
 
-  template <class UserClass, detail::reflect::SpecializationOf<ActorConfig> Config, class... Args>
-  ActorRef<UserClass> CreateActor(Config&& config, Args&&... args) {
+  /**
+   * @brief Create an actor with a manually specified config.
+   */
+  template <class UserClass, class... Args>
+  ActorRef<UserClass> CreateActor(ActorConfig&& config, Args&&... args) {
     std::scoped_lock locker(mu_);
     auto actor_id = GenerateRandomActorId();
     if (config.actor_name.has_value()) {
       actor_name_to_actor_id_[*config.actor_name] = actor_id;
     }
-    auto actor =
-        std::make_unique<detail::Actor<UserClass, Config>>(std::forward<Config>(config), std::forward<Args>(args)...);
+    auto actor = std::make_unique<detail::Actor<UserClass, Scheduler>>(scheduler_, std::move(config),
+                                                                       std::forward<Args>(args)...);
     auto handle = ActorRef<UserClass>(this_node_id_, actor_id, actor.get());
     actor_id_to_actor_[actor_id] = std::move(actor);
     return handle;
   }
 
-  template <class UserClass, class Scheduler, class... Args>
-  ActorRef<UserClass> CreateActor(Scheduler&& scheduler, Args&&... args) {
-    return CreateActor<UserClass, ActorConfig<Scheduler>>(
-        ActorConfig<Scheduler> {.scheduler = std::forward<Scheduler>(scheduler)}, std::forward<Args>(args)...);
+  /**
+   * @brief Create actor at current node using default config.
+   */
+  template <class UserClass, class... Args>
+  ActorRef<UserClass> CreateActor(Args&&... args) {
+    return CreateActor<UserClass>(ActorConfig {.node_id = this_node_id_}, std::forward<Args>(args)...);
   }
 
   template <class UserClass>
@@ -133,9 +139,10 @@ class ActorRegistry {
     }
   }
 
+  Scheduler scheduler_;
   mutable std::mutex mu_;
   std::mt19937 random_num_generator_;
-  uint32_t this_node_id_;
+  uint32_t this_node_id_ = 0;
   std::unordered_map<std::string, uint64_t> actor_name_to_actor_id_;
   std::unordered_map<uint64_t, std::unique_ptr<detail::TypeErasedActor>> actor_id_to_actor_;
 };

@@ -53,8 +53,8 @@ static ex_actor::WorkSharingThreadPool thread_pool(10);
 
 SCENARIO("exception in actor method should be propagated to the caller") {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::ActorRegistry registry;
-    auto counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+    auto counter = registry.CreateActor<Counter>();
     co_await counter.Send<&Counter::Error>();
   };
   REQUIRE_THROWS_WITH(ex::sync_wait(coroutine()), "error0");
@@ -62,9 +62,9 @@ SCENARIO("exception in actor method should be propagated to the caller") {
 
 SCENARIO("nest actor ref case") {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::ActorRegistry registry;
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
 
-    ex_actor::ActorRef counter = registry.CreateActor<Counter>(thread_pool.GetScheduler());
+    ex_actor::ActorRef counter = registry.CreateActor<Counter>();
     exec::async_scope scope;
     for (int i = 0; i < 100; ++i) {
       scope.spawn(counter.Send<&Counter::Add>(1));
@@ -72,7 +72,7 @@ SCENARIO("nest actor ref case") {
     auto res = co_await counter.Send<&Counter::GetValue>();
     REQUIRE(res == 100);
 
-    ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(thread_pool.GetScheduler(), counter);
+    ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(counter);
     auto res2 = co_await proxy.Send<&Proxy::GetValue>();
     auto res3 = co_await proxy.Send<&Proxy::GetValue2>();
     REQUIRE(res2 == 100);
@@ -83,14 +83,11 @@ SCENARIO("nest actor ref case") {
 }
 
 SCENARIO("create actor with full config") {
-  ex_actor::ActorRegistry registry;
-  auto counter = registry.CreateActor<Counter>(
-      ex_actor::ActorConfig {.scheduler = thread_pool.GetScheduler(), .max_message_executed_per_activation = 10});
-  registry.CreateActor<Counter>(
-      ex_actor::ActorConfig {.scheduler = thread_pool.GetScheduler(), .actor_name = "counter"});
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  auto counter = registry.CreateActor<Counter>(ex_actor::ActorConfig {.max_message_executed_per_activation = 10});
+  registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
 
-  registry.CreateActor<Proxy>(
-      ex_actor::ActorConfig {.scheduler = thread_pool.GetScheduler(), .mailbox_partition_size = 3}, counter);
+  registry.CreateActor<Proxy>(ex_actor::ActorConfig {.mailbox_partition_size = 3}, counter);
   registry.GetActorByName<Counter>("counter");
   registry.DestroyActor(counter);
 }

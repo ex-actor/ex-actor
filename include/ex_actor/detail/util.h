@@ -93,7 +93,7 @@ class Semaphore {
 
 namespace ex_actor::detail::util {
 template <class T>
-struct ThreadSafeQueue {
+struct LinearizableUnboundedQueue {
  public:
   void Push(T value) {
     std::lock_guard lock(mutex_);

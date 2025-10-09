@@ -61,6 +61,18 @@ struct ExTaskTraits<exec::task<T>> {
 template <class R, class T>
 concept RangeOf = std::ranges::range<R> && std::same_as<std::ranges::range_value_t<R>, T>;
 
+template <typename T, typename... Ts>
+consteval std::optional<size_t> GetIndexInParamPack() {
+  constexpr bool kMatches[] = {std::is_same_v<T, Ts>...};
+  for (std::size_t i = 0; i < sizeof...(Ts); ++i) {
+    if (kMatches[i]) return i;
+  }
+  return std::nullopt;
+}
+
+template <size_t kIndex, class... Ts>
+using ParamPackElement = std::tuple_element_t<kIndex, std::tuple<Ts...>>;
+
 // ---------------- Actor Methods Related ----------------
 using ::ex_actor::reflect::kActorMethods;
 

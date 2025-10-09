@@ -3,27 +3,26 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <ex_actor/detail/reflect.h>
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
 #include <stdexec/execution.hpp>
 
-#include "ex_actor/detail/reflect.h"
 #include "ex_actor/detail/util.h"
 
 namespace ex_actor {
 
-template <ex::scheduler Scheduler, detail::reflect::SpecializationOf<ex::prop>... Props>
 struct ActorConfig {
-  Scheduler scheduler;
   std::optional<std::string> actor_name;
   size_t mailbox_partition_size = 1;
   size_t max_message_executed_per_activation = 100;
-  std::tuple<Props...> std_exec_envs;
+  uint32_t node_id = 0;
 };
 
 namespace detail {
@@ -128,14 +127,26 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
 
 // ---------------Actor Class---------------
 
-template <class UserClass, reflect::SpecializationOf<ActorConfig> Config>
+template <class UserClass, ex::scheduler Scheduler>
 class Actor : public TypeErasedActor {
  public:
   template <typename... Args>
-  explicit Actor(Config actor_config, Args&&... args)
-      : actor_config_(std::move(actor_config)),
+  explicit Actor(Scheduler scheduler, ActorConfig actor_config, Args&&... args)
+      : scheduler_(std::move(scheduler)),
+        actor_config_(std::move(actor_config)),
         mailboxes_(actor_config_.mailbox_partition_size),
         user_class_instance_(std::make_unique<UserClass>(std::forward<Args>(args)...)) {}
+
+  template <typename... Args>
+  static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(Scheduler scheduler, ActorConfig actor_config,
+                                                            std::tuple<Args...> arg_tuple) {
+    return std::apply(
+        [scheduler = std::move(scheduler), actor_config = std::move(actor_config)](auto&&... args) {
+          return std::make_unique<Actor<UserClass, Scheduler>>(std::move(scheduler), std::move(actor_config),
+                                                               std::move(args)...);
+        },
+        std::move(arg_tuple));
+  }
 
   ~Actor() override {
     if (destroy_message_pushed_.load(std::memory_order_acquire)) {
@@ -162,8 +173,9 @@ class Actor : public TypeErasedActor {
   std::optional<std::string> GetActorName() const override { return actor_config_.actor_name; }
 
  private:
-  Config actor_config_;
-  std::vector<util::ThreadSafeQueue<ActorMessage*>> mailboxes_;
+  Scheduler scheduler_;
+  ActorConfig actor_config_;
+  std::vector<util::LinearizableUnboundedQueue<ActorMessage*>> mailboxes_;
   std::atomic_size_t pending_message_count_ = 0;
   std::atomic_size_t last_push_mailbox_partition_index_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
@@ -181,13 +193,7 @@ class Actor : public TypeErasedActor {
       return;
     }
 
-    auto start_with_env = std::apply(
-        [this](reflect::SpecializationOf<ex::prop> auto&&... props) {
-          return (ex::schedule(actor_config_.scheduler) | ... | ex::write_env(props));
-        },
-        actor_config_.std_exec_envs);
-
-    auto sender = std::move(start_with_env) | ex::then([this] { PullMailboxAndRun(); });
+    auto sender = ex::schedule(scheduler_) | ex::then([this] { PullMailboxAndRun(); });
     async_scope_.spawn(std::move(sender));
   }
 
@@ -218,6 +224,7 @@ class Actor : public TypeErasedActor {
         break;
       }
     }
+
     pending_message_count_.fetch_sub(message_executed, std::memory_order_release);
 
     // use seq_cst to prevent reordering activated_.store() and pending_message_count_.load()

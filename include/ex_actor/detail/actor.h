@@ -8,11 +8,11 @@
 #include <utility>
 #include <vector>
 
-#include <ex_actor/detail/reflect.h>
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/detail/reflect.h"
 #include "ex_actor/detail/util.h"
 
 namespace ex_actor {
@@ -71,7 +71,18 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
     Receiver receiver;
     ActorMessageSubmissionOperation(TypeErasedActor* actor, size_t mailbox_partition_index, Receiver receiver)
         : actor(actor), mailbox_partition_index(mailbox_partition_index), receiver(std::move(receiver)) {}
-    void Execute() override { receiver.set_value(); }
+    void Execute() override {
+      auto stoken = stdexec::get_stop_token(stdexec::get_env(receiver));
+      if constexpr (ex::unstoppable_token<decltype(stoken)>) {
+        receiver.set_value();
+      } else {
+        if (stoken.stop_requested()) {
+          receiver.set_stopped();
+        } else {
+          receiver.set_value();
+        }
+      }
+    }
     void start() noexcept {
       // According to the standard, the operation state will be alive until the task is executed,
       // so it's safe to push `this`.
@@ -84,7 +95,7 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
     TypeErasedActor* actor;
     size_t mailbox_partition_index;
     // NOLINTNEXTLINE(readability-identifier-naming)
-    using completion_signatures = ex::completion_signatures<ex::set_value_t()>;
+    using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
     struct Env {
       TypeErasedActor* actor;
       size_t mailbox_partition_index;

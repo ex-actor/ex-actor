@@ -29,7 +29,18 @@ class WorkSharingThreadPool {
         : receiver(std::move(receiver)), thread_pool(thread_pool) {}
     R receiver;
     WorkSharingThreadPool* thread_pool;
-    void Execute() override { receiver.set_value(); }
+    void Execute() override {
+      auto stoken = stdexec::get_stop_token(stdexec::get_env(receiver));
+      if constexpr (ex::unstoppable_token<decltype(stoken)>) {
+        receiver.set_value();
+      } else {
+        if (stoken.stop_requested()) {
+          receiver.set_stopped();
+        } else {
+          receiver.set_value();
+        }
+      }
+    }
 
     void start() noexcept { thread_pool->EnqueueOperation(this); }
   };
@@ -38,7 +49,7 @@ class WorkSharingThreadPool {
 
   struct Sender : ex::sender_t {
     // NOLINTNEXTLINE(readability-identifier-naming)
-    using completion_signatures = ex::completion_signatures<ex::set_value_t()>;
+    using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
     WorkSharingThreadPool* thread_pool;
     struct Env {
       WorkSharingThreadPool* thread_pool;

@@ -1,0 +1,43 @@
+name: Documentation Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  doc-test:
+    name: Test documentation code examples
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends cmake ninja-build wget
+
+      - name: Run documentation tests
+        run: python3 test/doc_test.py --verbose
+
+      - name: Archive test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doc-test-logs
+          path: |
+            /tmp/ex_actor_doc_test_*/
+            !/tmp/ex_actor_doc_test_*/build/
+          retention-days: 7

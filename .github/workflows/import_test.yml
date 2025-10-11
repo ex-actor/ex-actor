@@ -11,8 +11,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: CPM
+            dir: cmake_cpm
+            setup_bazel: false
+          - name: Install and Find Package
+            dir: cmake_install_find_package
+            setup_bazel: false
+          - name: Bazel bzlmod
+            dir: bazel_bzlmod
+            setup_bazel: true
+          - name: Bazel Workspace
+            dir: bazel_workspace
+            setup_bazel: true
+
+    name: Test ${{ matrix.name }}
 
     steps:
       - uses: actions/checkout@v4
@@ -21,25 +39,11 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Test CPM
-        run: |
-          cd test/import_test/cmake_cpm
-          ./build_ci.sh
-
-      - name: Test Install and Find Package
-        run: |
-          cd test/import_test/cmake_install_find_package
-          ./build_ci.sh
-
       - name: Setup Bazel environment
+        if: matrix.setup_bazel
         uses: bazel-contrib/setup-bazel@0.8.1
 
-      - name: Test Bazel bzlmod
+      - name: Run test
         run: |
-          cd test/import_test/bazel_bzlmod
-          ./build_ci.sh
-
-      - name: Test Bazel Workspace
-        run: |
-          cd test/import_test/bazel_workspace
+          cd test/import_test/${{ matrix.dir }}
           ./build_ci.sh

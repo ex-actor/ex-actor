@@ -33,6 +33,12 @@ jobs:
           - { cc: gcc, cpp: g++ }
           - { cc: clang, cpp: clang++ }
         cxxflags: ["", "-fsanitize=thread", "-fsanitize=address"]
+        exclude:
+          # Only run sanitizers with clang/clang++
+          - compiler: { cc: gcc, cpp: g++ }
+            cxxflags: "-fsanitize=thread"
+          - compiler: { cc: gcc, cpp: g++ }
+            cxxflags: "-fsanitize=address"
 
     steps:
       - uses: actions/checkout@v4

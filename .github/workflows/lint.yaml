@@ -43,7 +43,7 @@ jobs:
         with:
           style: "file" # Use .clang-format config file
           tidy-checks: "" # Use .clang-tidy config file
-          version: "21"
+          version: "20"
           ignore: "test/import_test|include/ex_actor/3rd_lib"
           ignore-tidy: "**/*.h"
           thread-comments: ${{ github.event_name == 'pull_request' && 'update' }}

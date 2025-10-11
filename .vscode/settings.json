@@ -1,18 +1,19 @@
 {
-        "cSpell.words": [
-                "blockingconcurrentqueue",
-                "cout",
-                "ctest",
-                "cxxflags",
-                "DCMAKE",
-                "endfunction",
-                "fsanitize",
-                "github",
-                "GITHUB",
-                "googletest",
-                "gtest",
-                "MSVC",
-                "NOLINTNEXTLINE",
-                "stdexec"
-        ]
+  "cSpell.words": [
+    "blockingconcurrentqueue",
+    "buildifier",
+    "cout",
+    "ctest",
+    "cxxflags",
+    "DCMAKE",
+    "endfunction",
+    "fsanitize",
+    "github",
+    "GITHUB",
+    "googletest",
+    "gtest",
+    "MSVC",
+    "NOLINTNEXTLINE",
+    "stdexec"
+  ]
 }

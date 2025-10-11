@@ -5,7 +5,7 @@
 #include <exec/static_thread_pool.hpp>
 
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
-#include "ex_actor/detail/util.h"
+#include "ex_actor/internal/util.h"
 
 namespace ex_actor {
 

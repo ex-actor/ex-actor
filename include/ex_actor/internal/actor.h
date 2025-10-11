@@ -9,23 +9,23 @@
 #include <utility>
 #include <vector>
 
-#include <ex_actor/detail/reflect.h>
+#include <ex_actor/internal/reflect.h>
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
 #include <stdexec/execution.hpp>
 
-#include "ex_actor/detail/util.h"
+#include "ex_actor/internal/util.h"
 
 namespace ex_actor {
-
 struct ActorConfig {
   std::optional<std::string> actor_name;
   size_t mailbox_partition_size = 1;
   size_t max_message_executed_per_activation = 100;
   uint32_t node_id = 0;
 };
+}  // namespace ex_actor
 
-namespace detail {
+namespace ex_actor::internal {
 struct ActorMessage {
   enum class Type : uint8_t {
     kMethodCall = 0,
@@ -254,5 +254,4 @@ ex::sender auto TypeErasedActor::CallActorMethod(size_t mailbox_partition_index,
            });
   }
 }
-}  // namespace detail
-}  // namespace ex_actor
+}  // namespace ex_actor::internal

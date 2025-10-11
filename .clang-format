@@ -29,3 +29,6 @@ ColumnLimit: 120
 ---
 Language: Proto
 BasedOnStyle: Google
+---
+Language: Json
+IndentWidth: 2

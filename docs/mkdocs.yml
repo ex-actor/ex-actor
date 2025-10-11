@@ -1,0 +1,49 @@
+site_name: "ex_actor"
+docs_dir: contents
+theme:
+  name: material
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: pink
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: pink
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.path
+    - navigation.expand
+    - content.tabs.link
+    - content.code.annotate
+    - content.code.copy
+
+plugins:
+  - d2:
+      executable: d2 # path to d2 executable
+      cache: True
+      layout: elk
+      theme: 301
+      pad: 100
+
+markdown_extensions:
+  - toc:
+      toc_depth: 3
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences

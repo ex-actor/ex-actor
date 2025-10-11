@@ -17,6 +17,7 @@ Key Features:
 
 # API Glance
 
+<!-- doc test start -->
 ```cpp
 #include "ex_actor/api.h"
 
@@ -45,6 +46,7 @@ int main() {
   return 0;
 }
 ```
+<!-- doc test end -->
 
 # How to Add `ex_actor` to Your Project
 

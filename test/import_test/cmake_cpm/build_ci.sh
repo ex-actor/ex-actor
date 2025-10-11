@@ -12,5 +12,7 @@ wget -O CPM.cmake https://github.com/cpm-cmake/CPM.cmake/releases/latest/downloa
 
 rm -rf build
 
+export CPM_SOURCE_CACHE=$HOME/.cache/CPM
+
 cmake -S . -B build -G "Ninja Multi-Config" -DCPM_ex_actor_SOURCE="$GITHUB_WORKSPACE"
 cmake --build build --config Release

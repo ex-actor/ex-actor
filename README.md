@@ -19,38 +19,31 @@ Key Features:
 
 ```cpp
 #include "ex_actor/api.h"
-namespace ex = stdexec;
 
-class Counter {
-  public:
-   int Add(int x) { return count_ += x; }
-   
-   // 1. Tell me your methods - the only line intrudes into your class.
-   constexpr static auto kActorMethods = std::make_tuple(&Counter::Add);
- 
-  private:
-   int count_ = 0;
- };
- 
- exec::task<int> Test() {
-   // 2. Choose a std::execution scheduler you like.
-   ex_actor::WorkSharingThreadPool thread_pool(10);
-   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+struct YourClass {
+  int Add(int x) { return count += x; }
+  int count = 0;
+};
 
-   // 3. Create the actor.
-   ex_actor::ActorRef counter = registry.CreateActor<Counter>();
- 
-   // 4. Call it! It returns a standard sender.
-   auto sender = counter.Send<&Counter::Add>(1) 
-                 | ex::then([](int value) { return value + 1; });
-   co_return co_await sender;
- }
- 
- int main() {
-   auto [res] = ex::sync_wait(Test()).value();
-   std::cout << "res: " << res << '\n';
-   return 0;
- }
+exec::task<int> Test() {
+  // 1. Choose a std::execution scheduler you like.
+  ex_actor::WorkSharingThreadPool thread_pool(10);
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+
+  // 2. Create the actor.
+  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+
+  // 3. Call it! It returns a standard sender.
+  auto sender = actor.Send<&YourClass::Add>(1) 
+                | stdexec::then([](int value) { return value + 1; });
+  co_return co_await sender;
+}
+
+int main() {
+  auto [res] = stdexec::sync_wait(Test()).value();
+  std::cout << "res: " << res << '\n';
+  return 0;
+}
 ```
 
 # How to Add `ex_actor` to Your Project

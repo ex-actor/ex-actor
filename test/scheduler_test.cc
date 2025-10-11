@@ -24,7 +24,6 @@ struct TestActor {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
   int count = 0;
-  static constexpr auto kActorMethods = std::make_tuple(&TestActor::Foo);
 };
 SCENARIO("Actor task should be stoppable") {
   ex_actor::WorkSharingThreadPool thread_pool(1);

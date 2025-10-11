@@ -133,7 +133,10 @@ def build_and_test(temp_dir: Path, verbose: bool = False):
         "cmake", "-S", str(temp_dir), "-B", str(build_dir),
         "-G", "Ninja Multi-Config"
     ]
-    subprocess.run(cmake_cmd, check=True)
+    # Set CPM_SOURCE_CACHE environment variable
+    env = os.environ.copy()
+    env['CPM_SOURCE_CACHE'] = os.path.expanduser('~/.cache/CPM')
+    subprocess.run(cmake_cmd, check=True, env=env)
     
     print("\n=== Building ===")
     build_cmd = [
@@ -159,32 +162,6 @@ def sanitize_filename(md_file: Path, block_index: int) -> str:
         parent_parts = str(md_file.parent).replace('/', '_').replace('\\', '_')
         return f"test_{parent_parts}_{name_parts}_{block_index}.cc"
     return f"test_{name_parts}_{block_index}.cc"
-
-
-def process_code_block(code: str) -> str:
-    """
-    Process the code block to ensure it's compilable.
-    Add missing includes if needed.
-    """
-    # Check if code already has #include <iostream>
-    has_iostream = '#include <iostream>' in code or '#include<iostream>' in code
-    
-    # If code uses std::cout but doesn't include iostream, add it
-    if ('std::cout' in code or 'std::endl' in code) and not has_iostream:
-        # Find the last #include line
-        lines = code.split('\n')
-        include_idx = -1
-        for i, line in enumerate(lines):
-            if line.strip().startswith('#include'):
-                include_idx = i
-        
-        if include_idx >= 0:
-            lines.insert(include_idx + 1, '#include <iostream>')
-            code = '\n'.join(lines)
-        else:
-            code = '#include <iostream>\n' + code
-    
-    return code
 
 
 def main():
@@ -268,10 +245,7 @@ def main():
             filename = sanitize_filename(md_file.relative_to(search_root), block_idx)
             test_file = temp_dir / filename
             
-            # Process code block
-            processed_code = process_code_block(code)
-            
-            test_file.write_text(processed_code, encoding='utf-8')
+            test_file.write_text(code, encoding='utf-8')
             test_files.append(filename)
             
             rel_md = md_file.relative_to(search_root)

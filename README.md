@@ -19,6 +19,7 @@ Key Features:
 
 <!-- doc test start -->
 ```cpp
+#include <cassert>
 #include "ex_actor/api.h"
 
 struct YourClass {
@@ -42,7 +43,7 @@ exec::task<int> Test() {
 
 int main() {
   auto [res] = stdexec::sync_wait(Test()).value();
-  std::cout << "res: " << res << '\n';
+  assert(res == 2);
   return 0;
 }
 ```

@@ -9,7 +9,7 @@
 
 #include <stdexec/execution.hpp>
 
-#include "ex_actor/detail/alias.h"  // IWYU pragma: keep
+#include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 
 namespace ex_actor::util {
 
@@ -91,7 +91,7 @@ class Semaphore {
 
 };  // namespace ex_actor::util
 
-namespace ex_actor::detail::util {
+namespace ex_actor::internal::util {
 template <class T>
 struct LinearizableUnboundedQueue {
  public:
@@ -150,4 +150,4 @@ class MoveOnlyAny {
   std::unique_ptr<AnyValueHolder> value_holder_;
 };
 
-}  // namespace ex_actor::detail::util
+}  // namespace ex_actor::internal::util

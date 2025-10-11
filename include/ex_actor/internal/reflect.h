@@ -14,7 +14,7 @@ constexpr std::tuple kActorMethods = UserClass::kActorMethods;
 
 }  // namespace ex_actor::reflect
 
-namespace ex_actor::detail::reflect {
+namespace ex_actor::internal::reflect {
 
 template <typename T>
 struct Signature;
@@ -105,4 +105,4 @@ auto InvokeActorMethod(UserClass& user_class_instance, Args&&... args) {
   return (user_class_instance.*kMethodPtr)(std::forward<Args>(args)...);
 }
 
-}  // namespace ex_actor::detail::reflect
+}  // namespace ex_actor::internal::reflect

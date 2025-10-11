@@ -7,5 +7,5 @@ cd "$SRC"/.. || exit
 set -e -x
 
 git fetch origin main
-git-clang-format -f origin/main || true
+git-clang-format-20 --binary "$(which clang-format-20)" -f origin/main || true
 buildifier -r ./

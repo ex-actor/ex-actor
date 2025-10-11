@@ -7,7 +7,7 @@
 #include <exec/task.hpp>
 
 #include "ex_actor/api.h"
-#include "ex_actor/detail/actor_creation.h"
+#include "ex_actor/internal/actor_creation.h"
 
 namespace ex = stdexec;
 

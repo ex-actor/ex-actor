@@ -238,7 +238,6 @@ class Actor : public TypeErasedActor {
 
 template <class UserClass, auto kMethod, class... Args>
 ex::sender auto TypeErasedActor::CallActorMethod(size_t mailbox_partition_index, Args&&... args) {
-  constexpr size_t kMethodIndex = reflect::GetActorMethodIndex<kMethod>();
   using ReturnType = reflect::Signature<decltype(kMethod)>::ReturnType;
   constexpr bool kIsNested = ex::sender<ReturnType>;
   auto start = ex::schedule(StdExecSchedulerForActorMessageSubmission(this, mailbox_partition_index));
@@ -246,12 +245,12 @@ ex::sender auto TypeErasedActor::CallActorMethod(size_t mailbox_partition_index,
   auto* user_class_instance = static_cast<UserClass*>(GetUserClassAddress());
 
   if constexpr (kIsNested) {
-    return std::move(start) | ex::let_value([user_class_instance, ... args = std::move(args), kMethodIndex]() mutable {
-             return reflect::InvokeActorMethod<UserClass, kMethodIndex>(*user_class_instance, std::move(args)...);
+    return std::move(start) | ex::let_value([user_class_instance, ... args = std::move(args)]() mutable {
+             return (user_class_instance->*kMethod)(std::move(args)...);
            });
   } else {
-    return std::move(start) | ex::then([user_class_instance, ... args = std::move(args), kMethodIndex]() mutable {
-             return reflect::InvokeActorMethod<UserClass, kMethodIndex>(*user_class_instance, std::move(args)...);
+    return std::move(start) | ex::then([user_class_instance, ... args = std::move(args)]() mutable {
+             return (user_class_instance->*kMethod)(std::move(args)...);
            });
   }
 }

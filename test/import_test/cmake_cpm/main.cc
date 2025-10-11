@@ -6,9 +6,6 @@ class Counter {
  public:
   int Add(int x) { return count_ += x; }
 
-  // Tell me your methods - it's all you need to make your class an actor.
-  constexpr static auto kActorMethods = std::make_tuple(&Counter::Add);
-
  private:
   int count_ = 0;
 };

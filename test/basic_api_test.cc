@@ -18,8 +18,6 @@ class Counter {
 
   void Error() const { throw std::runtime_error("error" + std::to_string(count_)); }
 
-  constexpr static auto kActorMethods = std::make_tuple(&Counter::Add, &Counter::GetValue, &Counter::Error);
-
  private:
   int count_ = 0;
 };
@@ -45,9 +43,6 @@ class Proxy {
  private:
   ex_actor::ActorRef<Counter> actor_ref_;
 };
-
-template <>
-constexpr auto ex_actor::reflect::kActorMethods<Proxy> = std::make_tuple(&Proxy::GetValue, &Proxy::GetValue2);
 
 static ex_actor::WorkSharingThreadPool thread_pool(10);
 

@@ -1,6 +1,7 @@
 {
         "cSpell.words": [
                 "blockingconcurrentqueue",
+                "cout",
                 "ctest",
                 "cxxflags",
                 "DCMAKE",
@@ -11,6 +12,7 @@
                 "googletest",
                 "gtest",
                 "MSVC",
-                "NOLINTNEXTLINE"
+                "NOLINTNEXTLINE",
+                "stdexec"
         ]
 }

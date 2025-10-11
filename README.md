@@ -19,38 +19,31 @@ Key Features:
 
 ```cpp
 #include "ex_actor/api.h"
-namespace ex = stdexec;
 
-class Counter {
-  public:
-   int Add(int x) { return count_ += x; }
-   
-   // 1. Tell me your methods - the only line intrudes into your class.
-   constexpr static auto kActorMethods = std::make_tuple(&Counter::Add);
- 
-  private:
-   int count_ = 0;
- };
- 
- exec::task<int> Test() {
-   // 2. Choose a std::execution scheduler you like.
-   ex_actor::WorkSharingThreadPool thread_pool(10);
-   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+struct YourClass {
+  int Add(int x) { return count += x; }
+  int count = 0;
+};
 
-   // 3. Create the actor.
-   ex_actor::ActorRef counter = registry.CreateActor<Counter>();
- 
-   // 4. Call it! It returns a standard sender.
-   auto sender = counter.Send<&Counter::Add>(1) 
-                 | ex::then([](int value) { return value + 1; });
-   co_return co_await sender;
- }
- 
- int main() {
-   auto [res] = ex::sync_wait(Test()).value();
-   std::cout << "res: " << res << '\n';
-   return 0;
- }
+exec::task<int> Test() {
+  // 1. Choose a std::execution scheduler you like.
+  ex_actor::WorkSharingThreadPool thread_pool(10);
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+
+  // 2. Create the actor.
+  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+
+  // 3. Call it! It returns a standard sender.
+  auto sender = actor.Send<&YourClass::Add>(1) 
+                | stdexec::then([](int value) { return value + 1; });
+  co_return co_await sender;
+}
+
+int main() {
+  auto [res] = stdexec::sync_wait(Test()).value();
+  std::cout << "res: " << res << '\n';
+  return 0;
+}
 ```
 
 # How to Add `ex_actor` to Your Project
@@ -66,7 +59,7 @@ We provide examples of different build systems.
 
 Can't find your build system? Open an issue to let us know. Welcome to open a PR to contribute!
 
-Our dependencies are listed in [CMakeLists.txt](CMakeLists.txt)* (search for `CPMAddPackage`).
+Our dependencies are listed in [CMakeLists.txt](CMakeLists.txt) (search for `CPMAddPackage`).
 All of them will be automatically downloaded and built from source, you don't need to configure them manually.
 
 We know it's hard to resolve dependency conflicts, so we carefully choose minimal dependencies.
@@ -88,7 +81,7 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 The single-process mode is heavily tested in our company's production environment. Feel free to use it.
 
-The distributed mode is still in early stage. Welcome to have a try and give us feedback!
+The distributed mode is still in early stage. Welcome to have a try and build together with us!
 
 # The Team Behind `ex_actor`
 

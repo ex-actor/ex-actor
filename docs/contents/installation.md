@@ -1,6 +1,6 @@
 # Installation
 
-We provide examples of different build systems, you can check the examples in `test/import_test/` directory.
+If you prefer a runnable example, you can check the examples in `test/import_test/` directory.
 
 Can't find your build system? Open an issue to let us know. Welcome to open a PR to contribute!
 

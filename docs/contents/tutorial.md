@@ -1,6 +1,6 @@
 # Tutorial
 
-The best way to learn a new library is to see some examples, let's go some examples and you'll learn all you want :)
+The best way to learn a new library is study from examples, let's go through some examples and you'll learn all you want :)
 
 This tutorial assume you have a basic knowledge of `std::execution`. If you are not familiar with it, we recommend the following resources:
 
@@ -12,12 +12,13 @@ instead of `std::execution` in the following examples.
 
 ## Basic case - turn your class into an actor
 
+First let's go through a basic example - create your first actor and call it.
 <!-- doc test start -->
 ```cpp
 #include <cassert>
 #include "ex_actor/api.h"
 
-// Assume you have a class, you want to turn it into an actor:
+// 1. Assume you have a class, you want to turn it into an actor.
 struct YourClass {
   int Add(int x) { return count += x; }
   int count = 0;
@@ -26,7 +27,7 @@ struct YourClass {
 
 int main() {
   /*
-  First, select a `std::execution` scheduler you like, if you have
+  2. First, select a `std::execution` scheduler you like, if you have
   no idea, we recommend `ex_actor::WorkSharingThreadPool` we provide,
   which is suitable for most cases.
   */
@@ -34,24 +35,23 @@ int main() {
   auto scheduler = thread_pool.GetScheduler();
 
   /*
-  Then, create an actor registry using the scheduler, and use the
+  3. Then, create an actor registry using the scheduler, and use the
   registry to create an actor.
   */
   ex_actor::ActorRegistry registry(scheduler);
   ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
   
   /*
-  Everything is setup, you can call the actor's method now.
+  4. Everything is setup, you can call the actor's method now.
   
   The method returns a standard `std::execution` sender, compatible
   with everything in the `std::execution` ecosystem.
   */
   auto sender = actor.Send<&YourClass::Add>(1);
 
-  // To execute the sender and consume the result, use `sync_wait`.
+  // 5. To execute the sender and consume the result, use `sync_wait`.
   auto [res] = stdexec::sync_wait(sender).value();
   assert(res == 1);
-  return 0;
 }
 ```
 <!-- doc test end -->
@@ -100,7 +100,6 @@ int main() {
   };
   auto [res3] = stdexec::sync_wait(coroutine()).value();
   assert(res3 == 3);
-  return 0;
 }
 ```
 <!-- doc test end -->
@@ -193,14 +192,13 @@ int main() {
   auto [res3] = stdexec::sync_wait(proxy.Send<&Proxy::GetValue2>()).value();
   assert(res2 == 100);
   assert(res3 == 100);
-  return 0;
 }
 ```
 <!-- doc test end -->
 
 Read the [previous section](#understanding-the-scheduler-switching) if you can't understand why `GetValue2`'s call back runs on the target actor(Counter), while `GetValue1`'s call back runs on the current actor(Proxy).
 
-## Understanding how actor interacts with the scheduler
+## Understanding how actor is scheduled
 
 Now you've learnt the basic usage of `ex_actor`. Next we'll dig a little deep, to understand how an actor is scheduled.
 
@@ -237,6 +235,10 @@ scheduler.push_task([actor = std::move(actor)] {
     auto message = actor.mailbox.pop();
     message->Execute();
     message_executed++;
+    /*
+    we limit the number of messages executed per activation
+    so that other actors won't starve.
+    */
     if (message_executed >= actor.max_message_executed_per_activation) {
       break;
     }
@@ -246,3 +248,11 @@ scheduler.push_task([actor = std::move(actor)] {
 
 We'll handle the synchronization correctly, so that **at any time, there is at most one thread executing the actor**.
 So you don't need to worry about the synchronization when writing actor methods.
+
+The whole schedule process is like this:
+
+1. someone calls an actor's method - i.e. start a sender returned by `actor.Send<>`.
+2. we push this message(the target method & its callbacks) to the actor's mailbox.
+3. we check if the actor is activated, if not, we activate it, push an activation task(see the above pseudo code) to the scheduler.
+4. the scheduler get the task, execute it, in which the actor will pull messages from its mailbox and execute them.
+5. the actor runs out of messages, or max messages executed per activation is reached, the activation task finishes.

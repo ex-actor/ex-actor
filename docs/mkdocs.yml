@@ -1,4 +1,6 @@
 site_name: "ex_actor"
+site_description: "A modern C++ actor framework based on std::execution"
+site_author: "Lixin Wei"
 docs_dir: contents
 theme:
   name: material
@@ -7,7 +9,7 @@ theme:
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: white
-      accent: pink
+      accent: blue
       toggle:
         icon: material/weather-sunny
         name: Switch to dark mode
@@ -15,7 +17,7 @@ theme:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: black
-      accent: pink
+      accent: blue
       toggle:
         icon: material/weather-night
         name: Switch to light mode
@@ -26,9 +28,15 @@ theme:
     - navigation.sections
     - navigation.expand
     - navigation.footer
+    - navigation.top
     - content.tabs.link
     - content.code.annotate
     - content.code.copy
+    - toc.follow
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - search.share
 extra:
   social:
     - icon: fontawesome/brands/github
@@ -37,6 +45,8 @@ extra:
 repo_url: https://github.com/ex-actor/ex-actor
 
 plugins:
+  - search
+  - social
   - d2:
       executable: d2 # path to d2 executable
       cache: True
@@ -45,7 +55,8 @@ plugins:
       pad: 100
   # - add-number:
   #     order: 2
-  - enumerate-headings
+  # - enumerate-headings:
+  #     toc_depth: 6
   - git-revision-date-localized:
       enable_creation_date: true
   - git-committers:

@@ -21,5 +21,4 @@ exec::task<void> TestBasicUseCase() {
 
 int main() {
   stdexec::sync_wait(TestBasicUseCase());
-  return 0;
 }

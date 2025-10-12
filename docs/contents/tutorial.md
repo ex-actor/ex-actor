@@ -1,0 +1,247 @@
+# Quick Start
+
+The best way to learn a new library is to see some examples, let's go some examples and you'll learn all you want :)
+
+This tutorial assume you have a basic knowledge of `std::execution`. If you are not familiar with it, we recommend the following resources:
+
+1. [P2300](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html) proposal
+2. [stdexec's doc](https://github.com/NVIDIA/stdexec?tab=readme-ov-file#resources) 
+
+C++26 is not finalized now. Currently we're based on the early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), so you'll see `stdexec`, `exec` namespaces
+instead of `std::execution` in the following examples.
+
+## Basic case - turn your class into an actor
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include "ex_actor/api.h"
+
+// Assume you have a class, you want to turn it into an actor:
+struct YourClass {
+  int Add(int x) { return count += x; }
+  int count = 0;
+};
+
+
+int main() {
+  /*
+  First, select a `std::execution` scheduler you like, if you have
+  no idea, we recommend `ex_actor::WorkSharingThreadPool` we provide,
+  which is suitable for most cases.
+  */
+  ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/2);
+  auto scheduler = thread_pool.GetScheduler();
+
+  /*
+  Then, create an actor registry using the scheduler, and use the
+  registry to create an actor.
+  */
+  ex_actor::ActorRegistry registry(scheduler);
+  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+  
+  /*
+  Everything is setup, you can call the actor's method now.
+  
+  The method returns a standard `std::execution` sender, compatible
+  with everything in the `std::execution` ecosystem.
+  */
+  auto sender = actor.Send<&YourClass::Add>(1);
+
+  // To execute the sender and consume the result, use `sync_wait`.
+  auto [res] = stdexec::sync_wait(sender).value();
+  assert(res == 1);
+  return 0;
+}
+```
+<!-- doc test end -->
+
+## Wrap the result in an async way
+
+Through this example, you'll learn how to wrap the sender using sender adapters and coroutines.
+You'll also learn about the scheduler switching mechanism in `std::execution`.
+
+**This part is the hardest and most important part of this tutorial. Please read it carefully.**
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include "ex_actor/api.h"
+
+struct YourClass {
+  int Add(int x) { return count += x; }
+  int count = 0;
+};
+
+int main() {
+  ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/2);
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+  auto sender = actor.Send<&YourClass::Add>(1);
+
+  // --- Example 1: Use `then` to wrap the sender ---
+  auto sender2 = sender | stdexec::then([](int value) {
+    // this line will be executed on the actor's thread.
+    return value + 1;
+  });
+  auto [res2] = stdexec::sync_wait(sender2).value();
+  assert(res2 == 2);
+
+
+  // --- Example 2: Coroutine ---
+  auto coroutine = [sender]() -> exec::task<int> {
+    auto res = co_await sender;
+    /*
+    the following line will be executed on the caller's thread
+    - here is the main thread. see below for more details.
+    */
+    assert(res == 1);
+    co_return res + 2;
+  };
+  auto [res3] = stdexec::sync_wait(coroutine()).value();
+  assert(res3 == 3);
+  return 0;
+}
+```
+<!-- doc test end -->
+
+
+### Understanding the scheduler switching
+
+You may be curious about why the first example's callback runs on the actor's thread. While the second example's callback(code after `co_await`) runs on the caller's thread.
+
+To understand this, you need to know the scheduler switching mechanism in `std::execution`.
+
+In `std::execution`, scheduler's switch should be explicit - by calling `continue_on` explicitly.
+
+An actor itself is a scheduler (not the scheduler passed to the `ActorRegistry` constructor, but **actor itself**), when you call its method, you schedule a task on it.
+So all the callbacks will run on the actor's thread.
+
+But in a coroutine, the code **looks like** they are executing in the same thread.
+So in order not to confuse the user, make coroutine easy to use, `std::execution::task` has **scheduler affinity** - it will keep the scheduler the same across the entire coroutine
+(See [`std::execution::task`'s proposal](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3552r3.html) for more details).
+
+In the second example, the coroutine's scheduler is the `run_loop` scheduler in `sync_wait`, which is the main thread. So the entire coroutine, except the async parts(the sender execution), will run on the main thread.
+
+
+
+## Chain actors - send message from one actor to another
+
+This examples shows hot to call an actor's method from another actor.
+
+The main thread calls `Proxy`, then `Proxy` calls `Counter`.
+
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include <iostream>
+#include "ex_actor/api.h"
+
+class Counter {
+ public:
+  void Add(int x) { count_ += x; }
+  int GetValue() const { return count_; }
+
+ private:
+  int count_ = 0;
+};
+
+class Proxy {
+ public:
+  explicit Proxy(ex_actor::ActorRef<Counter> actor_ref) : actor_ref_(actor_ref) {}
+  
+  // coroutine style
+  exec::task<int> GetValue1() {
+    int res = co_await actor_ref_.template Send<&Counter::GetValue>();
+    std::cout << "This line runs on the current actor(Proxy), "
+                 "because coroutine has scheduler affinity.\n";
+    co_return res;
+  }
+
+  // sender adapter style
+  stdexec::sender auto GetValue2() {
+    return actor_ref_.template Send<&Counter::GetValue>() | stdexec::then([](int value) {
+             std::cout << "This line runs on the target actor(Counter), "
+                          "unless you call continue_on explicitly.\n";
+             return value;
+           });
+  }
+
+ private:
+  ex_actor::ActorRef<Counter> actor_ref_;
+};
+
+int main() {
+  ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/2);
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  ex_actor::ActorRef counter = registry.CreateActor<Counter>();
+
+  // 1. increase the counter 100 times
+  exec::async_scope scope;
+  for (int i = 0; i < 100; ++i) {
+    scope.spawn(counter.Send<&Counter::Add>(1));
+  }
+  stdexec::sync_wait(scope.on_empty());
+
+  // 2. create a proxy actor, who has a reference to the counter actor
+  ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(counter);
+
+  // 3. call through the proxy actor
+  auto [res2] = stdexec::sync_wait(proxy.Send<&Proxy::GetValue1>()).value();
+  auto [res3] = stdexec::sync_wait(proxy.Send<&Proxy::GetValue2>()).value();
+  assert(res2 == 100);
+  assert(res3 == 100);
+  return 0;
+}
+```
+<!-- doc test end -->
+
+Read the [previous section](#understanding-the-scheduler-switching) if you can't understand why `GetValue2`'s call back runs on the target actor(Counter), while `GetValue1`'s call back runs on the current actor(Proxy).
+
+## Understanding how actor interacts with the scheduler
+
+Now you've learnt the basic usage of `ex_actor`. Next we'll dig a little deep, to understand how an actor is scheduled.
+
+This part is optional, if you don't want to know the details, you can skip it. But if you have time we
+recommend you to read it to have a better understanding of how actor works.
+
+```d2
+direction: right
+
+caller -> actor.mailbox: 1.Send message
+caller.shape: circle
+
+actor
+actor.mailbox -> actor.user class: 3.pull & execute
+actor.mailbox.shape: queue
+
+scheduler
+actor -> scheduler: 2.activate
+scheduler.task queue.shape: queue
+scheduler.worker thread
+
+```
+
+We wrap your class into an actor, the actor contains a mailbox(a queue),
+whenever a message is pushed to the mailbox, the actor will be activated - pushed to the scheduler.
+
+You can think of pushing the following pseudo lambda to the scheduler:
+
+```cpp
+// pseudo code of actor activation
+scheduler.push_task([actor = std::move(actor)] {
+  int message_executed = 0;
+  while (!actor.mailbox.empty()) {
+    auto message = actor.mailbox.pop();
+    message->Execute();
+    message_executed++;
+    if (message_executed >= actor.max_message_executed_per_activation) {
+      break;
+    }
+  }
+});
+```
+
+We'll handle the synchronization correctly, so that **at any time, there is at most one thread executing the actor**.
+So you don't need to worry about the synchronization when writing actor methods.

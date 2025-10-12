@@ -23,6 +23,7 @@ theme:
     - navigation.instant
     - navigation.instant.progress
     - navigation.path
+    - navigation.sections
     - navigation.expand
     - content.tabs.link
     - content.code.annotate
@@ -35,6 +36,9 @@ plugins:
       layout: elk
       theme: 301
       pad: 100
+  # - add-number:
+  #     order: 2
+  - enumerate-headings
 
 markdown_extensions:
   - toc:
@@ -47,3 +51,10 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+
+nav:
+  - Introduction: index.md
+  - Installation: installation.md
+  - Tutorial: tutorial.md
+  - Schedulers: schedulers.md
+  - Development: development.md

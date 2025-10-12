@@ -3,13 +3,16 @@
 [![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-blue.svg)](https://opensource.org/licenses/apache-2.0)
 [![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
 
-![image](assets/ex_actor_banner.jpg)
+![image](docs/contents/assets/ex_actor_banner.jpg)
+
+**📖 [Documentation](https://ex-actor.github.io/ex-actor/)**
 
 **ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) following `std::execution`'s design. **Only requires C++20 ([detail](#faqs))**.
 
 An actor framework turns your class into a remote service. All method calls will be queued to the actor's mailbox and executed sequentially. You can easily write distributed applications with it, without caring about thread synchronization and network.
 
 Key Features:
+
 1. **Easy to Use** - Turn your existing class into an actor. No arcane macros and inheritance.
 2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide some out-of-box, e.g. work-sharing & work-stealing thread pool.
 3. **Standard-Compliant API** - Our actor returns a standard sender, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
@@ -49,24 +52,7 @@ int main() {
 ```
 <!-- doc test end -->
 
-# How to Add `ex_actor` to Your Project
-
-We provide examples of different build systems.
-
-* For CMake project:
-  * [Use CMake Package Manager (CPM)](test/import_test/cmake_cpm) (recommended)
-  * [Install & find_package](test/import_test/cmake_install_find_package)
-* For Bazel project:
-  * [Bzlmod style](test/import_test/bazel_bzlmod)
-  * [Legacy WORKSPACE style](test/import_test/bazel_workspace)
-
-Can't find your build system? Open an issue to let us know. Welcome to open a PR to contribute!
-
-Our dependencies are listed in [CMakeLists.txt](CMakeLists.txt) (search for `CPMAddPackage`).
-All of them will be automatically downloaded and built from source, you don't need to configure them manually.
-
-We know it's hard to resolve dependency conflicts, so we carefully choose minimal dependencies.
-If you meet any dependency conflict, either try to modify our version in CMakeLists.txt to match your project, or modify your version to match ours.
+**Check our 📖 [Documentation](https://ex-actor.github.io/ex-actor/) for more details like installation & tutorials.**
 
 # FAQs
 

@@ -1,80 +1,78 @@
-# Quick Start
+# Introduction
 
-## Creating an actor
+[![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-blue.svg)](https://opensource.org/licenses/apache-2.0)
+[![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
 
-Assume you have a class, you want to turn it into an actor:
+![image](assets/ex_actor_banner.jpg)
 
+**ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) following `std::execution`'s design. **Only requires C++20 ([detail](#faqs))**.
+
+An actor framework turns your class into a remote service. All method calls will be queued to the actor's mailbox and executed sequentially. You can easily write distributed applications with it, without caring about thread synchronization and network.
+
+Key Features:
+
+1. **Easy to Use** - Turn your existing class into an actor. No arcane macros and inheritance.
+2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide some out-of-box, e.g. work-sharing & work-stealing thread pool.
+3. **Standard-Compliant API** - Our actor returns a standard sender, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
+
+
+## API Glance
+
+<!-- doc test start -->
 ```cpp
+#include <cassert>
+#include "ex_actor/api.h"
+
 struct YourClass {
   int Add(int x) { return count += x; }
   int count = 0;
 };
+
+exec::task<int> Test() {
+  // 1. Choose a std::execution scheduler you like.
+  ex_actor::WorkSharingThreadPool thread_pool(10);
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+
+  // 2. Create the actor.
+  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+
+  // 3. Call it! It returns a standard sender.
+  auto sender = actor.Send<&YourClass::Add>(1) 
+                | stdexec::then([](int value) { return value + 1; });
+  co_return co_await sender;
+}
+
+int main() {
+  auto [res] = stdexec::sync_wait(Test()).value();
+  assert(res == 2);
+  return 0;
+}
 ```
+<!-- doc test end -->
 
-First, select a `std::execution` scheduler you like, if you have no idea, we recommend the work-sharing thread pool
-we provide, which is suitable for most cases.
-```cpp
-#include "ex_actor/api.h"
+## Next Steps
 
-ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
-auto scheduler = thread_pool.GetScheduler();
-```
+1. How to add `ex_actor` to your project? - [Installation](installation.md)
+2. How to use `ex_actor`? - [Tutorial](tutorial.md)
 
-Then, create an actor registry using the scheduler, and use the registry to create an actor:
-```cpp
-ex_actor::ActorRegistry registry(scheduler);
-ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
-```
+## FAQs
 
-That's all, everything is setup, you can call the actor's method now:
-```cpp
-auto sender = actor.Send<&YourClass::Add>(1);
-```
-The method returns a standard `std::execution` sender, compatible with everything in the `std::execution` ecosystem.
-For example, you can `co_await` it, or use `ex::then` to wrap it, etc.
+### `std::execution` is in C++26, why you only requires C++20?
 
-To execute the sender and consume the result, use [`sync_wait`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-consumer-sync_wait):
-```cpp
-auto [res] = stdexec::sync_wait(sender).value();
-```
+C++26 is not finalized, now we depends on an early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), which only requires C++20. (it's like `fmtlib` vs `std::format` and `ranges-v3` vs `std::ranges`)
 
-## How actor interacts with the scheduler
+Once C++26 is ready, we'll add a build option to switch to the real `std::execution` in C++26, allow you to remove the dependency on `stdexec`. And it'll only be an option, you can still use `stdexec` because all senders based on `stdexec` will work well with `std::execution`.
 
-```d2
-direction: right
+**From our side, we'll keep our code compatible with both `stdexec` and `std::execution`**. So don't worry about the dependency.
 
-caller -> actor.mailbox: 1. Send message
-caller.shape: circle
+BTW, with C++26's reflection, most boilerplate of the distributed mode API can be eliminated. I'll add a new set of APIs for C++26 in the future, stay tuned!
 
-actor
-actor.mailbox -> actor.user class: 3. pull & execute
-actor.mailbox.shape: queue
+### Is it production-ready?
 
-scheduler
-actor -> scheduler: 2. activate
-scheduler.task queue.shape: queue
-scheduler.worker thread
+The single-process mode is heavily tested in our company's production environment. Feel free to use it.
 
-```
+The distributed mode is still in early stage. Welcome to have a try and build together with us!
 
-We wrap your class into an actor, the actor contains a mailbox(a queue),
-whenever a message is pushed to the mailbox, the actor will be activated - pushed to the scheduler.
+## The Team Behind `ex_actor`
 
-You can think of pushing the following lambda to the scheduler:
-
-```cpp
-scheduler.push_task([actor = std::move(actor)] {
-  int message_executed = 0;
-  while (!actor.mailbox.empty()) {
-    auto message = actor.mailbox.pop();
-    message->Execute();
-    message_executed++;
-    if (message_executed >= actor.max_message_executed_per_activation) {
-      break;
-    }
-  }
-});
-```
-
-We'll handle the synchronization correctly, so that **at any time, there is at most one thread executing the actor**.
-So you don't need to worry about the synchronization when writing actor methods.
+We are ...

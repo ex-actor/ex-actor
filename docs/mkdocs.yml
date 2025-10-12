@@ -25,9 +25,16 @@ theme:
     - navigation.path
     - navigation.sections
     - navigation.expand
+    - navigation.footer
     - content.tabs.link
     - content.code.annotate
     - content.code.copy
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/ex-actor/ex-actor
+
+repo_url: https://github.com/ex-actor/ex-actor
 
 plugins:
   - d2:
@@ -39,6 +46,11 @@ plugins:
   # - add-number:
   #     order: 2
   - enumerate-headings
+  - git-revision-date-localized:
+      enable_creation_date: true
+  - git-committers:
+      repository: ex-actor/ex-actor
+      branch: main
 
 markdown_extensions:
   - toc:

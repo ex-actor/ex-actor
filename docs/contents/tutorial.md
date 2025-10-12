@@ -1,4 +1,4 @@
-# Quick Start
+# Tutorial
 
 The best way to learn a new library is to see some examples, let's go some examples and you'll learn all you want :)
 
@@ -118,10 +118,11 @@ An actor itself is a scheduler (not the scheduler passed to the `ActorRegistry` 
 So all the callbacks will run on the actor's thread.
 
 But in a coroutine, the code **looks like** they are executing in the same thread.
-So in order not to confuse the user, make coroutine easy to use, `std::execution::task` has **scheduler affinity** - it will keep the scheduler the same across the entire coroutine
+So in order not to confuse the user, make coroutine easy to use, `std::execution::task` has **scheduler affinity** - it will keep the scheduler the same across the entire coroutine.
+In other words, after any `co_await` in the coroutine, `std::execution::task` will help you to switch back to the coroutine's scheduler.
 (See [`std::execution::task`'s proposal](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3552r3.html) for more details).
 
-In the second example, the coroutine's scheduler is the `run_loop` scheduler in `sync_wait`, which is the main thread. So the entire coroutine, except the async parts(the sender execution), will run on the main thread.
+In the second example, the coroutine's scheduler is the `run_loop` scheduler in `sync_wait`, which is the main thread. So after `co_await sender`, the coroutine will switch back to the main thread.
 
 
 

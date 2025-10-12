@@ -9,7 +9,7 @@
 
 **ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) following `std::execution`'s design. **Only requires C++20 ([detail](#faqs))**.
 
-An actor framework turns your class into a remote service. All method calls will be queued to the actor's mailbox and executed sequentially. You can easily write distributed applications with it, without caring about thread synchronization and network.
+This framework turns your class into a remote service. All method calls will be queued to the actor's mailbox and executed sequentially. You can easily write distributed applications with it, without caring about thread synchronization and network.
 
 Key Features:
 
@@ -52,7 +52,7 @@ int main() {
 ```
 <!-- doc test end -->
 
-**Check our 📖 [Documentation](https://ex-actor.github.io/ex-actor/) for more details like installation & tutorials.**
+**Check our 📖 [Documentation](https://ex-actor.github.io/ex-actor/) for more details like [installation](https://ex-actor.github.io/ex-actor/installation/) & [tutorials](https://ex-actor.github.io/ex-actor/tutorial/).**
 
 # FAQs
 

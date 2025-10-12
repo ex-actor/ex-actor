@@ -6,4 +6,4 @@ SRC=$(
 cd "$SRC" || exit
 set -e -x
 
-uvx --with mkdocs-d2-plugin,mkdocs-material,mkdocs-add-number-plugin,mkdocs-enumerate-headings-plugin  mkdocs serve -a 0.0.0.0:2023
+uvx --with mkdocs-d2-plugin,mkdocs-material,mkdocs-add-number-plugin,mkdocs-enumerate-headings-plugin,mkdocs-git-revision-date-localized-plugin,mkdocs-git-committers-plugin-2  mkdocs serve -a 0.0.0.0:2023

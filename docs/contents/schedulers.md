@@ -11,7 +11,9 @@ ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
 auto scheduler = thread_pool.GetScheduler();
 ```
 
-This scheduler is suitable for most cases. It's a simple thread pool with a global shared lock-free task queue.
+This scheduler is suitable for most cases.
+
+It's a classic thread pool with a shared lock-free task queue.
 
 ```d2
 direction: right
@@ -33,7 +35,7 @@ auto scheduler = thread_pool.GetScheduler();
 ```
 
 It's an alias of `stdexec`'s `exec::static_thread_pool`, which is a sophisticated work-stealing-style thread pool.
-Every thread has a FILO local task queue, and when a thread is idle, it will steal tasks from other threads.
+Every thread has a LIFO local task queue, and when a thread is idle, it will steal tasks from other threads.
 
 It has better performance in some cases. But the task stealing overhead can be non-negligible in some low-latency scenarios.
 Use it when you know what you are doing.

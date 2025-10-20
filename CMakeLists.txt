@@ -6,15 +6,15 @@ include(CMakePackageConfigHelpers)
 # ------------------- global setups -------------------
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-  add_compile_options(-Wno-subobject-linkage)
-endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-fdiagnostics-color=always)
 endif()
+set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "")
 
 # ------------------- dependencies -------------------
+
+# When C++26 is ready, I'll add a build option to switch to the real std::execution in C++26,
+# allow you to remove the dependency on stdexec. Stay tuned!
 CPMAddPackage(
   NAME stdexec
   GITHUB_REPOSITORY NVIDIA/stdexec
@@ -22,7 +22,59 @@ CPMAddPackage(
   OPTIONS "BUILD_TESTING OFF"
   OPTIONS "STDEXEC_BUILD_EXAMPLES OFF"
 )
+
+# reflect-cpp with Cap'n Proto for actor message serialization
+CPMAddPackage(
+  NAME CapnProto
+  GITHUB_REPOSITORY capnproto/capnproto
+  GIT_TAG v1.2.0
+  OPTIONS "BUILD_TESTING OFF"
+  OPTIONS "CMAKE_CXX_FLAGS -w"
+)
+CPMAddPackage(
+  NAME reflectcpp
+  GITHUB_REPOSITORY getml/reflect-cpp
+  GIT_TAG 265b69355917c1eba0149cbbfbe2b7f245859c81
+  OPTIONS "REFLECTCPP_BUILD_BENCHMARKS OFF"
+  OPTIONS "REFLECTCPP_JSON OFF"
+  OPTIONS "REFLECTCPP_CAPNPROTO ON"
+  OPTIONS "REFLECTCPP_INSTALL ON"
+)
+
+# libzmq + cppzmq for message passing in distributed mode
+CPMAddPackage(
+  NAME libzmq
+  GITHUB_REPOSITORY zeromq/libzmq
+  GIT_TAG v4.3.5
+  OPTIONS "CMAKE_CXX_FLAGS -w"
+  OPTIONS "BUILD_TESTS OFF"
+)
+CPMAddPackage(
+  NAME cppzmq
+  GITHUB_REPOSITORY zeromq/cppzmq
+  GIT_TAG v4.11.0
+  OPTIONS "CPPZMQ_BUILD_TESTS OFF"
+)
+
+CPMAddPackage(
+  NAME spdlog
+  GITHUB_REPOSITORY gabime/spdlog
+  GIT_TAG v1.16.0
+  OPTIONS "SPDLOG_INSTALL ON"
+)
+
 # ------------------- targets -------------------
+
+add_library(ex_actor_network STATIC src/ex_actor/internal/network.cc)
+target_include_directories(ex_actor_network PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_link_libraries(
+  ex_actor_network
+  PRIVATE STDEXEC::stdexec reflectcpp::reflectcpp cppzmq-static spdlog::spdlog
+)
+
 add_library(ex_actor INTERFACE)
 target_include_directories(ex_actor INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -30,10 +82,17 @@ target_include_directories(ex_actor INTERFACE
 )
 target_link_libraries(
   ex_actor
-  INTERFACE STDEXEC::stdexec
+  INTERFACE
+  STDEXEC::stdexec
+  reflectcpp::reflectcpp
+  cppzmq-static
+  spdlog::spdlog
+  ex_actor_network
 )
 # to suppress subobject linkage warnings in stdexec
-target_compile_options(ex_actor INTERFACE -Wno-subobject-linkage)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  target_compile_options(ex_actor INTERFACE -Wno-subobject-linkage)
+endif()
 add_library(ex_actor::ex_actor ALIAS ex_actor)
 
 # ------------------- tests -------------------
@@ -44,7 +103,7 @@ if(EX_ACTOR_BUILD_TESTS)
 endif()
 
 # ------------------- install -------------------
-install(TARGETS ex_actor EXPORT ex_actor-targets)
+install(TARGETS ex_actor ex_actor_network EXPORT ex_actor-targets)
 install(DIRECTORY include/ DESTINATION include)
 install(
   EXPORT ex_actor-targets

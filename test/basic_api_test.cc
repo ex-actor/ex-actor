@@ -1,15 +1,17 @@
 #include <cassert>
 #include <iostream>
-#include <tuple>
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
-#include <exec/task.hpp>
+#include <gmock/gmock-matchers.h>
+#include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
 #include "ex_actor/internal/actor_creation.h"
 
 namespace ex = stdexec;
+
+using testing::HasSubstr;
+using testing::Property;
+using testing::Throws;
 
 class Counter {
  public:
@@ -46,16 +48,17 @@ class Proxy {
 
 static ex_actor::WorkSharingThreadPool thread_pool(10);
 
-SCENARIO("exception in actor method should be propagated to the caller") {
+TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
   auto coroutine = []() -> exec::task<void> {
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
     auto counter = registry.CreateActor<Counter>();
     co_await counter.Send<&Counter::Error>();
   };
-  REQUIRE_THROWS_WITH(ex::sync_wait(coroutine()), "error0");
+  ASSERT_THAT([&coroutine] { ex::sync_wait(coroutine()); },
+              Throws<std::exception>(Property(&std::exception::what, HasSubstr("error0"))));
 }
 
-SCENARIO("nest actor ref case") {
+TEST(BasicApiTest, NestActorRefCase) {
   auto coroutine = []() -> exec::task<void> {
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
 
@@ -65,24 +68,26 @@ SCENARIO("nest actor ref case") {
       scope.spawn(counter.Send<&Counter::Add>(1));
     }
     auto res = co_await counter.Send<&Counter::GetValue>();
-    REQUIRE(res == 100);
+    EXPECT_EQ(res, 100);
 
     ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(counter);
     auto res2 = co_await proxy.Send<&Proxy::GetValue>();
     auto res3 = co_await proxy.Send<&Proxy::GetValue2>();
-    REQUIRE(res2 == 100);
-    REQUIRE(res3 == 100);
+    EXPECT_EQ(res2, 100);
+    EXPECT_EQ(res3, 100);
     co_return;
   };
   ex::sync_wait(coroutine());
 }
 
-SCENARIO("create actor with full config") {
+TEST(BasicApiTest, CreateActorWithFullConfig) {
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
   auto counter = registry.CreateActor<Counter>(ex_actor::ActorConfig {.max_message_executed_per_activation = 10});
   registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
 
-  registry.CreateActor<Proxy>(ex_actor::ActorConfig {.mailbox_partition_size = 3}, counter);
-  registry.GetActorByName<Counter>("counter");
+  static_assert(rfl::internal::has_reflection_type_v<ex_actor::ActorRef<Counter>>);
+  // test pass by lvalue
+  ex_actor::ActorConfig config = {.max_message_executed_per_activation = 10};
+  registry.CreateActor<Proxy>(config, counter);
   registry.DestroyActor(counter);
 }

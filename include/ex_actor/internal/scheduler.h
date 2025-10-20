@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <thread>
 
 #include <exec/static_thread_pool.hpp>
@@ -48,7 +49,6 @@ class WorkSharingThreadPool {
   struct Scheduler;
 
   struct Sender : ex::sender_t {
-    // NOLINTNEXTLINE(readability-identifier-naming)
     using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
     WorkSharingThreadPool* thread_pool;
     struct Env {
@@ -82,9 +82,10 @@ class WorkSharingThreadPool {
   std::vector<std::jthread> workers_;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {
+    internal::util::SetThreadName("ws_pool_worker");
     TypeEasedOperation* operation = nullptr;
     while (!stop_token.stop_requested()) {
-      bool ok = queue_.wait_dequeue_timed(operation, std::chrono::milliseconds(100));
+      bool ok = queue_.wait_dequeue_timed(operation, std::chrono::milliseconds(10));
       if (!ok) {
         continue;
       }

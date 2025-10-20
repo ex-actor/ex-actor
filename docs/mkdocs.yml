@@ -74,10 +74,14 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
 
 nav:
   - Introduction: index.md
   - Installation: installation.md
   - Tutorial: tutorial.md
+  - Distributed Mode: distributed_mode.md
   - Schedulers: schedulers.md
-  - Development: development.md
+  - Contributing: contributing.md

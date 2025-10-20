@@ -49,8 +49,11 @@ int main() {
   */
   auto sender = actor.Send<&YourClass::Add>(1);
 
-  // 5. To execute the sender and consume the result, use `sync_wait`.
-  auto [res] = stdexec::sync_wait(sender).value();
+  /*
+  5. To execute the sender and consume the result, use `sync_wait`.
+  Note that the sender is not copyable, so you need to use `std::move`.
+  */
+  auto [res] = stdexec::sync_wait(std::move(sender)).value();
   assert(res == 1);
 }
 ```

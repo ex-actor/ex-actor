@@ -18,6 +18,9 @@ Key Features:
 
 ## API Glance
 
+Currently we're based on std::execution's early implementation - [stdexec](https://github.com/NVIDIA/stdexec),
+so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` in the following example.
+
 <!-- doc test start -->
 ```cpp
 #include <cassert>
@@ -68,11 +71,20 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 ### Is it production-ready?
 
-The single-process mode is heavily tested in our company's production environment. While minor bugs can occur due to version divergence btw open source & internal codes.
-The overall quality is good, feel free to use it in production.
+The single-process mode is heavily tested in our company's production environment. While minor bugs can occur due to version divergence btw open source & internal codes, the overall quality is good, feel free to use it in production.
 
 The distributed mode is still in early stage. Welcome to have a try and build together with us!
 
 ## The Team Behind `ex_actor`
 
-We are ...
+We are Metabit Trading, a tech driven quant trading company.
+We are dedicated to merging the precision of mathematics with the innovation of computer science,
+leveraging advanced artificial intelligence (AI) and machine learning (ML) to drive investment decisions and strategy development.
+
+During building our trading system, we find that there is no existing actor framework in the market fits our needs, so we build one
+from scratch.
+Now `ex_actor` serves as a core part of our trading system. With its clean API and pluggability of threading model,
+we are able to unify the low-latency and high-throughput workflow together, building a very clean codebase.
+
+While this framework has done a lot in our company. We think there should be a wider use case in the community, so we open source this
+project. Welcome to have a try and build together with us!

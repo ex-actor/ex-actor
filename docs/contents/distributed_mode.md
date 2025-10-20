@@ -42,7 +42,7 @@ class PingWorker {
 };
 
 int main(int argc, char** argv) {
-  uint32_t node_id = std::atoi(argv[1]);
+  uint32_t this_node_id = std::atoi(argv[1]);
   ex_actor::WorkSharingThreadPool thread_pool(4);
 
   // boilerplate 3, split by comma, e.g. ActorRoster<A, B, C...>
@@ -73,7 +73,7 @@ we can take advantage of a schemafull protocol. From this reason, we choose [Cap
 
 ## Network
 
-We choose [ZeroMQ](https://zeromq.org/) as it is a well-known and sophisticated message passing library.
+We choose [ZeroMQ](https://zeromq.org/), it's a well-known and sophisticated message passing library.
 
 The topology is a full mesh. Each node holds one receive DEALER socket bound to local. And several send DEALER sockets connected to other nodes.
 

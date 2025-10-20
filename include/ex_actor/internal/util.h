@@ -1,18 +1,19 @@
 #pragma once
 
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <queue>
 
+#include <spdlog/spdlog.h>
 #include <stdexec/execution.hpp>
 
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 
 namespace ex_actor::util {
-
 /**
  * @brief A std::execution style semaphore. support on_negative sender.
  */
@@ -73,7 +74,6 @@ class Semaphore {
   };
 
   struct OnDrainedSender : ex::sender_t {
-    // NOLINTNEXTLINE(readability-identifier-naming)
     using completion_signatures = ex::completion_signatures<ex::set_value_t()>;
     Semaphore* semaphore;
 
@@ -115,6 +115,34 @@ struct LinearizableUnboundedQueue {
   mutable std::mutex mutex_;
 };
 
+template <class K, class V>
+class LockGuardedMap {
+ public:
+  bool Insert(const K& key, V value) {
+    std::lock_guard lock(mutex_);
+    auto [iter, inserted] = map_.try_emplace(key, std::move(value));
+    return inserted;
+  }
+
+  V& At(const K& key) {
+    std::lock_guard lock(mutex_);
+    auto iter = map_.find(key);
+    EXA_THROW_CHECK(iter != map_.end()) << "Key not found: " << key;
+    return iter->second;
+  }
+
+  void Erase(const K& key) {
+    std::lock_guard lock(mutex_);
+    map_.erase(key);
+  }
+
+  std::mutex& GetMutex() const { return mutex_; }
+
+ private:
+  std::unordered_map<K, V> map_;
+  mutable std::mutex mutex_;
+};
+
 // Similar to std::any, but allow move-only types
 class MoveOnlyAny {
  public:
@@ -150,4 +178,15 @@ class MoveOnlyAny {
   std::unique_ptr<AnyValueHolder> value_holder_;
 };
 
+#if defined(_WIN32)
+#include <windows.h>
+inline void SetThreadName(const std::string& name) {
+  SetThreadDescription(GetCurrentThread(), std::wstring(name.begin(), name.end()).c_str());
+}
+#elif defined(__linux__)
+#include <pthread.h>
+inline void SetThreadName(const std::string& name) { pthread_setname_np(pthread_self(), name.c_str()); }
+#else
+inline void SetThreadName(const std::string&) {}
+#endif
 }  // namespace ex_actor::internal::util

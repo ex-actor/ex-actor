@@ -1,0 +1,5 @@
+# ThreadSanitizer suppressions file for project X.
+
+race:zmq::ypipe_t
+race:zmq::detail::socket_base
+race:zmq::socket_base_t

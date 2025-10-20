@@ -1,12 +1,12 @@
 #include <chrono>
 
-#include <catch2/catch_test_macros.hpp>
+#include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
 
 namespace ex = ex_actor::ex;
 
-SCENARIO("task in WorkSharingThreadPool should be stoppable") {
+TEST(SchedulerTest, TaskInWorkSharingThreadPoolShouldBeStoppable) {
   ex_actor::WorkSharingThreadPool thread_pool(1);
   auto scheduler = thread_pool.GetScheduler();
   auto task = ex::schedule(scheduler) | ex::then([]() { std::this_thread::sleep_for(std::chrono::milliseconds(100)); });
@@ -25,7 +25,7 @@ struct TestActor {
   }
   int count = 0;
 };
-SCENARIO("Actor task should be stoppable") {
+TEST(SchedulerTest, ActorTaskShouldBeStoppable) {
   ex_actor::WorkSharingThreadPool thread_pool(1);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
   auto actor = registry.CreateActor<TestActor>();

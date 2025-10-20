@@ -5,25 +5,27 @@
 #include <type_traits>
 
 #include <exec/task.hpp>
+#include <rfl/Tuple.hpp>
 #include <stdexec/execution.hpp>
-
-namespace ex_actor::reflect {
-
-template <class UserClass>
-constexpr std::tuple kActorMethods = UserClass::kActorMethods;
-
-}  // namespace ex_actor::reflect
 
 namespace ex_actor::internal::reflect {
 
 template <typename T>
 struct Signature;
 
+template <class R, class... Args>
+struct Signature<R (*)(Args...)> {
+  using ReturnType = R;
+  using ArgsTupleType = std::tuple<Args...>;
+  using DecayedArgsRflTupleType = rfl::Tuple<std::decay_t<Args>...>;
+};
+
 template <typename R, typename C, typename... Args>
 struct Signature<R (C::*)(Args...)> {
   using ClassType = C;
   using ReturnType = R;
   using ArgsTupleType = std::tuple<Args...>;
+  using DecayedArgsRflTupleType = rfl::Tuple<std::decay_t<Args>...>;
 };
 template <typename R, typename C, typename... Args>
 struct Signature<R (C::*)(Args...) const> : Signature<R (C::*)(Args...)> {};
@@ -74,10 +76,31 @@ template <size_t kIndex, class... Ts>
 using ParamPackElement = std::tuple_element_t<kIndex, std::tuple<Ts...>>;
 
 // ---------------- Actor Methods Related ----------------
-using ::ex_actor::reflect::kActorMethods;
+#ifndef EXA_ACTOR_METHODS_KEYWORD
+#define EXA_ACTOR_METHODS_KEYWORD kActorMethods
+#endif
 
 template <class T>
-concept HasActorMethods = (std::tuple_size_v<decltype(kActorMethods<T>)> > 0);
+constexpr std::tuple EXA_ACTOR_METHODS_KEYWORD = {};
+
+template <typename, typename = void>
+struct HasStaticMemberActorMethods : std::false_type {};
+template <typename T>
+struct HasStaticMemberActorMethods<T, std::void_t<decltype(T::EXA_ACTOR_METHODS_KEYWORD)>> : std::true_type {};
+template <typename T>
+inline constexpr bool kHasStaticMemberActorMethods = HasStaticMemberActorMethods<T>::value;
+
+template <class UserClass>
+consteval auto GetActorMethodsTuple() {
+  if constexpr (kHasStaticMemberActorMethods<UserClass>) {
+    return UserClass::EXA_ACTOR_METHODS_KEYWORD;
+  } else {
+    return EXA_ACTOR_METHODS_KEYWORD<UserClass>;
+  }
+}
+
+template <class T>
+concept HasActorMethods = (std::tuple_size_v<decltype(GetActorMethodsTuple<T>())> > 0);
 
 template <class UserClass>
 consteval void CheckHasActorMethods() {
@@ -88,21 +111,41 @@ consteval void CheckHasActorMethods() {
 
 template <auto kFunc, size_t kIndex = 0>
   requires std::is_member_function_pointer_v<decltype(kFunc)>
-consteval size_t GetActorMethodIndex() {
+consteval std::optional<uint64_t> GetActorMethodIndex() {
   using ClassType = Signature<decltype(kFunc)>::ClassType;
-  CheckHasActorMethods<ClassType>();
-  if constexpr (IsSameMemberFn<std::get<kIndex>(kActorMethods<ClassType>), kFunc>()) {
+  constexpr auto kActorMethodsTuple = GetActorMethodsTuple<ClassType>();
+  if constexpr (std::tuple_size_v<decltype(kActorMethodsTuple)> == 0) {
+    return std::nullopt;
+  } else if constexpr (IsSameMemberFn<std::get<kIndex>(kActorMethodsTuple), kFunc>()) {
     return kIndex;
-  } else if constexpr (kIndex + 1 < std::tuple_size_v<decltype(kActorMethods<ClassType>)>) {
+  } else if constexpr (kIndex + 1 < std::tuple_size_v<decltype(kActorMethodsTuple)>) {
     return GetActorMethodIndex<kFunc, kIndex + 1>();
   }
+  return std::nullopt;
 };
 
 template <class UserClass, size_t kMethodIndex, class... Args>
 auto InvokeActorMethod(UserClass& user_class_instance, Args&&... args) {
   CheckHasActorMethods<UserClass>();
-  constexpr auto kMethodPtr = std::get<kMethodIndex>(kActorMethods<UserClass>);
+  constexpr auto kMethodPtr = std::get<kMethodIndex>(GetActorMethodsTuple<UserClass>());
   return (user_class_instance.*kMethodPtr)(std::forward<Args>(args)...);
 }
+template <stdexec::sender Sender>
+using CoAwaitType =
+    decltype(std::declval<exec::task<void>::promise_type>().await_transform(std::declval<Sender>()).await_resume());
 
+template <auto kMethod>
+constexpr auto UnwrapRetrunSenderIfNested() {
+  using ReturnType = Signature<decltype(kMethod)>::ReturnType;
+  constexpr bool kIsNested = stdexec::sender<ReturnType>;
+  if constexpr (kIsNested) {
+    return std::type_identity<CoAwaitType<ReturnType>> {};
+  } else {
+    return std::type_identity<ReturnType> {};
+  }
+}
 }  // namespace ex_actor::internal::reflect
+
+namespace ex_actor::reflect {
+using ::ex_actor::internal::reflect::EXA_ACTOR_METHODS_KEYWORD;
+}  // namespace ex_actor::reflect

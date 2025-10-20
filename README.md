@@ -41,7 +41,7 @@ exec::task<int> Test() {
   // 3. Call it! It returns a standard sender.
   auto sender = actor.Send<&YourClass::Add>(1) 
                 | stdexec::then([](int value) { return value + 1; });
-  co_return co_await sender;
+  co_return co_await std::move(sender);
 }
 
 int main() {
@@ -67,7 +67,8 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 ## Is it production-ready?
 
-The single-process mode is heavily tested in our company's production environment. Feel free to use it.
+The single-process mode is heavily tested in our company's production environment. While minor bugs can occur due to version divergence btw open source & internal codes.
+The overall quality is good, feel free to use it in production.
 
 The distributed mode is still in early stage. Welcome to have a try and build together with us!
 

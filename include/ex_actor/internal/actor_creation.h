@@ -19,23 +19,6 @@ namespace ex_actor::internal {
 template <class... Classes>
 struct ActorRoster {};
 
-template <class Registry>
-class ActorRegistryMessageBroker : public network::MessageBroker {
- public:
-  ActorRegistryMessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id, Registry& registry)
-      : network::MessageBroker(std::move(node_list), this_node_id), registry_(registry) {
-    StartIOThreads();
-  }
-
- protected:
-  void HandleRequestFromOtherNode(uint64_t receive_request_id, network::ByteBufferType data) override {
-    registry_.HandleNetworkRequest(receive_request_id, std::move(data));
-  }
-
- private:
-  Registry& registry_;
-};
-
 template <ex::scheduler Scheduler, class... ActorClasses>
 class ActorRegistry {
  public:
@@ -55,8 +38,10 @@ class ActorRegistry {
       : is_distributed_mode_(true),
         scheduler_(std::move(scheduler)),
         this_node_id_(this_node_id),
-        message_broker_(std::make_unique<ActorRegistryMessageBroker<ActorRegistry<Scheduler, ActorClasses...>>>(
-            cluster_node_info, this_node_id, *this)) {
+        message_broker_(std::make_unique<network::MessageBroker>(
+            cluster_node_info, this_node_id, [this](uint64_t receive_request_id, network::ByteBufferType data) {
+              HandleNetworkRequest(receive_request_id, std::move(data));
+            })) {
     logging::SetupProcessWideLoggingConfig();
     InitRandomNumGenerator();
     for (const auto& node : cluster_node_info) {
@@ -66,6 +51,10 @@ class ActorRegistry {
   }
 
   ~ActorRegistry() {
+    // stop receiving network requests first
+    if (is_distributed_mode_) {
+      message_broker_->ClusterAlignedStop();
+    }
     // bulk destroy actors
     auto destroy_msg = std::make_unique<DestroyMessage>();
     for (auto& [_, actor] : actor_id_to_actor_) {
@@ -165,8 +154,6 @@ class ActorRegistry {
   }
 
  private:
-  friend class ActorRegistryMessageBroker<ActorRegistry<Scheduler, ActorClasses...>>;
-
   bool is_distributed_mode_ = false;
   Scheduler scheduler_;
   std::mt19937 random_num_generator_;

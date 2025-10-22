@@ -9,30 +9,19 @@
 
 using ex_actor::internal::network::ByteBufferType;
 
-class DummyMessageBroker : public ex_actor::internal::network::MessageBroker {
- public:
-  DummyMessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t this_node_id)
-      : ex_actor::internal::network::MessageBroker(std::move(node_list), this_node_id) {
-    StartIOThreads();
-  }
-
- protected:
-  void HandleRequestFromOtherNode(uint64_t receive_request_id, ByteBufferType data) override {
-    ReplyRequest(receive_request_id, std::move(data));
-  }
-};
-
 TEST(NetworkTest, MessageBrokerTest) {
   auto test_once = []() {
     std::vector<ex_actor::NodeInfo> node_list = {{.node_id = 0, .address = "tcp://127.0.0.1:5201"},
                                                  {.node_id = 1, .address = "tcp://127.0.0.1:5202"},
                                                  {.node_id = 2, .address = "tcp://127.0.0.1:5203"}};
 
-    ex_actor::util::Semaphore unfinished_nodes(node_list.size());
-    auto node_main = [&unfinished_nodes](const std::vector<ex_actor::NodeInfo>& node_list, uint32_t node_id) {
+    auto node_main = [](const std::vector<ex_actor::NodeInfo>& node_list, uint32_t node_id) {
       ex_actor::internal::util::SetThreadName("node_" + std::to_string(node_id));
-      DummyMessageBroker message_broker(node_list,
-                                        /*this_node_id=*/node_id);
+      ex_actor::internal::network::MessageBroker message_broker(
+          node_list,
+          /*this_node_id=*/node_id, [&message_broker](uint64_t receive_request_id, ByteBufferType data) {
+            message_broker.ReplyRequest(receive_request_id, std::move(data));
+          });
       uint32_t to_node_id = (node_id + 1) % node_list.size();
       exec::async_scope scope;
       for (int i = 0; i < 5; ++i) {
@@ -44,9 +33,6 @@ TEST(NetworkTest, MessageBrokerTest) {
                     }));
       }
       stdexec::sync_wait(scope.on_empty());
-      unfinished_nodes.Acquire(1);
-      ex_actor::ex::sync_wait(unfinished_nodes.OnDrained());
-      spdlog::info("node {} finished", node_id);
     };
     std::jthread node_0(node_main, node_list, 0);
     std::jthread node_1(node_main, node_list, 1);

@@ -48,22 +48,24 @@ def find_markdown_files(root_dir: Path) -> List[Path]:
     return sorted(set(md_files))
 
 
-def extract_doc_test_blocks(md_file: Path) -> List[Tuple[str, int]]:
+def extract_doc_test_blocks(md_file: Path) -> List[Tuple[str, int, str]]:
     """
     Extract code blocks between <!-- doc test start --> and <!-- doc test end -->.
-    Returns list of (code_content, line_number) tuples.
+    Returns list of (code_content, line_number, wrapper_script) tuples.
+    wrapper_script is empty string if not specified.
     """
     content = md_file.read_text(encoding='utf-8')
     blocks = []
     
-    # Pattern to match doc test blocks
-    pattern = r'<!-- doc test start -->\s*```(?:cpp|c\+\+)?\s*\n(.*?)```\s*<!-- doc test end -->'
+    # Pattern to match doc test blocks with optional wrapper_script parameter
+    pattern = r'<!-- doc test start(?:,\s*wrapper_script:\s*(\S+))?\s*-->\s*```(?:cpp|c\+\+)?\s*\n(.*?)```\s*<!-- doc test end -->'
     
     for match in re.finditer(pattern, content, re.DOTALL):
-        code = match.group(1)
+        wrapper_script = match.group(1) if match.group(1) else ""
+        code = match.group(2)
         # Find line number
         line_num = content[:match.start()].count('\n') + 1
-        blocks.append((code, line_num))
+        blocks.append((code, line_num, wrapper_script))
     
     return blocks
 
@@ -80,8 +82,14 @@ def copy_template_project(template_dir: Path, dest_dir: Path):
             shutil.copytree(item, dest_dir / item.name)
 
 
-def create_cmake_lists(test_files: List[str], source_dir: Path, cmake_file: Path):
-    """Create CMakeLists.txt with all test executables."""
+def create_cmake_lists(test_files: List[Tuple[str, str]], source_dir: Path, cmake_file: Path):
+    """Create CMakeLists.txt with all test executables.
+    
+    Args:
+        test_files: List of (test_filename, wrapper_script) tuples
+        source_dir: Path to the ex_actor source directory
+        cmake_file: Path where CMakeLists.txt should be written
+    """
     cmake_content = f"""cmake_minimum_required(VERSION 3.25.0 FATAL_ERROR)
 project(doc_tests)
 
@@ -98,9 +106,29 @@ CPMAddPackage(
 
 """
     
-    for test_file in test_files:
+    for test_file, wrapper_script in test_files:
         test_name = Path(test_file).stem
-        cmake_content += f"""
+        
+        if wrapper_script:
+            # Test with wrapper script (similar to multi_process_test)
+            wrapper_name = Path(wrapper_script).name
+            cmake_content += f"""
+add_executable({test_name} {test_file})
+target_link_libraries({test_name} ex_actor::ex_actor)
+configure_file(
+  ${{CMAKE_CURRENT_SOURCE_DIR}}/{wrapper_name}
+  ${{CMAKE_CURRENT_BINARY_DIR}}/{wrapper_name}
+  COPYONLY
+)
+add_test(
+  NAME {test_name}
+  COMMAND {wrapper_name} $<TARGET_FILE:{test_name}>
+)
+set_tests_properties({test_name} PROPERTIES TIMEOUT 3)
+"""
+        else:
+            # Regular test without wrapper script
+            cmake_content += f"""
 add_executable({test_name} {test_file})
 target_link_libraries({test_name} ex_actor::ex_actor)
 add_test(NAME {test_name} COMMAND {test_name})
@@ -212,8 +240,8 @@ def main():
         blocks = extract_doc_test_blocks(md_file)
         if blocks:
             print(f"  {md_file.relative_to(search_root)}: {len(blocks)} block(s)")
-            for i, (code, line_num) in enumerate(blocks):
-                all_blocks.append((md_file, i, code, line_num))
+            for i, (code, line_num, wrapper_script) in enumerate(blocks):
+                all_blocks.append((md_file, i, code, line_num, wrapper_script))
     
     if not all_blocks:
         print("\nNo doc test blocks found!")
@@ -240,16 +268,35 @@ def main():
         
         # Save extracted code blocks as test files
         test_files = []
+        wrapper_scripts = set()  # Track unique wrapper scripts to copy
         print("\nCreating test files:")
-        for md_file, block_idx, code, line_num in all_blocks:
+        for md_file, block_idx, code, line_num, wrapper_script in all_blocks:
             filename = sanitize_filename(md_file.relative_to(search_root), block_idx)
             test_file = temp_dir / filename
             
             test_file.write_text(code, encoding='utf-8')
-            test_files.append(filename)
+            test_files.append((filename, wrapper_script))
             
             rel_md = md_file.relative_to(search_root)
-            print(f"  {filename} (from {rel_md}:{line_num})")
+            if wrapper_script:
+                print(f"  {filename} (from {rel_md}:{line_num}, wrapper: {wrapper_script})")
+                wrapper_scripts.add(wrapper_script)
+            else:
+                print(f"  {filename} (from {rel_md}:{line_num})")
+        
+        # Copy wrapper scripts to temp directory
+        if wrapper_scripts:
+            print("\nCopying wrapper scripts:")
+            for wrapper_script in wrapper_scripts:
+                wrapper_src = project_root / wrapper_script
+                wrapper_dst = temp_dir / Path(wrapper_script).name
+                if wrapper_src.exists():
+                    shutil.copy2(wrapper_src, wrapper_dst)
+                    # Make sure the script is executable
+                    wrapper_dst.chmod(0o755)
+                    print(f"  {wrapper_script}")
+                else:
+                    print(f"  Warning: {wrapper_script} not found!", file=sys.stderr)
         
         # Create CMakeLists.txt
         print("\nGenerating CMakeLists.txt...")

@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
-#include <exception>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -12,6 +11,7 @@
 #include <stdexec/execution.hpp>
 
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
+#include "ex_actor/internal/logging.h"
 
 namespace ex_actor::util {
 /**

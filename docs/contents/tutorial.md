@@ -44,16 +44,23 @@ int main() {
   /*
   4. Everything is setup, you can call the actor's method now.
   
-  The method returns a standard `std::execution` sender, compatible
+  The method returns a standard `std::execution::task`, compatible
   with everything in the `std::execution` ecosystem.
   */
-  auto sender = actor.Send<&YourClass::Add>(1);
+  auto task = actor.Send<&YourClass::Add>(1);
 
   /*
-  5. To execute the sender and consume the result, use `sync_wait`.
-  Note that the sender is not copyable, so you need to use `std::move`.
+  4.1 [Advanced topic, for low-latency scenarios]
+  `std::execution::task` will invoke dynamic memory allocation,
+  For local actors, you can try `SendLocal`, which has better performance.
   */
-  auto [res] = stdexec::sync_wait(std::move(sender)).value();
+  auto sender = actor.SendLocal<&YourClass::Add>(1);
+
+  /*
+  5. To execute the task and consume the result, use `sync_wait`.
+  Note that the task is not copyable, so you need to use `std::move`.
+  */
+  auto [res] = stdexec::sync_wait(std::move(task)).value();
   assert(res == 1);
 }
 ```
@@ -80,20 +87,19 @@ int main() {
   ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/2);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
   ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
-  auto sender = actor.Send<&YourClass::Add>(1);
 
   // --- Example 1: Use `then` to wrap the sender ---
-  auto sender2 = sender | stdexec::then([](int value) {
+  auto task1 = actor.Send<&YourClass::Add>(1) | stdexec::then([](int value) {
     // this line will be executed on the actor's thread.
     return value + 1;
   });
-  auto [res2] = stdexec::sync_wait(sender2).value();
-  assert(res2 == 2);
+  auto [res1] = stdexec::sync_wait(std::move(task1)).value();
+  assert(res1 == 2);
 
 
   // --- Example 2: Coroutine ---
-  auto coroutine = [sender]() -> exec::task<int> {
-    auto res = co_await sender;
+  auto coroutine = [&actor]() -> exec::task<int> {
+    auto res = co_await actor.Send<&YourClass::Add>(1);
     /*
     the following line will be executed on the caller's thread
     - here is the main thread. see below for more details.
@@ -101,8 +107,8 @@ int main() {
     assert(res == 1);
     co_return res + 2;
   };
-  auto [res3] = stdexec::sync_wait(coroutine()).value();
-  assert(res3 == 3);
+  auto [res2] = stdexec::sync_wait(coroutine()).value();
+  assert(res2 == 3);
 }
 ```
 <!-- doc test end -->

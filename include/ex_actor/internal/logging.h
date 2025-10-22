@@ -6,6 +6,10 @@
 #include <rfl/to_view.hpp>
 #include <spdlog/spdlog.h>
 
+#if __cpp_lib_stacktrace >= 202011L
+#include <stacktrace>
+#endif
+
 namespace ex_actor::internal::logging {
 
 inline void InstallFallbackExceptionHandler() {
@@ -21,6 +25,9 @@ inline void InstallFallbackExceptionHandler() {
     } else {
       spdlog::critical("terminate called without an active exception");
     }
+#if __cpp_lib_stacktrace >= 202011L
+    spdlog::info("backtrace:\n{}", std::to_string(std::stacktrace::current()));
+#endif
     std::abort();
   });
 };

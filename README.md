@@ -15,12 +15,12 @@ Key Features:
 
 1. **Easy to Use** - Turn your existing class into an actor. No arcane macros and inheritance.
 2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide some out-of-box, e.g. work-sharing & work-stealing thread pool.
-3. **Standard-Compliant API** - Our actor returns a standard sender, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
+3. **Standard-Compliant API** - Our actor returns a standard `std::execution::task`, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
 
 
 # API Glance
 
-Currently we're based on std::execution's early implementation - [stdexec](https://github.com/NVIDIA/stdexec),
+Note: currently we're based on std::execution's early implementation - [stdexec](https://github.com/NVIDIA/stdexec),
 so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` in the following example.
 
 <!-- doc test start -->
@@ -41,10 +41,10 @@ exec::task<int> Test() {
   // 2. Create the actor.
   ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
 
-  // 3. Call it! It returns a standard sender.
-  auto sender = actor.Send<&YourClass::Add>(1) 
-                | stdexec::then([](int value) { return value + 1; });
-  co_return co_await std::move(sender);
+  // 3. Call it! It returns a `std::execution::task`.
+  auto task = actor.Send<&YourClass::Add>(1) 
+              | stdexec::then([](int value) { return value + 1; });
+  co_return co_await std::move(task);
 }
 
 int main() {
@@ -74,16 +74,10 @@ The single-process mode is heavily tested in our company's production environmen
 
 The distributed mode is still in early stage. Welcome to have a try and build together with us!
 
-# The Team Behind `ex_actor`
+## The Team Behind `ex_actor`
 
-We are Metabit Trading, a tech driven quant trading company.
-We are dedicated to merging the precision of mathematics with the innovation of computer science,
-leveraging advanced artificial intelligence (AI) and machine learning (ML) to drive investment decisions and strategy development.
+We are [Qianxiang (乾象投资)](https://www.qianxiang.cn/), founded in 2018, a technology-driven investment management firm with a focus on artificial intelligence and machine learning. We deeply integrate and enhance machine learning algorithms, applying them to financial data characterized by extremely low signal-to-noise ratios, and thereby generating sustainable returns with low risks for our investors.
 
-During building our trading system, we find that there is no existing actor framework in the market fits our needs, so we build one
-from scratch.
-Now `ex_actor` serves as a core part of our trading system. With its clean API and pluggability of threading model,
-we are able to unify the low-latency and high-throughput workflow together, building a very clean codebase.
+In the process of engineering our trading system, we discovered that no existing actor framework on the market could meet our specific requirements. Consequently, we built one from the ground up. Today, ex_actor serves as a core part of our trading system. Its clean API and pluggable threading model allow us to unify low-latency and high-throughput workflows seamlessly, resulting in a remarkably clean and maintainable codebase.
 
-While this framework has done a lot in our company. We think there should be a wider use case in the community, so we open source this
-project. Welcome to have a try and build together with us!
+While this framework has successful application internally, we believe there are more valuable use case in the community which can make it more sophisticated. We are excited to open-source ex_actor and look forward to building it together with you!

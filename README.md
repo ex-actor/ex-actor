@@ -54,7 +54,11 @@ int main() {
 ```
 <!-- doc test end -->
 
-**Check our 📖 [Documentation](https://ex-actor.github.io/ex-actor/) for more details like [installation](https://ex-actor.github.io/ex-actor/installation/) & [tutorials](https://ex-actor.github.io/ex-actor/tutorial/).**
+**Check 📘[Tutorials](https://ex-actor.github.io/ex-actor/tutorial/) page for more examples!**
+
+## Installation
+
+See [installation](https://ex-actor.github.io/ex-actor/installation/) page.
 
 # FAQs
 

@@ -37,8 +37,7 @@ class PingWorker {
 };
 
 TEST(DistributedTest, ConstructionInDistributedMode) {
-  ex_actor::util::Semaphore done_nodes(2);
-  auto node_main = [&done_nodes](uint32_t this_node_id) {
+  auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     ex_actor::ActorRoster<A, B, PingWorker> roster;
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
@@ -68,11 +67,6 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
     auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
     ASSERT_EQ(ping_res, "ack from Alice, msg got: hello");
-
-    // wait other nodes done before destroying actor registry, or message will be lost
-    done_nodes.Acquire(1);
-    ex_actor::ex::sync_wait(done_nodes.OnDrained());
-    spdlog::info("node {} done", this_node_id);
   };
 
   std::jthread node_0(node_main, 0);

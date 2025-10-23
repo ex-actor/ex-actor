@@ -8,7 +8,7 @@ cd "$SRC" || exit
 set -e -x
 
 pushd "${GITHUB_WORKSPACE}"/..
-  zip -r /tmp/code_after_merge.zip ex-actor -x "*.git*" -x "*build*"
+  zip -r /tmp/code_after_merge.zip ex-actor -x "*.git*" -x "*build*" -x "*bazel-*" -x "*bazel*external" -x "*.cache*"
   zip_sha256=$(sha256sum /tmp/code_after_merge.zip | awk '{print $1}')
 popd
 

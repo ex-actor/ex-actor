@@ -2,3 +2,4 @@ build
 compile_commands.json
 .cache
 docs/.config
+MODULE.bazel.lock

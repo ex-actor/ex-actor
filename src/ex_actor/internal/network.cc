@@ -1,24 +1,57 @@
 #include "ex_actor/internal/network.h"
 
+#include <atomic>
 #include <chrono>
 #include <thread>
 
 #include <spdlog/spdlog.h>
-#include <zmq_addon.hpp>
 
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/serialization.h"
 
 namespace ex_actor::internal::network {
-MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t this_node_id)
-    : node_list_(std::move(node_list)), this_node_id_(this_node_id) {
+
+MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t this_node_id,
+                             std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler)
+    : node_list_(std::move(node_list)),
+      this_node_id_(this_node_id),
+      request_handler_(std::move(request_handler)),
+      quit_latch_(node_list_.size()) {
   logging::SetupProcessWideLoggingConfig();
   EstablishConnections();
-}
-
-void MessageBroker::StartIOThreads() {
   send_thread_ = std::jthread([this](const std::stop_token& stop_token) { SendProcessLoop(stop_token); });
   recv_thread_ = std::jthread([this](const std::stop_token& stop_token) { ReceiveProcessLoop(stop_token); });
+}
+
+MessageBroker::~MessageBroker() {
+  if (!stopped_) {
+    ClusterAlignedStop();
+  }
+}
+
+void MessageBroker::ClusterAlignedStop() {
+  // tell all other nodes: I'm going to quit
+  spdlog::info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_id_);
+  for (auto& node : node_list_) {
+    if (node.node_id != this_node_id_) {
+      auto sender = SendRequest(node.node_id, ByteBufferType {}, /*quit_flag=*/true);
+      // TODO: async_scope.spawn() won't compile, figure it out later
+      stdexec::sync_wait(std::move(sender));
+    }
+  }
+  quit_latch_.count_down();
+
+  // wait until all nodes are going to quit
+  // TODO: add heartbeat so it won't block forever when node dies unexpectedly
+  quit_latch_.wait();
+  stopped_ = true;
+  spdlog::info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_id_);
+  // stop io threads first
+  send_thread_.request_stop();
+  recv_thread_.request_stop();
+  send_thread_.join();
+  recv_thread_.join();
+  spdlog::info("[Cluster Aligned Stop] Node {}'s io threads stopped, cluster aligned stop completed", this_node_id_);
 }
 
 void MessageBroker::EstablishConnections() {
@@ -48,12 +81,13 @@ void MessageBroker::EstablishConnections() {
   }
 }
 
-MessageBroker::SendRequestSender MessageBroker::SendRequest(uint32_t to_node_id, ByteBufferType data) {
+MessageBroker::SendRequestSender MessageBroker::SendRequest(uint32_t to_node_id, ByteBufferType data, bool quit_flag) {
   EXA_THROW_CHECK_NE(to_node_id, this_node_id_) << "Cannot send message to current node";
   Identifier identifier {
       .request_node_id = this_node_id_,
       .response_node_id = to_node_id,
       .request_id_in_node = send_request_id_counter_.fetch_add(1),
+      .quit_flag = quit_flag,
   };
   return SendRequestSender {
       .identifier = identifier,
@@ -72,11 +106,8 @@ void MessageBroker::ReplyRequest(uint64_t receive_request_id, ByteBufferType dat
   });
 }
 
-void MessageBroker::PushOperation(TypeErasedOperation* operation) {
-  {
-    std::scoped_lock lock(map_mutex_);
-    send_request_id_to_operation_.Insert(operation->identifier.request_id_in_node, operation);
-  }
+void MessageBroker::PushOperation(TypeErasedSendOperation* operation) {
+  send_request_id_to_operation_.Insert(operation->identifier.request_id_in_node, operation);
   pending_send_operations_.Push(operation);
 }
 
@@ -91,6 +122,10 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
       multi.add(std::move(operation->data));
       auto& send_socket = node_id_to_send_socket_.At(operation->identifier.response_node_id);
       EXA_THROW_CHECK(multi.send(send_socket));
+      if (operation->identifier.quit_flag) {
+        // quit operation has no response, complete it immediately
+        operation->Complete(ByteBufferType {});
+      }
     }
     while (auto optional_reply_operation = pending_reply_operations_.TryPop()) {
       auto& reply_operation = optional_reply_operation.value();
@@ -114,30 +149,37 @@ void MessageBroker::ReceiveProcessLoop(const std::stop_token& stop_token) {
     if (!multi.recv(recv_socket_)) {
       continue;
     }
+    HandleReceivedMessage(std::move(multi));
+  }
+}
 
-    // Validate message structure: [identifier][data]
-    EXA_THROW_CHECK_EQ(multi.size(), 2) << "Expected 2-part message, got " << multi.size() << " parts";
+void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
+  // Validate message structure: [identifier][data]
+  EXA_THROW_CHECK_EQ(multi.size(), 2) << "Expected 2-part message, got " << multi.size() << " parts";
 
-    // Extract frames
-    zmq::message_t identifier_bytes = multi.pop();
-    zmq::message_t data_bytes = multi.pop();
+  // Extract frames
+  zmq::message_t identifier_bytes = multi.pop();
+  zmq::message_t data_bytes = multi.pop();
 
-    auto identifier =
-        internal::serde::Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
-
-    if (identifier.request_node_id == this_node_id_) {
-      // Response from remote node
-      TypeErasedOperation* operation = send_request_id_to_operation_.At(identifier.request_id_in_node);
-      send_request_id_to_operation_.Erase(identifier.request_id_in_node);
-      operation->Complete(std::move(data_bytes));
-    } else if (identifier.response_node_id == this_node_id_) {
-      // Request from remote node - pass to handler, which will send response back
-      auto receive_request_id = received_request_id_counter_.fetch_add(1);
-      received_request_id_to_identifier_.Insert(receive_request_id, identifier);
-      HandleRequestFromOtherNode(receive_request_id, std::move(data_bytes));
-    } else {
-      EXA_THROW << "Invalid identifier, " << EXA_DUMP_VARS(identifier);
-    }
+  auto identifier = internal::serde::Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
+  if (identifier.quit_flag) {
+    EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
+    spdlog::info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
+    quit_latch_.count_down();
+    return;
+  }
+  if (identifier.request_node_id == this_node_id_) {
+    // Response from remote node
+    TypeErasedSendOperation* operation = send_request_id_to_operation_.At(identifier.request_id_in_node);
+    send_request_id_to_operation_.Erase(identifier.request_id_in_node);
+    operation->Complete(std::move(data_bytes));
+  } else if (identifier.response_node_id == this_node_id_) {
+    // Request from remote node - pass to handler, which will send response back
+    auto receive_request_id = received_request_id_counter_.fetch_add(1);
+    received_request_id_to_identifier_.Insert(receive_request_id, identifier);
+    request_handler_(receive_request_id, std::move(data_bytes));
+  } else {
+    EXA_THROW << "Invalid identifier, " << EXA_DUMP_VARS(identifier);
   }
 }
 }  // namespace ex_actor::internal::network

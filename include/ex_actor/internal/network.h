@@ -4,15 +4,14 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
-#include <iostream>
+#include <latch>
 #include <mutex>
 #include <thread>
-#include <unordered_map>
 
 #include <exec/task.hpp>
 #include <zmq.hpp>
+#include <zmq_addon.hpp>
 
-#include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
@@ -29,35 +28,33 @@ struct Identifier {
   uint32_t request_node_id;
   uint32_t response_node_id;
   uint64_t request_id_in_node;
+  bool quit_flag = false;
 };
 
 class MessageBroker {
  public:
-  explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id);
-  virtual ~MessageBroker() = default;
+  explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
+                         std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler);
+  ~MessageBroker();
 
-  void StartIOThreads();
+  void ClusterAlignedStop();
 
   // -------- std::execution sender adaption start--------
-  struct TypeErasedOperation {
-    enum class Type : uint8_t {
-      kRequest = 0,
-      kReply = 1,
-    };
-    virtual ~TypeErasedOperation() = default;
-    virtual void Complete(ByteBufferType response_data) = 0;
-    TypeErasedOperation(Type type, Identifier identifier, ByteBufferType data, MessageBroker* message_broker)
-        : type(type), identifier(identifier), data(std::move(data)), message_broker(message_broker) {}
-    Type type;
+  struct TypeErasedSendOperation {
+    virtual ~TypeErasedSendOperation() = default;
+    virtual void Complete(ByteBufferType /*response_data*/) {
+      EXA_THROW << "TypeErasedOperation::Complete should not be called";
+    }
+    TypeErasedSendOperation(Identifier identifier, ByteBufferType data, MessageBroker* message_broker)
+        : identifier(identifier), data(std::move(data)), message_broker(message_broker) {}
     Identifier identifier;
     ByteBufferType data;
     MessageBroker* message_broker {};
   };
   template <ex::receiver R>
-  struct SendRequestOperation : TypeErasedOperation {
+  struct SendRequestOperation : TypeErasedSendOperation {
     SendRequestOperation(Identifier identifier, ByteBufferType data, MessageBroker* message_broker, R receiver)
-        : TypeErasedOperation(Type::kRequest, identifier, std::move(data), message_broker),
-          receiver(std::move(receiver)) {}
+        : TypeErasedSendOperation(identifier, std::move(data), message_broker), receiver(std::move(receiver)) {}
     R receiver;
     std::atomic_bool started = false;
     void start() noexcept {
@@ -87,18 +84,16 @@ class MessageBroker {
    * @brief Send buffer to the remote node.
    * @return A sender containing raw response buffer.
    */
-  SendRequestSender SendRequest(uint32_t to_node_id, ByteBufferType data);
+  SendRequestSender SendRequest(uint32_t to_node_id, ByteBufferType data, bool quit_flag = false);
 
   void ReplyRequest(uint64_t receive_request_id, ByteBufferType data);
 
- protected:
-  virtual void HandleRequestFromOtherNode(uint64_t receive_request_id, ByteBufferType data) = 0;
-
  private:
   void EstablishConnections();
-  void PushOperation(TypeErasedOperation* operation);
+  void PushOperation(TypeErasedSendOperation* operation);
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
+  void HandleReceivedMessage(zmq::multipart_t multi);
 
   struct ReplyOperation {
     Identifier identifier;
@@ -115,13 +110,15 @@ class MessageBroker {
   util::LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
   zmq::socket_t recv_socket_ {context_, zmq::socket_type::dealer};
 
-  std::jthread send_thread_;
-  std::jthread recv_thread_;
-  util::LinearizableUnboundedQueue<TypeErasedOperation*> pending_send_operations_;
-  util::LockGuardedMap<uint64_t, TypeErasedOperation*> send_request_id_to_operation_;
+  util::LinearizableUnboundedQueue<TypeErasedSendOperation*> pending_send_operations_;
+  util::LockGuardedMap<uint64_t, TypeErasedSendOperation*> send_request_id_to_operation_;
   util::LinearizableUnboundedQueue<ReplyOperation> pending_reply_operations_;
   util::LockGuardedMap<uint64_t, Identifier> received_request_id_to_identifier_;
-  std::mutex map_mutex_;
+
+  std::jthread send_thread_;
+  std::jthread recv_thread_;
+  bool stopped_ = false;
+  std::latch quit_latch_;
 };
 
 }  // namespace ex_actor::internal::network

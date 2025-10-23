@@ -71,5 +71,5 @@ jobs:
         # Execute tests defined by the CMake configuration. Note that --build-config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
         # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
         run: >
-          export TSAN_OPTIONS=suppressions=${{ github.workspace }}/test/tsan_suppression.txt
+          TSAN_OPTIONS=suppressions=${{ github.workspace }}/test/tsan_suppression.txt
           ctest --build-config ${{ matrix.build_type }} --output-on-failure

@@ -3,8 +3,12 @@ site_description: "A modern C++ actor framework based on std::execution"
 site_author: "Lixin Wei"
 docs_dir: contents
 site_url: https://ex-actor.github.io/ex-actor/
+repo_name: ex-actor/ex-actor
+edit_uri: edit/main/docs/contents
 theme:
   name: material
+  icon:
+    repo: fontawesome/brands/github
   palette:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
@@ -38,6 +42,7 @@ theme:
     - search.suggest
     - search.highlight
     - search.share
+    - content.action.edit
 extra:
   social:
     - icon: fontawesome/brands/github

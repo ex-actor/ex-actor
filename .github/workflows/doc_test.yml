@@ -19,6 +19,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build documentation
+        run: |
+          curl -fsSL https://d2lang.com/install.sh | sh -s --
+          ./docs/build.sh
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

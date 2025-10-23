@@ -2,4 +2,6 @@ build
 compile_commands.json
 .cache
 docs/.config
+docs/.config
+docs/site
 MODULE.bazel.lock

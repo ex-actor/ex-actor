@@ -78,6 +78,6 @@ The distributed mode is still in early stage. Welcome to have a try and build to
 
 We are [Qianxiang (乾象投资)](https://www.qianxiang.cn/), founded in 2018, a technology-driven investment management firm with a focus on artificial intelligence and machine learning. We deeply integrate and enhance machine learning algorithms, applying them to financial data characterized by extremely low signal-to-noise ratios, and thereby generating sustainable returns with low risks for our investors.
 
-In the process of engineering our trading system, we discovered that no existing actor framework on the market could meet our specific requirements. Consequently, we built one from the ground up. Today, ex_actor serves as a core part of our trading system. Its clean API and pluggable threading model allow us to unify low-latency and high-throughput workflows seamlessly, resulting in a remarkably clean and maintainable codebase.
+In the process of engineering our trading system, we discovered that no existing actor framework on the market could meet our specific requirements. Consequently, we built one from the ground up.
 
-While this framework has successful application internally, we believe there are more valuable use case in the community which can make it more sophisticated. We are excited to open-source ex_actor and look forward to building it together with you!
+While this framework has some successful applications internally, we believe there are more valuable use case in the community which can make it more sophisticated. So we open-source ex_actor, look forward to building it together with you!

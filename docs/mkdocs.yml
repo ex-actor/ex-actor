@@ -2,6 +2,7 @@ site_name: "ex_actor"
 site_description: "A modern C++ actor framework based on std::execution"
 site_author: "Lixin Wei"
 docs_dir: contents
+site_url: https://ex-actor.github.io/ex-actor/
 theme:
   name: material
   palette:

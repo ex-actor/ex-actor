@@ -1,8 +1,10 @@
+#include <atomic>
 #include <chrono>
 
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
+#include "ex_actor/internal/actor_config.h"
 
 namespace ex = ex_actor::ex;
 
@@ -35,4 +37,35 @@ TEST(SchedulerTest, ActorTaskShouldBeStoppable) {
   }
   scope.request_stop();
   ex::sync_wait(scope.on_empty());
+}
+
+TEST(SchedulerTest, PrioritySchedulerTest) {
+  ex_actor::PriorityThreadPool thread_pool(1, /*start_workers_immediately=*/false);
+  auto scheduler = thread_pool.GetScheduler();
+  std::atomic_int count = 0;
+  auto sender1 = ex::schedule(scheduler) | ex::then([&count]() {
+                   EXPECT_EQ(count, 0);
+                   count++;
+                 }) |
+                 ex::write_env(ex::prop {ex_actor::get_std_exec_env,
+                                         std::unordered_map<std::string, std::string> {{"priority", "1"}}});
+  auto sender2 = ex::schedule(scheduler) | ex::then([&count]() {
+                   EXPECT_EQ(count, 2);
+                   count++;
+                 }) |
+                 ex::write_env(ex::prop {ex_actor::get_std_exec_env,
+                                         std::unordered_map<std::string, std::string> {{"priority", "3"}}});
+  auto sender3 = ex::schedule(scheduler) | ex::then([&count]() {
+                   EXPECT_EQ(count, 1);
+                   count++;
+                 }) |
+                 ex::write_env(ex::prop {ex_actor::get_std_exec_env,
+                                         std::unordered_map<std::string, std::string> {{"priority", "2"}}});
+  exec::async_scope scope;
+  scope.spawn(sender1);
+  scope.spawn(sender2);
+  scope.spawn(sender3);
+  thread_pool.StartWorkers();
+  ex::sync_wait(scope.on_empty());
+  ASSERT_EQ(count, 3);
 }

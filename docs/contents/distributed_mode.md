@@ -68,6 +68,11 @@ int main(int argc, char** argv) {
 }
 ```
 <!-- doc test end -->
+
+Compile this program into a binary, let's say `distributed_node`.
+
+In one shell, run: `./distributed_node 0`, in another shell, run: `./distributed_node 1`. Both processes should exit normally.
+
 ## Serialization
 
 We choose [reflect-cpp](https://github.com/getml/reflect-cpp) as the serialization library.

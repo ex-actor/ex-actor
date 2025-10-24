@@ -7,9 +7,15 @@
 
 **ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework turns your C++ class into an async service. You can easily write distributed applications with it, without caring about thread synchronization and network.
+This framework turns you C++ class into a remote service(so called actor). All method calls to it will be pushed into a queue and executed in serial. So in your class you don't need any lock, just focus on your logic.
 
-Key Features:
+When the actor is local, args in method will be moved directly in memory. When it's a remote actor, I'll help you to serialize them, send through network, and get the return value back.
+
+This programming model is called "Actor Model". Where each actor can receive message, execute it, and send to other actors. It's a very easy way to write highly parallelized programs, because you don't need any locks in your code. Just write normal classes.
+
+[This video](https://www.youtube.com/watch?v=ELwEdb_pD0k) gives a good introduction to the Actor Model from high level.
+
+# Key Features
 
 1. **Easy to Use** - Turn your existing class into an actor. No arcane macros and inheritance.
 2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide some out-of-box, e.g. work-sharing & work-stealing thread pool.

@@ -7,7 +7,7 @@
 
 **ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework turns you C++ class into a remote service(so called actor). All method calls to it will be pushed into a queue and executed in serial. So in your class you don't need any lock, just focus on your logic.
+This framework turns you C++ class into a remote service(so called actor). All method calls to it will be pushed into the mailbox(a queue) of the actor and executed in serial. So in your class you don't need any lock, just focus on your logic.
 
 When the actor is local, args in method will be moved directly in memory. When it's a remote actor, I'll help you to serialize them, send through network, and get the return value back.
 

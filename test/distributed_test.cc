@@ -30,7 +30,7 @@ class PingWorker {
 
   std::string Ping(const std::string& message) { return "ack from " + name_ + ", msg got: " + message; }
 
-  std::string Error() { throw std::runtime_error("error"); }
+  std::string Error() { throw std::runtime_error("error from " + name_); }
 
   static constexpr std::tuple kActorMethods = {&PingWorker::Ping, &PingWorker::Error};
 

@@ -82,12 +82,13 @@ TEST(BasicApiTest, NestActorRefCase) {
 
 TEST(BasicApiTest, CreateActorWithFullConfig) {
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-  auto counter = registry.CreateActor<Counter>(ex_actor::ActorConfig {.max_message_executed_per_activation = 10});
-  registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
+  auto counter = registry.CreateActor<Counter>(
+      ex_actor::ActorConfig {.max_message_executed_per_activation = 10, .actor_name = "counter1"});
+  registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter2"});
 
   static_assert(rfl::internal::has_reflection_type_v<ex_actor::ActorRef<Counter>>);
   // test pass by lvalue
-  ex_actor::ActorConfig config = {.max_message_executed_per_activation = 10};
+  ex_actor::ActorConfig config = {.max_message_executed_per_activation = 10, .actor_name = "proxy"};
   registry.CreateActor<Proxy>(config, counter);
-  registry.DestroyActor(counter);
+  // registry.DestroyActor(counter);
 }

@@ -55,11 +55,6 @@ class ActorRegistry {
     if (is_distributed_mode_) {
       message_broker_->ClusterAlignedStop();
     }
-    // bulk destroy actors
-    auto destroy_msg = std::make_unique<DestroyMessage>();
-    for (auto& [_, actor] : actor_id_to_actor_) {
-      actor->PushMessage(destroy_msg.get());
-    }
     actor_id_to_actor_.clear();
   }
 

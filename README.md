@@ -66,6 +66,14 @@ int main() {
 
 See [installation](https://ex-actor.github.io/ex-actor/installation/) page.
 
+## Contributing
+
+For any questions, bugs or feature requests, open an issue to let us know! We'll try our best to help you!
+
+We'll also be very glad if you can implement anything yourself! Just open a pull request, we'll review and merge it in short time.
+
+For more guides, see [contributing](https://ex-actor.github.io/ex-actor/contributing/) page.
+
 # FAQs
 
 ## `std::execution` is in C++26, why you only requires C++20?

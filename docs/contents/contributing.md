@@ -1,11 +1,27 @@
 # Contributing Guide
 
-First thank you for considering to contribute to `ex_actor`! In order to make the contribution process smoother, please follow the following guidelines:
+First thank you for considering to contribute to `ex_actor`!
 
-- For small changes, you can directly open a pull request, we'll review and merge it in short time.
+## Have Questions about any part of the project?
 
-- ⚠️ For non-trivial changes which will cost you a lot time to implement, in order to save both our time, please open an issue to discuss with us first.
+Open an issue, we'll try our best to help you!
+
+## Bugs & Features Requests
+
+If you find any bugs or have any feature requests, welcome to open an issue to let us know!
+
+For small changes, you can directly open a pull request without an issue, we'll review and merge it in short time.
+
+⚠️ For non-trivial changes which will cost you a lot time to implement, in order to save both our time, please open an issue to discuss with us first.
 By this way we can refine the design in advance and avoid potential duplicate work.
+
+## Roadmap
+
+You can find our roadmap [here](https://github.com/orgs/ex-actor/projects/2). That's what we want to achieve in the future.
+
+Have a look and pick what you're interested in, discuss with us in the related issue, and start coding!
+
+If you have other ideas, welcome to open an issue to discuss with us!
 
 ## How to build from source
 

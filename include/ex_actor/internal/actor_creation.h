@@ -256,7 +256,7 @@ class ActorRegistry {
       }
     }
     if constexpr (kMethodIndex + 1 < std::tuple_size_v<decltype(kActorMethodsTuple)>) {
-      return FindMethodAndCallIt<kMethodIndex + 1>(method_index, actor_id, receive_request_id, data, size);
+      return FindMethodAndCallIt<ActorClass, kMethodIndex + 1>(method_index, actor_id, receive_request_id, data, size);
     }
     EXA_THROW << "Can't find method in actor class, method_index=" << method_index
               << ", class=" << typeid(ActorClass).name();

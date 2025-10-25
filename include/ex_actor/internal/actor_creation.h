@@ -6,6 +6,7 @@
 #include <random>
 #include <type_traits>
 #include <unordered_map>
+#include <variant>
 
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/actor_ref.h"
@@ -69,7 +70,7 @@ class ActorRegistry {
   template <class UserClass, class... Args>
   ActorRef<UserClass> CreateActor(ActorConfig config, Args&&... args) {
     EXA_THROW_CHECK_EQ(config.node_id, this_node_id_)
-        << "`CreteActor` can only be used to create actor at current node, to create actor at remote node, use "
+        << "`CreateActor` can only be used to create actor at current node, to create actor at remote node, use "
            "`CreateActorUseStaticCreateFn`, because we need a unique construction signature.";
     auto actor_id = GenerateRandomActorId();
     auto actor =
@@ -78,6 +79,12 @@ class ActorRegistry {
                                       GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                       message_broker_.get());
     actor_id_to_actor_[actor_id] = std::move(actor);
+    if (config.actor_name) {
+      const auto& name = *config.actor_name;
+      EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
+      actor_name_to_ref_.emplace(name, AnyActorRef(std::in_place_type_t<ActorRef<UserClass>>, handle));
+      actor_id_to_name_[actor_id] = name;
+    }
     return handle;
   }
 
@@ -110,6 +117,12 @@ class ActorRegistry {
                                         GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                         message_broker_.get());
       actor_id_to_actor_[actor_id] = std::move(actor);
+      if (config.actor_name) {
+        const auto& name = *config.actor_name;
+        EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
+        actor_name_to_ref_.emplace(name, AnyActorRef(std::in_place_type_t<ActorRef<UserClass>>, handle));
+        actor_id_to_name_[actor_id] = name;
+      }
       return handle;
     }
 
@@ -149,8 +162,20 @@ class ActorRegistry {
   void DestroyActor(const ActorRef<UserClass>& actor_ref) {
     auto actor_id = actor_ref.GetActorId();
     EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
+    if (auto it = actor_id_to_name_.find(id); it != actor_id_to_name_.end()) {
+      actor_name_to_ref_.erase(it->second);
+      actor_id_to_name_.erase(it);
+    }
     auto& actor = actor_id_to_actor_.at(actor_id);
     actor_id_to_actor_.erase(actor_id);
+  }
+
+  template <class UserClass>
+  inline std::optional<ActorRef<UserClass>> GetActorRefByName(std::string_view name) const {
+    if (auto it = actor_name_to_ref_.find(name); it != actor_name_to_ref_.end()) {
+      if (auto p = std::get_if<ActorRef<UserClass>>(&it->second)) return *p;
+    }
+    return std::nullopt;
   }
 
  private:
@@ -162,6 +187,9 @@ class ActorRegistry {
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unique_ptr<network::MessageBroker> message_broker_;
   exec::async_scope async_scope_;
+  using AnyActorRef = std::variant<ActorRef<ActorClasses>...>;
+  std::unordered_map<std::string, AnyActorRef> actor_name_to_ref_;
+  std::unordered_map<std::uint64_t, std::string> actor_id_to_name_;
 
   template <class UserClass>
   std::optional<uint64_t> GetActorClassIndexInRoster() {

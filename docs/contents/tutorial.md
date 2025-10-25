@@ -136,7 +136,7 @@ In the second example, the coroutine's scheduler is the `run_loop` scheduler in 
 
 ## Chain actors - send message from one actor to another
 
-This examples shows how to call an actor's method from another actor.
+This examples shows hot to call an actor's method from another actor.
 
 The main thread calls `Proxy`, then `Proxy` calls `Counter`.
 

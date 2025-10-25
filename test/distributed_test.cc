@@ -30,7 +30,9 @@ class PingWorker {
 
   std::string Ping(const std::string& message) { return "ack from " + name_ + ", msg got: " + message; }
 
-  static constexpr std::tuple kActorMethods = {&PingWorker::Ping};
+  std::string Error() { throw std::runtime_error("error"); }
+
+  static constexpr std::tuple kActorMethods = {&PingWorker::Ping, &PingWorker::Error};
 
  private:
   std::string name_;
@@ -67,6 +69,12 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
     auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
     ASSERT_EQ(ping_res, "ack from Alice, msg got: hello");
+
+    // TODO: test error propagation
+    auto error = ping_worker.Send<&PingWorker::Error>();
+
+    // ASSERT_THAT([&error] { stdexec::sync_wait(std::move(error)); },
+    //             Throws<std::exception>(Property(&std::exception::what, HasSubstr("error"))));
   };
 
   std::jthread node_0(node_main, 0);
@@ -75,11 +83,3 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
   node_0.join();
   node_1.join();
 }
-
-// SCENARIO("construction exceptions should be propagated") {}
-
-// SCENARIO("remote call exceptions should be propagated") {}
-
-// SCENARIO("actor ref can pass through network") {}
-
-// SCENARIO("get remote actor by its name") {}

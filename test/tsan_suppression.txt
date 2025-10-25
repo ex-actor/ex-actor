@@ -1,7 +1,3 @@
 # ThreadSanitizer suppressions file for project X.
 
 race:zmq::
-
-# fix later
-race:exec::__task::basic_task
-race:exec::__scope::__spawn_op

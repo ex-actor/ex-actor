@@ -143,7 +143,7 @@ class Actor : public TypeErasedActor {
   }
 
   ~Actor() override {
-    if (destroy_message_pushed_.load(std::memory_order_acquire)) {
+    if (!destroy_message_pushed_) {
       ex::sync_wait(async_scope_.on_empty());
       return;
     }
@@ -154,7 +154,7 @@ class Actor : public TypeErasedActor {
 
   void PushMessage(ActorMessage* task) override {
     if (task->GetType() == ActorMessage::Type::kDestroy) [[unlikely]] {
-      destroy_message_pushed_.store(true, std::memory_order_release);
+      destroy_message_pushed_ = true;
     }
     mailbox_.Push(task);
     pending_message_count_.fetch_add(1, std::memory_order_release);
@@ -171,7 +171,7 @@ class Actor : public TypeErasedActor {
   std::unique_ptr<UserClass> user_class_instance_;
   exec::async_scope async_scope_;
   std::atomic_bool activated_ = false;
-  std::atomic_bool destroy_message_pushed_ = false;
+  bool destroy_message_pushed_ = false;
 
   // push self to the executor
   void TryActivate() {

@@ -91,6 +91,7 @@ Checks: >
   -misc-include-cleaner,
   -performance-avoid-endl,
   -readability-isolate-declaration,
+  -readability-convert-member-functions-to-static,
 
 FormatStyle: file
 CheckOptions:

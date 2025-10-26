@@ -136,7 +136,7 @@ In the second example, the coroutine's scheduler is the `run_loop` scheduler in 
 
 ## Chain actors - send message from one actor to another
 
-This examples shows hot to call an actor's method from another actor.
+This examples shows how to call an actor's method from another actor.
 
 The main thread calls `Proxy`, then `Proxy` calls `Counter`.
 
@@ -252,6 +252,9 @@ scheduler.push_task([actor = std::move(actor)] {
       break;
     }
   }
+  if (still has messages in the mailbox) {
+    push again to the scheduler
+  }
 });
 ```
 
@@ -265,3 +268,4 @@ The whole schedule process is like this:
 3. we check if the actor is activated, if not, we activate it, push an activation task(see the above pseudo code) to the scheduler.
 4. the scheduler get the task, execute it, in which the actor will pull messages from its mailbox and execute them.
 5. the actor runs out of messages, or max messages executed per activation is reached, the activation task finishes.
+6. if there are still messages in the mailbox, the activation task will be pushed again to the scheduler.

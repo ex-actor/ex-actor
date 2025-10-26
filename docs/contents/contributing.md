@@ -30,12 +30,12 @@ cd ex_actor
 ./scripts/regen_build_dir.sh
 
 cd build
-#build
-cmake --build . --config Release
-# install
-cmake --install . --prefix <your_install_prefix>
-# test
-ctest -C Release --output-on-failure
+# build
+cmake --build . --config Debug
+# run all test
+ctest -C Debug --output-on-failure
+# run specific test
+./test/Debug/basic_api_test
 ```
 
 ## Clangd related

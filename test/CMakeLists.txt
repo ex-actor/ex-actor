@@ -9,16 +9,22 @@ CPMAddPackage(
 
 
 function(ex_actor_test NAME)
+  cmake_parse_arguments(TEST "" "TIMEOUT" "" ${ARGN})
+  if(NOT DEFINED TEST_TIMEOUT)
+    set(TEST_TIMEOUT 3)
+  endif()
   add_executable(${NAME} ${NAME}.cc)
   target_link_libraries(${NAME} PRIVATE ex_actor GTest::gtest_main GTest::gmock)
   add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${NAME}>)
-  set_tests_properties(${NAME} PROPERTIES TIMEOUT 3)
+  set_tests_properties(${NAME} PROPERTIES TIMEOUT ${TEST_TIMEOUT})
 endfunction()
 
 ex_actor_test(basic_api_test)
 ex_actor_test(util_test)
 ex_actor_test(scheduler_test)
 ex_actor_test(stress_test)
+ex_actor_test(shuffle_merge_test TIMEOUT 10)
+ex_actor_test(complex_api_test)
 ex_actor_test(distributed_test)
 ex_actor_test(network_test)
 

@@ -47,17 +47,17 @@ int main() {
   The method returns a standard `std::execution::task`, compatible
   with everything in the `std::execution` ecosystem.
 
-  This method requires your args can be serialized by reflect-cpp, if you met errors
-  like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/ to
-  add a serializer for it.
+  This method requires your args can be serialized by reflect-cpp, if you met compile
+  errors like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/
+  to add a serializer for it.
   
-  **Or if you only need single-process mode, use SendLocal() instead. See below.**
+  **Or if you can confirm it's a local actor, use SendLocal() instead. See below.**
   */
   auto task = actor.Send<&YourClass::Add>(1);
 
   /*
   4.1 For local actors, you can try `SendLocal`, which has better performance,
-  and **can bypass the serialization code path**
+  and don't require the args to be serializable.
   */
   auto sender = actor.SendLocal<&YourClass::Add>(1);
 

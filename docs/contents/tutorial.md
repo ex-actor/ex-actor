@@ -47,8 +47,9 @@ int main() {
   The method returns a standard `std::execution::task`, compatible
   with everything in the `std::execution` ecosystem.
 
-  This method requires your args can be serialized by reflect-cpp, if you
-  met errors like "Unsupported type.", refer https://rfl.getml.com/concepts/custom_classes/ to add a serializer for it.
+  This method requires your args can be serialized by reflect-cpp, if you met errors
+  like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/ to
+  add a serializer for it.
   
   **Or if you only need single-process mode, use SendLocal() instead. See below.**
   */

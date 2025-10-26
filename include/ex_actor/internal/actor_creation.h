@@ -82,7 +82,7 @@ class ActorRegistry {
     if (config.actor_name) {
       const auto& name = *config.actor_name;
       EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
-      actor_name_to_ref_.emplace(name, AnyActorRef(std::in_place_type_t<ActorRef<UserClass>>, handle));
+      actor_name_to_ref_.emplace(name, AnyActorRef{ std::in_place_type<ActorRef<UserClass>>, handle });
       actor_id_to_name_[actor_id] = name;
     }
     return handle;
@@ -120,7 +120,7 @@ class ActorRegistry {
       if (config.actor_name) {
         const auto& name = *config.actor_name;
         EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
-        actor_name_to_ref_.emplace(name, AnyActorRef(std::in_place_type_t<ActorRef<UserClass>>, handle));
+        actor_name_to_ref_.emplace(name, AnyActorRef{ std::in_place_type<ActorRef<UserClass>>, handle });
         actor_id_to_name_[actor_id] = name;
       }
       return handle;
@@ -133,8 +133,8 @@ class ActorRegistry {
     uint64_t class_index_in_roster = GetActorClassIndexInRoster<UserClass>().value();
 
     // protocol: [message_type][class_index_in_roster][ActorCreationArgs]
-    serde::ActorCreationArgs actor_creation_args {
-        config, typename CreateFnSig::DecayedArgsRflTupleType {std::forward<Args>(args)...}};
+    typename CreateFnSig::DecayedArgsRflTupleType args_tuple{std::forward<Args>(args)...};
+    serde::ActorCreationArgs actor_creation_args{config, std::move(args_tuple)};
     std::vector<char> serialized = serde::Serialize(actor_creation_args);
 
     serde::BufferWriter buffer_writer(network::ByteBufferType {serialized.size() + sizeof(class_index_in_roster) +
@@ -162,7 +162,7 @@ class ActorRegistry {
   void DestroyActor(const ActorRef<UserClass>& actor_ref) {
     auto actor_id = actor_ref.GetActorId();
     EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
-    if (auto it = actor_id_to_name_.find(id); it != actor_id_to_name_.end()) {
+    if (auto it = actor_id_to_name_.find(actor_id); it != actor_id_to_name_.end()) {
       actor_name_to_ref_.erase(it->second);
       actor_id_to_name_.erase(it);
     }

@@ -18,12 +18,14 @@ set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "")
 CPMAddPackage(
   NAME stdexec
   GITHUB_REPOSITORY NVIDIA/stdexec
-  GIT_TAG 770f7959142c2446319f642c82aed8b07aea3f86
+  GIT_TAG nvhpc-25.09
   OPTIONS "BUILD_TESTING OFF"
   OPTIONS "STDEXEC_BUILD_EXAMPLES OFF"
 )
 
 # reflect-cpp with Cap'n Proto for actor message serialization
+find_package(CapnProto CONFIG)
+if (NOT CapnProto_FOUND)
 CPMAddPackage(
   NAME CapnProto
   GITHUB_REPOSITORY capnproto/capnproto
@@ -31,6 +33,9 @@ CPMAddPackage(
   OPTIONS "BUILD_TESTING OFF"
   OPTIONS "CMAKE_CXX_FLAGS -w"
 )
+endif()
+find_package(reflectcpp CONFIG)
+if (NOT reflectcpp_FOUND)
 CPMAddPackage(
   NAME reflectcpp
   GITHUB_REPOSITORY getml/reflect-cpp
@@ -40,8 +45,12 @@ CPMAddPackage(
   OPTIONS "REFLECTCPP_CAPNPROTO ON"
   OPTIONS "REFLECTCPP_INSTALL ON"
 )
+endif()
 
 # libzmq + cppzmq for message passing in distributed mode
+find_package(ZeroMQ CONFIG REQUIRED)
+find_package(cppzmq CONFIG)
+if (NOT ZeroMQ_FOUND OR NOT cppzmq_FOUND)
 CPMAddPackage(
   NAME libzmq
   GITHUB_REPOSITORY zeromq/libzmq
@@ -55,13 +64,16 @@ CPMAddPackage(
   GIT_TAG v4.11.0
   OPTIONS "CPPZMQ_BUILD_TESTS OFF"
 )
-
+endif()
+find_package(spdlog CONFIG REQUIRED)
+if (NOT spdlog_FOUND)
 CPMAddPackage(
   NAME spdlog
   GITHUB_REPOSITORY gabime/spdlog
   GIT_TAG v1.16.0
   OPTIONS "SPDLOG_INSTALL ON"
 )
+endif()
 
 # ------------------- targets -------------------
 
@@ -93,6 +105,10 @@ target_link_libraries(
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
   target_compile_options(ex_actor INTERFACE -Wno-subobject-linkage)
 endif()
+if (WIN32)
+target_compile_definitions(ex_actor INTERFACE NOMINMAX)
+endif()
+
 add_library(ex_actor::ex_actor ALIAS ex_actor)
 
 # ------------------- tests -------------------

@@ -72,7 +72,7 @@ For any questions, bugs or feature requests, open an issue to let us know! We'll
 
 We'll also be very glad if you can implement anything yourself! Just open a pull request, we'll review and merge it in short time.
 
-For more guides, see [contributing](https://ex-actor.github.io/ex-actor/contributing/) page.
+For more guides, see [contributing](https://ex-actor.github.io/ex-actor/contributing/) page for more details like [how to build from source](https://ex-actor.github.io/ex-actor/contributing/#how-to-build-from-source).
 
 # FAQs
 

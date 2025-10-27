@@ -105,14 +105,22 @@ class ActorRef {
     buffer_writer.WritePrimitive(method_index);
     buffer_writer.WritePrimitive(actor_id_);
     buffer_writer.CopyFrom(serialized_args.data(), serialized_args.size());
+
     using UnwrappedType = decltype(reflect::UnwrapRetrunSenderIfNested<kMethod>())::type;
     auto sender = message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut()) |
                   ex::then([](network::ByteBufferType response_buffer) {
+                    serde::BufferReader reader {std::move(response_buffer)};
+                    auto type = reader.NextPrimitive<serde::NetworkRequestType>();
+                    if (type == serde::NetworkRequestType::kActorMethodCallError) {
+                      EXA_THROW << serde::Deserialize<serde::ActorMethodReturnValue<std::string>>(
+                                       reader.Current(), reader.RemainingSize())
+                                       .return_value;
+                    }
                     if constexpr (std::is_void_v<UnwrappedType>) {
                       return;
                     } else {
-                      return serde::Deserialize<serde::ActorMethodReturnValue<UnwrappedType>>(
-                                 response_buffer.data<uint8_t>(), response_buffer.size())
+                      return serde::Deserialize<serde::ActorMethodReturnValue<UnwrappedType>>(reader.Current(),
+                                                                                              reader.RemainingSize())
                           .return_value;
                     }
                   });

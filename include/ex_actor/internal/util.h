@@ -179,9 +179,8 @@ class MoveOnlyAny {
 };
 
 #if defined(_WIN32)
-#include <windows.h>
 inline void SetThreadName(const std::string& name) {
-  SetThreadDescription(GetCurrentThread(), std::wstring(name.begin(), name.end()).c_str());
+  // TODO
 }
 #elif defined(__linux__)
 #include <pthread.h>

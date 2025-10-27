@@ -120,7 +120,7 @@ class ActorRegistry {
     uint64_t class_index_in_roster = GetActorClassIndexInRoster<UserClass>().value();
 
     // protocol: [message_type][class_index_in_roster][ActorCreationArgs]
-    serde::ActorCreationArgs actor_creation_args {
+    serde::ActorCreationArgs<typename CreateFnSig::DecayedArgsRflTupleType> actor_creation_args {
         config, typename CreateFnSig::DecayedArgsRflTupleType {std::forward<Args>(args)...}};
     std::vector<char> serialized = serde::Serialize(actor_creation_args);
 
@@ -165,7 +165,7 @@ class ActorRegistry {
 
   template <class UserClass>
   std::optional<uint64_t> GetActorClassIndexInRoster() {
-    auto actor_class_index = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
+    constexpr auto actor_class_index = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
     if (is_distributed_mode_ && !actor_class_index.has_value()) {
       EXA_THROW_CHECK(actor_class_index.has_value())
           << "Can't find actor class in roster, class=" << typeid(UserClass).name();

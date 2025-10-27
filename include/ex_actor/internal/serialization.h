@@ -50,6 +50,9 @@ struct ActorMethodReturnValue {
   T return_value;
 };
 
+template <>
+struct ActorMethodReturnValue<void> {};
+
 template <auto kFn>
 auto DeserializeFnArgs(const uint8_t* data, size_t size) {
   using Sig = reflect::Signature<decltype(kFn)>;

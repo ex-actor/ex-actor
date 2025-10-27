@@ -36,5 +36,9 @@
   ],
   "clangd.arguments": [
     "--compile-commands-dir=${workspaceFolder}"
-  ]
+  ],
+  "files.associations": {
+    "xstring": "cpp",
+    "memory": "cpp"
+  },
 }

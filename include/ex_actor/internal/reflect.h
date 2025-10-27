@@ -65,9 +65,11 @@ concept RangeOf = std::ranges::range<R> && std::same_as<std::ranges::range_value
 
 template <typename T, typename... Ts>
 consteval std::optional<size_t> GetIndexInParamPack() {
-  constexpr bool kMatches[] = {std::is_same_v<T, Ts>...};
-  for (std::size_t i = 0; i < sizeof...(Ts); ++i) {
-    if (kMatches[i]) return i;
+  if constexpr (sizeof...(Ts) != 0) {
+    constexpr bool kMatches[] = {std::is_same_v<T, Ts>...};
+    for (std::size_t i = 0; i < sizeof...(Ts); ++i) {
+      if (kMatches[i]) return i;
+    }
   }
   return std::nullopt;
 }
@@ -121,7 +123,7 @@ consteval std::optional<uint64_t> GetActorMethodIndex() {
   } else if constexpr (kIndex + 1 < std::tuple_size_v<decltype(kActorMethodsTuple)>) {
     return GetActorMethodIndex<kFunc, kIndex + 1>();
   }
-  return std::nullopt;
+  return std::optional<uint64_t> {};
 };
 
 template <class UserClass, size_t kMethodIndex, class... Args>

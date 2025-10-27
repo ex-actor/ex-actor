@@ -16,6 +16,10 @@
 #include "ex_actor/internal/serialization.h"
 
 namespace ex_actor::internal {
+enum class ActorCreationResponseType : uint8_t {
+    kSuccess = 0,
+    kError = 1
+};
 
 template <class... Classes>
 struct ActorRoster {};
@@ -135,11 +139,23 @@ class ActorRegistry {
 
     // send to remote
     auto sender = message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut()) |
-                  ex::then([](network::ByteBufferType response_buffer) {
-                    serde::BufferReader reader(std::move(response_buffer));
-                    auto actor_id = reader.template NextPrimitive<uint64_t>();
-                    return actor_id;
-                  });
+                  ex::then([](network::ByteBufferType response_buffer) {
+                    serde::BufferReader reader(std::move(response_buffer));
+                      
+                      // NEW: Read the response type header
+                      auto response_type = reader.NextPrimitive<ActorCreationResponseType>();
+
+                      if (response_type == ActorCreationResponseType::kSuccess) {
+                        // This is the original logic
+                        auto actor_id = reader.template NextPrimitive<uint64_t>();
+                        return actor_id;
+                      } else {
+                        // NEW: Handle error case
+                        // Assuming serde::Deserialize<std::string> is the counterpart to serde::Serialize(std::string)
+                        std::string error_msg = serde::Deserialize<std::string>(reader.Current(), reader.RemainingSize());
+                        throw std::runtime_error(error_msg); // This will be re-thrown by .value() below
+                      }
+                  });
     // sync wait and create handle
     auto [actor_id] = stdexec::sync_wait(std::move(sender)).value();
     return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, GetActorClassIndexInRoster<UserClass>().value(),
@@ -191,17 +207,37 @@ class ActorRegistry {
     return static_cast<serde::NetworkRequestType>(*static_cast<const uint8_t*>(buffer.data()));
   }
 
-  void HandleNetworkRequest(uint64_t receive_request_id, network::ByteBufferType request_buffer) {
-    serde::BufferReader<network::ByteBufferType> reader(std::move(request_buffer));
-    auto message_type = reader.NextPrimitive<serde::NetworkRequestType>();
-    if (message_type == serde::NetworkRequestType::kActorCreationRequest) {
-      auto actor_cls_index = reader.NextPrimitive<uint64_t>();
-      uint64_t actor_id = FindClassAndCreateActor(actor_cls_index, reader.Current(), reader.RemainingSize());
-      serde::BufferWriter<network::ByteBufferType> writer(network::ByteBufferType(sizeof(actor_id)));
-      writer.WritePrimitive(actor_id);
-      message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
-      return;
-    }
+void HandleNetworkRequest(uint64_t receive_request_id, network::ByteBufferType request_buffer) {
+    serde::BufferReader<network::ByteBufferType> reader(std::move(request_buffer));
+    auto message_type = reader.NextPrimitive<serde::NetworkRequestType>();
+    if (message_type == serde::NetworkRequestType::kActorCreationRequest) {
+      try {
+        // --- This is the part you're wrapping ---
+        auto actor_cls_index = reader.NextPrimitive<uint64_t>();
+        uint64_t actor_id = FindClassAndCreateActor(actor_cls_index, reader.Current(), reader.RemainingSize());
+        // --- End of wrapped part ---
+
+        // Send SUCCESS response
+        serde::BufferWriter<network::ByteBufferType> writer(
+            network::ByteBufferType(sizeof(ActorCreationResponseType) + sizeof(actor_id)));
+        writer.WritePrimitive(ActorCreationResponseType::kSuccess); // NEW: Write success header
+        writer.WritePrimitive(actor_id);                          // Write payload
+        message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+        return;
+      } catch (const std::exception& e) {
+        // Send ERROR response
+        std::string error_msg = e.what();
+        std::vector<char> serialized_error = serde::Serialize(error_msg); // Assuming serde::Serialize works for std::string
+
+        serde::BufferWriter<network::ByteBufferType> writer(
+            network::ByteBufferType(sizeof(ActorCreationResponseType) + serialized_error.size()));
+        writer.WritePrimitive(ActorCreationResponseType::kError); // NEW: Write error header
+        writer.CopyFrom(serialized_error.data(), serialized_error.size()); // Write payload
+        message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+        return;
+      }
+    }
+    // ... rest of function
     if (message_type == serde::NetworkRequestType::kActorMethodCallRequest) {
       auto class_index_in_roster = reader.NextPrimitive<uint64_t>();
       auto method_index = reader.NextPrimitive<uint64_t>();

@@ -35,7 +35,7 @@ jobs:
         run: |
           ./scripts/regen_build_dir.sh
 
-      - uses: cpp-linter/cpp-linter-action@v2.16.2
+      - uses: cpp-linter/cpp-linter-action@v2.16.5
         id: linter
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,7 +45,7 @@ jobs:
           version: "20"
           ignore: "test/import_test|include/ex_actor/3rd_lib"
           ignore-tidy: "**/*.h"
-          thread-comments: ${{ github.event_name == 'pull_request' && 'update' }}
+          step-summary: ${{ github.event_name == 'pull_request' && 'update' }}
 
       - name: Fail fast?!
         if: steps.linter.outputs.checks-failed > 0

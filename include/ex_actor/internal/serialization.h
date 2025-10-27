@@ -32,6 +32,8 @@ T Deserialize(const uint8_t* data, size_t size) {
 enum class NetworkRequestType : uint8_t {
   kActorCreationRequest = 0,
   kActorMethodCallRequest,
+  kActorMethodCallReturn,
+  kActorMethodCallError,
 };
 
 template <class Tuple>
@@ -49,6 +51,9 @@ template <class T>
 struct ActorMethodReturnValue {
   T return_value;
 };
+
+template <>
+struct ActorMethodReturnValue<void> {};
 
 template <auto kFn>
 auto DeserializeFnArgs(const uint8_t* data, size_t size) {

@@ -46,13 +46,18 @@ int main() {
   
   The method returns a standard `std::execution::task`, compatible
   with everything in the `std::execution` ecosystem.
+
+  This method requires your args can be serialized by reflect-cpp, if you met compile
+  errors like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/
+  to add a serializer for it.
+  
+  **Or if you can confirm it's a local actor, use SendLocal() instead. See below.**
   */
   auto task = actor.Send<&YourClass::Add>(1);
 
   /*
-  4.1 [Advanced topic, for low-latency scenarios]
-  `std::execution::task` will invoke dynamic memory allocation,
-  For local actors, you can try `SendLocal`, which has better performance.
+  4.1 For local actors, you can try `SendLocal`, which has better performance,
+  and don't require the args to be serializable.
   */
   auto sender = actor.SendLocal<&YourClass::Add>(1);
 
@@ -136,7 +141,7 @@ In the second example, the coroutine's scheduler is the `run_loop` scheduler in 
 
 ## Chain actors - send message from one actor to another
 
-This examples shows hot to call an actor's method from another actor.
+This examples shows how to call an actor's method from another actor.
 
 The main thread calls `Proxy`, then `Proxy` calls `Counter`.
 
@@ -252,6 +257,9 @@ scheduler.push_task([actor = std::move(actor)] {
       break;
     }
   }
+  if (still has messages in the mailbox) {
+    push again to the scheduler
+  }
 });
 ```
 
@@ -265,3 +273,4 @@ The whole schedule process is like this:
 3. we check if the actor is activated, if not, we activate it, push an activation task(see the above pseudo code) to the scheduler.
 4. the scheduler get the task, execute it, in which the actor will pull messages from its mailbox and execute them.
 5. the actor runs out of messages, or max messages executed per activation is reached, the activation task finishes.
+6. if there are still messages in the mailbox, the activation task will be pushed again to the scheduler.

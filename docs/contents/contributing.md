@@ -25,17 +25,36 @@ If you have other ideas, welcome to open an issue to discuss with us!
 
 ## How to build from source
 
+## Linux
+
 ```bash
-cd ex_actor
+cd ex-actor
+
+# If fail due to network issues, just retry it.
+# in these script I set cache dir for CPM, previous success download will be cached.
 ./scripts/regen_build_dir.sh
 
 cd build
-#build
-cmake --build . --config Release
-# install
-cmake --install . --prefix <your_install_prefix>
-# test
-ctest -C Release --output-on-failure
+# build
+cmake --build . --config Debug
+# run all test
+ctest -C Debug --output-on-failure
+# run specific test
+./test/Debug/basic_api_test
+
+# format code
+./scripts/format.sh
+```
+
+## Windows
+
+```powershell
+cd ex-actor
+cmake -S . -B build -G "Visual Studio 17 2022"
+cmake --build build --config Debug
+
+# run all test
+ctest -C Debug --output-on-failure
 ```
 
 ## Clangd related

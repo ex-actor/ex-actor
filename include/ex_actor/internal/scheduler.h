@@ -78,7 +78,7 @@ class WorkSharingThreadPool {
   void EnqueueOperation(TypeEasedOperation* operation) { queue_.enqueue(operation); }
 
  private:
-  ex_actor::embedded_3rd::moodycamel::BlockingConcurrentQueue<TypeEasedOperation*> queue_;
+  moodycamel::BlockingConcurrentQueue<TypeEasedOperation*> queue_;
   std::vector<std::jthread> workers_;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {

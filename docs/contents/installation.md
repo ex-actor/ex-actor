@@ -1,7 +1,5 @@
 # Installation
 
-If you prefer a runnable example, you can check the examples in `test/import_test/` directory.
-
 Can't find your build system? Open an issue to let us know. Welcome to open a PR to contribute!
 
 ## CMake Projects
@@ -34,12 +32,20 @@ target_link_libraries(main ex_actor::ex_actor)
 
 ```
 
+**Highly recommend you to use `CPM_SOURCE_CACHE` environment variable to set a cache directory for CPM.cmake.**
+**It's useful when you fail the download due to network issues, and want to retry again. With this you don't need to download the successfully downloaded package again.**
+
 ### Use legacy install and find_package
 
 first, install ex_actor to your system:
 
 ```bash
 git clone https://github.com/ex-actor/ex-actor.git --depth 1 && cd ex-actor
+
+# Set a cache directory for CPM.cmake, It's useful when you fail the download due
+# to network issues, and want to retry again. Avoid re-downloading.
+export CPM_SOURCE_CACHE=$HOME/.cache/CPM
+
 cmake -S . -B build -G "Ninja Multi-Config"
 cmake --build build --config Release
 cmake --install build --prefix <your_install_prefix>

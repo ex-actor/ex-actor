@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <random>
 #include <type_traits>
@@ -72,6 +73,7 @@ class ActorRegistry {
     EXA_THROW_CHECK_EQ(config.node_id, this_node_id_)
         << "`CreateActor` can only be used to create actor at current node, to create actor at remote node, use "
            "`CreateActorUseStaticCreateFn`, because we need a unique construction signature.";
+    auto actor_name = config.actor_name;
     auto actor_id = GenerateRandomActorId();
     auto actor =
         std::make_unique<Actor<UserClass, Scheduler>>(scheduler_, std::move(config), std::forward<Args>(args)...);
@@ -79,11 +81,17 @@ class ActorRegistry {
                                       GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                       message_broker_.get());
     actor_id_to_actor_[actor_id] = std::move(actor);
-    if (config.actor_name) {
-      const auto& name = *config.actor_name;
-      EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
-      actor_name_to_ref_.emplace(name, AnyActorRef{ std::in_place_type<ActorRef<UserClass>>, handle });
-      actor_id_to_name_[actor_id] = name;
+    if (actor_name) {
+      if constexpr ((std::is_same_v<UserClass, ActorClasses> || ...)) {
+        const auto& name = *actor_name;
+        EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
+        actor_name_to_ref_.emplace(name, AnyActorRef {std::in_place_type<ActorRef<UserClass>>, handle});
+        actor_id_to_name_[actor_id] = name;
+      } else {
+        EXA_THROW << "Cannot create named actor: type " << typeid(UserClass).name()
+                  << " is not in the ActorRegistry roster. "
+                  << "Add it to your ActorRegistry template parameters: ActorRegistry<Scheduler, YourType, ...>";
+      }
     }
     return handle;
   }
@@ -110,6 +118,7 @@ class ActorRegistry {
 
     // local actor, create directly
     if (config.node_id == this_node_id_) {
+      auto actor_name = config.actor_name;
       auto actor_id = GenerateRandomActorId();
       auto actor = std::make_unique<Actor<UserClass, Scheduler, /*kUseStaticCreateFn=*/true>>(
           scheduler_, std::move(config), std::forward<Args>(args)...);
@@ -117,11 +126,17 @@ class ActorRegistry {
                                         GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                         message_broker_.get());
       actor_id_to_actor_[actor_id] = std::move(actor);
-      if (config.actor_name) {
-        const auto& name = *config.actor_name;
-        EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
-        actor_name_to_ref_.emplace(name, AnyActorRef{ std::in_place_type<ActorRef<UserClass>>, handle });
-        actor_id_to_name_[actor_id] = name;
+      if (actor_name) {
+        if constexpr ((std::is_same_v<UserClass, ActorClasses> || ...)) {
+          const auto& name = *actor_name;
+          EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
+          actor_name_to_ref_.emplace(name, AnyActorRef {std::in_place_type<ActorRef<UserClass>>, handle});
+          actor_id_to_name_[actor_id] = name;
+        } else {
+          EXA_THROW << "Cannot create named actor: type " << typeid(UserClass).name()
+                    << " is not in the ActorRegistry roster. "
+                    << "Add it to your ActorRegistry template parameters: ActorRegistry<Scheduler, YourType, ...>";
+        }
       }
       return handle;
     }
@@ -133,8 +148,9 @@ class ActorRegistry {
     uint64_t class_index_in_roster = GetActorClassIndexInRoster<UserClass>().value();
 
     // protocol: [message_type][class_index_in_roster][ActorCreationArgs]
-    typename CreateFnSig::DecayedArgsRflTupleType args_tuple{std::forward<Args>(args)...};
-    serde::ActorCreationArgs actor_creation_args{config, std::move(args_tuple)};
+    typename CreateFnSig::DecayedArgsRflTupleType args_tuple {std::forward<Args>(args)...};
+    serde::ActorCreationArgs<typename CreateFnSig::DecayedArgsRflTupleType> actor_creation_args {config,
+                                                                                                 std::move(args_tuple)};
     std::vector<char> serialized = serde::Serialize(actor_creation_args);
 
     serde::BufferWriter buffer_writer(network::ByteBufferType {serialized.size() + sizeof(class_index_in_roster) +
@@ -171,7 +187,7 @@ class ActorRegistry {
   }
 
   template <class UserClass>
-  inline std::optional<ActorRef<UserClass>> GetActorRefByName(std::string_view name) const {
+  inline std::optional<ActorRef<UserClass>> GetActorRefByName(const std::string name) const {
     if (auto it = actor_name_to_ref_.find(name); it != actor_name_to_ref_.end()) {
       if (auto p = std::get_if<ActorRef<UserClass>>(&it->second)) return *p;
     }
@@ -187,13 +203,14 @@ class ActorRegistry {
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unique_ptr<network::MessageBroker> message_broker_;
   exec::async_scope async_scope_;
-  using AnyActorRef = std::variant<ActorRef<ActorClasses>...>;
+  using AnyActorRef = std::conditional_t<sizeof...(ActorClasses) == 0, std::variant<std::monostate>,
+                                         std::variant<ActorRef<ActorClasses>...>>;
   std::unordered_map<std::string, AnyActorRef> actor_name_to_ref_;
   std::unordered_map<std::uint64_t, std::string> actor_id_to_name_;
 
   template <class UserClass>
   std::optional<uint64_t> GetActorClassIndexInRoster() {
-    auto actor_class_index = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
+    constexpr auto actor_class_index = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
     if (is_distributed_mode_ && !actor_class_index.has_value()) {
       EXA_THROW_CHECK(actor_class_index.has_value())
           << "Can't find actor class in roster, class=" << typeid(UserClass).name();
@@ -274,17 +291,34 @@ class ActorRegistry {
                       ex::then([this, receive_request_id](auto return_value) {
                         std::vector<char> serialized =
                             serde::Serialize(serde::ActorMethodReturnValue {std::move(return_value)});
-                        serde::BufferWriter<network::ByteBufferType> writer(network::ByteBufferType(serialized.size()));
+                        serde::BufferWriter writer(
+                            network::ByteBufferType {sizeof(serde::NetworkRequestType) + serialized.size()});
                         // TODO optimize the copy here
+                        writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallReturn);
                         writer.CopyFrom(serialized.data(), serialized.size());
                         message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+                      }) |
+                      ex::upon_error([this, receive_request_id](auto error) {
+                        try {
+                          if (error) {
+                            std::rethrow_exception(error);
+                          }
+                        } catch (std::exception& error) {
+                          std::vector<char> serialized =
+                              serde::Serialize(serde::ActorMethodReturnValue {std::string(error.what())});
+                          serde::BufferWriter writer(
+                              network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
+                          writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallError);
+                          writer.CopyFrom(serialized.data(), serialized.size());
+                          message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+                        }
                       });
         async_scope_.spawn(std::move(sender));
         return;
       }
     }
     if constexpr (kMethodIndex + 1 < std::tuple_size_v<decltype(kActorMethodsTuple)>) {
-      return FindMethodAndCallIt<kMethodIndex + 1>(method_index, actor_id, receive_request_id, data, size);
+      return FindMethodAndCallIt<ActorClass, kMethodIndex + 1>(method_index, actor_id, receive_request_id, data, size);
     }
     EXA_THROW << "Can't find method in actor class, method_index=" << method_index
               << ", class=" << typeid(ActorClass).name();

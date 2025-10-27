@@ -69,6 +69,9 @@ class ActorRef {
    * @brief Send message to an actor. Returns a coroutine carrying the result. Dynamic memory allocation will happen due
    * to the use of coroutine. If you can confirm it's a local actor, consider using SendLocal() instead, which has
    * better performance.
+   * @note If your method argument can't be automatically serialized by reflect-cpp, refer
+   * https://rfl.getml.com/concepts/custom_classes/ to add serializer for it. Or if you can confirm it's a local actor,
+   * you can use SendLocal() to bypass the serialization code path.
    * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>
@@ -90,7 +93,7 @@ class ActorRef {
     serde::ActorMethodCallArgs<typename Sig::DecayedArgsRflTupleType> method_call_args {
         .args_tuple = typename Sig::DecayedArgsRflTupleType(std::forward<Args>(args)...)};
     auto serialized_args = serde::Serialize(method_call_args);
-    std::optional<uint64_t> optional_method_index = reflect::GetActorMethodIndex<kMethod>();
+    constexpr std::optional<uint64_t> optional_method_index = reflect::GetActorMethodIndex<kMethod>();
     EXA_THROW_CHECK(optional_method_index.has_value())
         << "Can't find method index in actor methods. Please put this method to your actor class's method tuple.";
     uint64_t method_index = optional_method_index.value();
@@ -102,14 +105,22 @@ class ActorRef {
     buffer_writer.WritePrimitive(method_index);
     buffer_writer.WritePrimitive(actor_id_);
     buffer_writer.CopyFrom(serialized_args.data(), serialized_args.size());
+
     using UnwrappedType = decltype(reflect::UnwrapRetrunSenderIfNested<kMethod>())::type;
     auto sender = message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut()) |
                   ex::then([](network::ByteBufferType response_buffer) {
+                    serde::BufferReader reader {std::move(response_buffer)};
+                    auto type = reader.NextPrimitive<serde::NetworkRequestType>();
+                    if (type == serde::NetworkRequestType::kActorMethodCallError) {
+                      EXA_THROW << serde::Deserialize<serde::ActorMethodReturnValue<std::string>>(
+                                       reader.Current(), reader.RemainingSize())
+                                       .return_value;
+                    }
                     if constexpr (std::is_void_v<UnwrappedType>) {
                       return;
                     } else {
-                      return serde::Deserialize<serde::ActorMethodReturnValue<UnwrappedType>>(
-                                 response_buffer.data<uint8_t>(), response_buffer.size())
+                      return serde::Deserialize<serde::ActorMethodReturnValue<UnwrappedType>>(reader.Current(),
+                                                                                              reader.RemainingSize())
                           .return_value;
                     }
                   });

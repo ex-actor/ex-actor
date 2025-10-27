@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <random>
 #include <type_traits>
@@ -246,10 +247,27 @@ class ActorRegistry {
                       ex::then([this, receive_request_id](auto return_value) {
                         std::vector<char> serialized =
                             serde::Serialize(serde::ActorMethodReturnValue {std::move(return_value)});
-                        serde::BufferWriter<network::ByteBufferType> writer(network::ByteBufferType(serialized.size()));
+                        serde::BufferWriter writer(
+                            network::ByteBufferType {sizeof(serde::NetworkRequestType) + serialized.size()});
                         // TODO optimize the copy here
+                        writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallReturn);
                         writer.CopyFrom(serialized.data(), serialized.size());
                         message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+                      }) |
+                      ex::upon_error([this, receive_request_id](auto error) {
+                        try {
+                          if (error) {
+                            std::rethrow_exception(error);
+                          }
+                        } catch (std::exception& error) {
+                          std::vector<char> serialized =
+                              serde::Serialize(serde::ActorMethodReturnValue {std::string(error.what())});
+                          serde::BufferWriter writer(
+                              network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
+                          writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallError);
+                          writer.CopyFrom(serialized.data(), serialized.size());
+                          message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+                        }
                       });
         async_scope_.spawn(std::move(sender));
         return;

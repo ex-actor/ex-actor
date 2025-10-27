@@ -73,8 +73,8 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     // TODO: test error propagation
     auto error = ping_worker.Send<&PingWorker::Error>();
 
-    // ASSERT_THAT([&error] { stdexec::sync_wait(std::move(error)); },
-    //             Throws<std::exception>(Property(&std::exception::what, HasSubstr("error"))));
+    ASSERT_THAT([&error] { stdexec::sync_wait(std::move(error)); },
+                Throws<std::exception>(Property(&std::exception::what, HasSubstr("error"))));
   };
 
   std::jthread node_0(node_main, 0);

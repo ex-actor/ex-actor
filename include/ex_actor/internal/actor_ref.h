@@ -93,7 +93,7 @@ class ActorRef {
     serde::ActorMethodCallArgs<typename Sig::DecayedArgsRflTupleType> method_call_args {
         .args_tuple = typename Sig::DecayedArgsRflTupleType(std::forward<Args>(args)...)};
     auto serialized_args = serde::Serialize(method_call_args);
-    std::optional<uint64_t> optional_method_index = reflect::GetActorMethodIndex<kMethod>();
+    constexpr std::optional<uint64_t> optional_method_index = reflect::GetActorMethodIndex<kMethod>();
     EXA_THROW_CHECK(optional_method_index.has_value())
         << "Can't find method index in actor methods. Please put this method to your actor class's method tuple.";
     uint64_t method_index = optional_method_index.value();

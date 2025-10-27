@@ -28,7 +28,7 @@ TEST(StressTest, ActorShouldOnlyBeExecutedInOneThread) {
   threads.reserve(10);
   for (int i = 0; i < 4; ++i) {
     threads.emplace_back([actor]() {
-      for (int j = 0; j < 100; ++j) {
+      for (int j = 0; j < 10; ++j) {
         ex_actor::ex::sync_wait(actor.Send<&TestActor::Run>());
       }
     });

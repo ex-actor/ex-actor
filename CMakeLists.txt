@@ -10,7 +10,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-fdiagnostics-color=always)
 endif()
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "")
-
+if (MSVC)
+  add_compile_options(/EHsc)
+  add_compile_options(/bigobj)
+endif()
 # ------------------- dependencies -------------------
 
 # When C++26 is ready, I'll add a build option to switch to the real std::execution in C++26,
@@ -24,6 +27,13 @@ CPMAddPackage(
 )
 
 # reflect-cpp with Cap'n Proto for actor message serialization
+CPMAddPackage(
+    NAME zlib-cmake
+    GITHUB_REPOSITORY jimmy-park/zlib-cmake
+    GIT_TAG edc9d59d34ea33b1fae4f40268bc69a6d5dd70c0
+    OPTIONS "ZLIB_TEST OFF"
+    OPTIONS "ZLIB_INSTALL ON"
+)
 CPMAddPackage(
   NAME CapnProto
   GITHUB_REPOSITORY capnproto/capnproto
@@ -48,6 +58,7 @@ CPMAddPackage(
   GIT_TAG v4.3.5
   OPTIONS "CMAKE_CXX_FLAGS -w"
   OPTIONS "BUILD_TESTS OFF"
+  OPTIONS "BUILD_SHARED OFF"
 )
 CPMAddPackage(
   NAME cppzmq
@@ -98,6 +109,14 @@ add_library(ex_actor::ex_actor ALIAS ex_actor)
 # ------------------- tests -------------------
 option(EX_ACTOR_BUILD_TESTS "Build tests" ON)
 if(EX_ACTOR_BUILD_TESTS)
+  CPMAddPackage(
+    NAME googletest
+    GITHUB_REPOSITORY google/googletest
+    GIT_TAG b2b9072ecbe874f5937054653ef8f2731eb0f010
+    OPTIONS
+    "INSTALL_GTEST OFF"
+    "gtest_force_shared_crt ON"
+  )
   enable_testing()
   add_subdirectory(test)
 endif()

@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
@@ -50,12 +51,16 @@ class Proxy {
 class TestActorWithNamedLookup {
  public:
   explicit TestActorWithNamedLookup(
-      std::shared_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> reg)
-      : registry(reg) {}
-  void LookUpActor() { (void)registry->GetActorRefByName<Counter>("counter"); }
+      std::weak_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> reg)
+      : registry_(std::move(reg)) {}
+  void LookUpActor() {
+    if (registry_.expired()) throw std::runtime_error("Registry pointer expired before we could look up the actor!");
+    auto ptr = registry_.lock();
+    (void)ptr->GetActorRefByName<Counter>("counter");
+  }
 
  private:
-  std::shared_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> registry;
+  std::weak_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> registry_;
 };
 
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {

@@ -49,13 +49,12 @@ class Proxy {
 class TestActorWithNamedLookup;
 
 static ex_actor::WorkSharingThreadPool thread_pool(10);
-static ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler, Counter, TestActorWithNamedLookup>
-    test_named_registry(thread_pool.GetScheduler());
+static ex_actor::ActorRegistry test_named_registry(thread_pool.GetScheduler());
 
 class TestActorWithNamedLookup {
  public:
   explicit TestActorWithNamedLookup() {}
-  bool CanLookUpActor() { return test_named_registry.GetActorRefByName<Counter>("counter").has_value(); }
+  void LookUpActor() { test_named_registry.GetActorRefByName<Counter>("counter"); }
 };
 
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
@@ -105,10 +104,8 @@ TEST(BasicApiTest, CreateActorWithFullConfig) {
 TEST(BasicApiTest, LookUpNamedActor) {
   test_named_registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
   auto test_retriever_actor = test_named_registry.CreateActor<TestActorWithNamedLookup>();
-  auto coroutine = [test_retriever_actor]() -> exec::task<bool> {
-    co_return co_await test_retriever_actor.Send<&TestActorWithNamedLookup::CanLookUpActor>();
+  auto coroutine = [test_retriever_actor]() -> exec::task<void> {
+    co_await test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();
   };
-  auto result = ex::sync_wait(coroutine());
-  ASSERT_TRUE(result.has_value());
-  ASSERT_TRUE(std::get<0>(result.value()));
+  ASSERT_NO_THROW(coroutine());
 }

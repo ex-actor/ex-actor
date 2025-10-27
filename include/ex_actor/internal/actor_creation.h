@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -7,7 +8,6 @@
 #include <random>
 #include <type_traits>
 #include <unordered_map>
-#include <variant>
 
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/actor_ref.h"
@@ -73,7 +73,6 @@ class ActorRegistry {
     EXA_THROW_CHECK_EQ(config.node_id, this_node_id_)
         << "`CreateActor` can only be used to create actor at current node, to create actor at remote node, use "
            "`CreateActorUseStaticCreateFn`, because we need a unique construction signature.";
-    auto actor_name = config.actor_name;
     auto actor_id = GenerateRandomActorId();
     auto actor =
         std::make_unique<Actor<UserClass, Scheduler>>(scheduler_, std::move(config), std::forward<Args>(args)...);
@@ -81,17 +80,10 @@ class ActorRegistry {
                                       GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                       message_broker_.get());
     actor_id_to_actor_[actor_id] = std::move(actor);
-    if (actor_name) {
-      if constexpr ((std::is_same_v<UserClass, ActorClasses> || ...)) {
-        const auto& name = *actor_name;
-        EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
-        actor_name_to_ref_.emplace(name, AnyActorRef {std::in_place_type<ActorRef<UserClass>>, handle});
-        actor_id_to_name_[actor_id] = name;
-      } else {
-        EXA_THROW << "Cannot create named actor: type " << typeid(UserClass).name()
-                  << " is not in the ActorRegistry roster. "
-                  << "Add it to your ActorRegistry template parameters: ActorRegistry<Scheduler, YourType, ...>";
-      }
+    if (config.actor_name) {
+      const auto& name = *config.actor_name;
+      EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
+      actor_name_to_id_.emplace(name, actor_id);
     }
     return handle;
   }
@@ -118,7 +110,6 @@ class ActorRegistry {
 
     // local actor, create directly
     if (config.node_id == this_node_id_) {
-      auto actor_name = config.actor_name;
       auto actor_id = GenerateRandomActorId();
       auto actor = std::make_unique<Actor<UserClass, Scheduler, /*kUseStaticCreateFn=*/true>>(
           scheduler_, std::move(config), std::forward<Args>(args)...);
@@ -126,17 +117,10 @@ class ActorRegistry {
                                         GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                         message_broker_.get());
       actor_id_to_actor_[actor_id] = std::move(actor);
-      if (actor_name) {
-        if constexpr ((std::is_same_v<UserClass, ActorClasses> || ...)) {
-          const auto& name = *actor_name;
-          EXA_THROW_CHECK(!actor_name_to_ref_.contains(name)) << "Actor already exists";
-          actor_name_to_ref_.emplace(name, AnyActorRef {std::in_place_type<ActorRef<UserClass>>, handle});
-          actor_id_to_name_[actor_id] = name;
-        } else {
-          EXA_THROW << "Cannot create named actor: type " << typeid(UserClass).name()
-                    << " is not in the ActorRegistry roster. "
-                    << "Add it to your ActorRegistry template parameters: ActorRegistry<Scheduler, YourType, ...>";
-        }
+      if (config.actor_name) {
+        const auto& name = *config.actor_name;
+        EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
+        actor_name_to_id_.emplace(name, actor_id);
       }
       return handle;
     }
@@ -178,20 +162,18 @@ class ActorRegistry {
   void DestroyActor(const ActorRef<UserClass>& actor_ref) {
     auto actor_id = actor_ref.GetActorId();
     EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
-    if (auto it = actor_id_to_name_.find(actor_id); it != actor_id_to_name_.end()) {
-      actor_name_to_ref_.erase(it->second);
-      actor_id_to_name_.erase(it);
-    }
     auto& actor = actor_id_to_actor_.at(actor_id);
     actor_id_to_actor_.erase(actor_id);
+    std::erase_if(actor_name_to_id_, [actor_id](const auto& pair) { return pair.second == actor_id; });
   }
 
   template <class UserClass>
-  inline std::optional<ActorRef<UserClass>> GetActorRefByName(const std::string name) const {
-    if (auto it = actor_name_to_ref_.find(name); it != actor_name_to_ref_.end()) {
-      if (auto p = std::get_if<ActorRef<UserClass>>(&it->second)) return *p;
-    }
-    return std::nullopt;
+  inline ActorRef<UserClass> GetActorRefByName(const std::string name) const {
+    const auto actor_id = actor_name_to_id_.at(name);
+    const auto& actor = actor_id_to_actor_.at(actor_id);
+    return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id,
+                               GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
+                               message_broker_.get());
   }
 
  private:
@@ -203,13 +185,10 @@ class ActorRegistry {
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unique_ptr<network::MessageBroker> message_broker_;
   exec::async_scope async_scope_;
-  using AnyActorRef = std::conditional_t<sizeof...(ActorClasses) == 0, std::variant<std::monostate>,
-                                         std::variant<ActorRef<ActorClasses>...>>;
-  std::unordered_map<std::string, AnyActorRef> actor_name_to_ref_;
-  std::unordered_map<std::uint64_t, std::string> actor_id_to_name_;
+  std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
 
   template <class UserClass>
-  std::optional<uint64_t> GetActorClassIndexInRoster() {
+  std::optional<uint64_t> GetActorClassIndexInRoster() const {
     constexpr auto actor_class_index = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
     if (is_distributed_mode_ && !actor_class_index.has_value()) {
       EXA_THROW_CHECK(actor_class_index.has_value())

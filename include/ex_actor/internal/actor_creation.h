@@ -74,14 +74,15 @@ class ActorRegistry {
         << "`CreateActor` can only be used to create actor at current node, to create actor at remote node, use "
            "`CreateActorUseStaticCreateFn`, because we need a unique construction signature.";
     auto actor_id = GenerateRandomActorId();
+    auto actor_name = config.actor_name;
     auto actor =
         std::make_unique<Actor<UserClass, Scheduler>>(scheduler_, std::move(config), std::forward<Args>(args)...);
     auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id,
                                       GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                       message_broker_.get());
     actor_id_to_actor_[actor_id] = std::move(actor);
-    if (config.actor_name) {
-      const auto& name = *config.actor_name;
+    if (actor_name) {
+      const auto& name = *actor_name;
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
       actor_name_to_id_.emplace(name, actor_id);
     }
@@ -111,14 +112,15 @@ class ActorRegistry {
     // local actor, create directly
     if (config.node_id == this_node_id_) {
       auto actor_id = GenerateRandomActorId();
+      auto actor_name = config.actor_name;
       auto actor = std::make_unique<Actor<UserClass, Scheduler, /*kUseStaticCreateFn=*/true>>(
           scheduler_, std::move(config), std::forward<Args>(args)...);
       auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id,
                                         GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                         message_broker_.get());
       actor_id_to_actor_[actor_id] = std::move(actor);
-      if (config.actor_name) {
-        const auto& name = *config.actor_name;
+      if (actor_name) {
+        const auto& name = *actor_name;
         EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
         actor_name_to_id_.emplace(name, actor_id);
       }

@@ -49,16 +49,18 @@ class Proxy {
 
 class TestActorWithNamedLookup {
  public:
-  explicit TestActorWithNamedLookup(std::shared_ptr<ex_actor::ActorRegistry> reg) : registry(reg) {}
+  explicit TestActorWithNamedLookup(
+      std::shared_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> reg)
+      : registry(reg) {}
   void LookUpActor() { (void)registry->GetActorRefByName<Counter>("counter"); }
 
  private:
-  std::shared_ptr<ex_actor::ActorRegistry> registry;
+  std::shared_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> registry;
 };
 
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
-  ex_actor::WorkSharingThreadPool thread_pool(10);
   auto coroutine = []() -> exec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(10);
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
     auto counter = registry.CreateActor<Counter>();
     co_await counter.Send<&Counter::Error>();
@@ -68,10 +70,9 @@ TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
 }
 
 TEST(BasicApiTest, NestActorRefCase) {
-  ex_actor::WorkSharingThreadPool thread_pool(10);
   auto coroutine = []() -> exec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(10);
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     ex_actor::ActorRef counter = registry.CreateActor<Counter>();
     exec::async_scope scope;
     for (int i = 0; i < 100; ++i) {
@@ -104,11 +105,12 @@ TEST(BasicApiTest, CreateActorWithFullConfig) {
 }
 
 TEST(BasicApiTest, LookUpNamedActor) {
-  ex_actor::WorkSharingThreadPool thread_pool(10);
-  auto registry_ptr = std::make_shared<ex_actor::ActorRegistry>(thread_pool.GetScheduler());
-  registry_ptr->CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
-  auto test_retriever_actor = registry_ptr->CreateActor<TestActorWithNamedLookup>(registry_ptr);
-  auto coroutine = [test_retriever_actor]() -> exec::task<void> {
+  auto coroutine = []() -> exec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(10);
+    auto registry_ptr = std::make_shared<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>>(
+        thread_pool.GetScheduler());
+    registry_ptr->CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
+    auto test_retriever_actor = registry_ptr->CreateActor<TestActorWithNamedLookup>(registry_ptr);
     co_await test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();
   };
   ASSERT_NO_THROW(ex::sync_wait(coroutine()));

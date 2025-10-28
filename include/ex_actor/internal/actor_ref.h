@@ -76,7 +76,7 @@ class ActorRef {
    */
   template <auto kMethod, class... Args>
   auto Send(Args&&... args) const
-      -> exec::task<typename decltype(reflect::UnwrapRetrunSenderIfNested<kMethod>())::type> {
+      -> exec::task<typename decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
     if (!IsEmpty()) [[unlikely]] {
@@ -106,7 +106,7 @@ class ActorRef {
     buffer_writer.WritePrimitive(actor_id_);
     buffer_writer.CopyFrom(serialized_args.data(), serialized_args.size());
 
-    using UnwrappedType = decltype(reflect::UnwrapRetrunSenderIfNested<kMethod>())::type;
+    using UnwrappedType = decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type;
     auto sender = message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut()) |
                   ex::then([](network::ByteBufferType response_buffer) {
                     serde::BufferReader reader {std::move(response_buffer)};

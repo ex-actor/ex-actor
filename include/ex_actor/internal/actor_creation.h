@@ -112,15 +112,14 @@ class ActorRegistry {
     // local actor, create directly
     if (config.node_id == this_node_id_) {
       auto actor_id = GenerateRandomActorId();
-      auto actor_name = config.actor_name;
       auto actor = std::make_unique<Actor<UserClass, Scheduler, /*kUseStaticCreateFn=*/true>>(
           scheduler_, std::move(config), std::forward<Args>(args)...);
       auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id,
                                         GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                         message_broker_.get());
       actor_id_to_actor_[actor_id] = std::move(actor);
-      if (actor_name) {
-        const auto& name = *actor_name;
+      if (config.actor_name.has_value()) {
+        std::string& name = *config.actor_name;
         EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
         actor_name_to_id_.emplace(name, actor_id);
       }
@@ -170,7 +169,7 @@ class ActorRegistry {
   }
 
   template <class UserClass>
-  inline ActorRef<UserClass> GetActorRefByName(const std::string name) const {
+  ActorRef<UserClass> GetActorRefByName(const std::string& name) const {
     const auto actor_id = actor_name_to_id_.at(name);
     const auto& actor = actor_id_to_actor_.at(actor_id);
     return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id,
@@ -191,12 +190,12 @@ class ActorRegistry {
 
   template <class UserClass>
   std::optional<uint64_t> GetActorClassIndexInRoster() const {
-    constexpr auto actor_class_index = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
-    if (is_distributed_mode_ && !actor_class_index.has_value()) {
-      EXA_THROW_CHECK(actor_class_index.has_value())
+    constexpr auto kActorClassIndex = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
+    if (is_distributed_mode_ && !kActorClassIndex.has_value()) {
+      EXA_THROW_CHECK(kActorClassIndex.has_value())
           << "Can't find actor class in roster, class=" << typeid(UserClass).name();
     }
-    return actor_class_index;
+    return kActorClassIndex;
   }
   void InitRandomNumGenerator() {
     std::random_device rd;

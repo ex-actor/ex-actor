@@ -75,7 +75,7 @@ class ActorRef {
    * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>
-  auto Send(Args&&... args) const
+  [[nodiscard]] auto Send(Args&&... args) const
       -> exec::task<typename decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
@@ -88,7 +88,6 @@ class ActorRef {
 
     // remote call
     EXA_THROW_CHECK(message_broker_ != nullptr) << "Message broker not set";
-    // protocol: [request_type][class_index_in_roster][method_index][actor_id][ActorMethodCallArgs]
     using Sig = reflect::Signature<decltype(kMethod)>;
     serde::ActorMethodCallArgs<typename Sig::DecayedArgsRflTupleType> method_call_args {
         .args_tuple = typename Sig::DecayedArgsRflTupleType(std::forward<Args>(args)...)};
@@ -100,6 +99,7 @@ class ActorRef {
     serde::BufferWriter buffer_writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) +
                                                                sizeof(class_index_in_roster_) + sizeof(method_index) +
                                                                sizeof(actor_id_) + serialized_args.size()});
+    // protocol: [request_type][class_index_in_roster][method_index][actor_id][ActorMethodCallArgs]
     buffer_writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallRequest);
     buffer_writer.WritePrimitive(class_index_in_roster_);
     buffer_writer.WritePrimitive(method_index);
@@ -131,7 +131,7 @@ class ActorRef {
    * @brief Send message to a local actor. Has better performance than the generic Send(). No heap allocation.
    */
   template <auto kMethod, class... Args>
-  ex::sender auto SendLocal(Args&&... args) const {
+  [[nodiscard]] ex::sender auto SendLocal(Args&&... args) const {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
     if (!IsEmpty()) [[unlikely]] {

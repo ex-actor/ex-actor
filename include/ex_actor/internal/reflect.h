@@ -137,7 +137,7 @@ using CoAwaitType =
     decltype(std::declval<exec::task<void>::promise_type>().await_transform(std::declval<Sender>()).await_resume());
 
 template <auto kMethod>
-constexpr auto UnwrapRetrunSenderIfNested() {
+constexpr auto UnwrapReturnSenderIfNested() {
   using ReturnType = Signature<decltype(kMethod)>::ReturnType;
   constexpr bool kIsNested = stdexec::sender<ReturnType>;
   if constexpr (kIsNested) {

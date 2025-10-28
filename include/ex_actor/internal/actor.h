@@ -5,25 +5,17 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
-#include <ex_actor/internal/reflect.h>
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
 #include <rfl/Tuple.hpp>
 #include <rfl/apply.hpp>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/util.h"
-
-namespace ex_actor {
-struct ActorConfig {
-  size_t max_message_executed_per_activation = 100;
-  uint32_t node_id = 0;
-  std::optional<std::string> actor_name;
-};
-}  // namespace ex_actor
 
 namespace ex_actor::internal {
 struct ActorMessage {
@@ -41,7 +33,9 @@ struct DestroyMessage : ActorMessage {
   Type GetType() const override { return Type::kDestroy; }
 };
 
-struct TypeErasedActor {
+class TypeErasedActor {
+ public:
+  explicit TypeErasedActor(ActorConfig actor_config) : actor_config_(std::move(actor_config)) {}
   virtual ~TypeErasedActor() = default;
   virtual void PushMessage(ActorMessage* task) = 0;
   virtual void* GetUserClassAddress() = 0;
@@ -51,6 +45,11 @@ struct TypeErasedActor {
 
   template <auto kMethod, class... Args>
   ex::sender auto CallActorMethodUseTuple(rfl::Tuple<Args...> args_tuple);
+
+  const ActorConfig& GetActorConfig() const { return actor_config_; }
+
+ protected:
+  ActorConfig actor_config_;
 };
 
 // ---------------std::execution Scheduler Adaption-----------------
@@ -123,7 +122,7 @@ class Actor : public TypeErasedActor {
  public:
   template <typename... Args>
   explicit Actor(Scheduler scheduler, ActorConfig actor_config, Args&&... args)
-      : scheduler_(std::move(scheduler)), actor_config_(std::move(actor_config)) {
+      : TypeErasedActor(std::move(actor_config)), scheduler_(std::move(scheduler)) {
     if constexpr (kUseStaticCreateFn) {
       user_class_instance_ = std::make_unique<UserClass>(UserClass::Create(std::forward<Args>(args)...));
     } else {
@@ -165,7 +164,6 @@ class Actor : public TypeErasedActor {
 
  private:
   Scheduler scheduler_;
-  ActorConfig actor_config_;
   util::LinearizableUnboundedQueue<ActorMessage*> mailbox_;
   std::atomic_size_t pending_message_count_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
@@ -183,7 +181,9 @@ class Actor : public TypeErasedActor {
       return;
     }
 
-    auto sender = ex::schedule(scheduler_) | ex::then([this] { PullMailboxAndRun(); });
+    auto sender = ex::schedule(scheduler_) |
+                  ex::write_env(ex::prop {ex_actor::get_std_exec_env, GetActorConfig().std_exec_envs}) |
+                  ex::then([this] { PullMailboxAndRun(); });
     async_scope_.spawn(std::move(sender));
   }
 

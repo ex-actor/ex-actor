@@ -10,7 +10,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-fdiagnostics-color=always)
 endif()
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "")
-if (MSVC)
+if(MSVC)
   add_compile_options(/EHsc)
   add_compile_options(/bigobj)
 endif()
@@ -28,11 +28,11 @@ CPMAddPackage(
 
 # reflect-cpp with Cap'n Proto for actor message serialization
 CPMAddPackage(
-    NAME zlib-cmake
-    GITHUB_REPOSITORY jimmy-park/zlib-cmake
-    GIT_TAG edc9d59d34ea33b1fae4f40268bc69a6d5dd70c0
-    OPTIONS "ZLIB_TEST OFF"
-    OPTIONS "ZLIB_INSTALL ON"
+  NAME zlib-cmake
+  GITHUB_REPOSITORY jimmy-park/zlib-cmake
+  GIT_TAG edc9d59d34ea33b1fae4f40268bc69a6d5dd70c0
+  OPTIONS "ZLIB_TEST OFF"
+  OPTIONS "ZLIB_INSTALL ON"
 )
 CPMAddPackage(
   NAME CapnProto

@@ -1,20 +1,27 @@
 #pragma once
 
-#include <iostream>
 #include <thread>
 
 #include <exec/static_thread_pool.hpp>
 
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
+#include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
 
-class WorkSharingThreadPool {
+template <template <class> class Queue>
+class WorkSharingThreadPoolBase {
  public:
-  explicit WorkSharingThreadPool(size_t thread_count) {
-    workers_.reserve(thread_count);
-    for (size_t i = 0; i < thread_count; ++i) {
+  explicit WorkSharingThreadPoolBase(size_t thread_count, bool start_workers_immediately = true)
+      : thread_count_(thread_count) {
+    if (start_workers_immediately) {
+      StartWorkers();
+    }
+  }
+
+  void StartWorkers() {
+    for (size_t i = 0; i < thread_count_; ++i) {
       workers_.emplace_back([this](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token); });
     }
   }
@@ -26,12 +33,13 @@ class WorkSharingThreadPool {
 
   template <ex::receiver R>
   struct Operation : TypeEasedOperation {
-    Operation(R receiver, WorkSharingThreadPool* thread_pool)
+    Operation(R receiver, WorkSharingThreadPoolBase* thread_pool)
         : receiver(std::move(receiver)), thread_pool(thread_pool) {}
     R receiver;
-    WorkSharingThreadPool* thread_pool;
+    WorkSharingThreadPoolBase* thread_pool;
     void Execute() override {
-      auto stoken = stdexec::get_stop_token(stdexec::get_env(receiver));
+      auto env = stdexec::get_env(receiver);
+      auto stoken = stdexec::get_stop_token(env);
       if constexpr (ex::unstoppable_token<decltype(stoken)>) {
         receiver.set_value();
       } else {
@@ -43,16 +51,31 @@ class WorkSharingThreadPool {
       }
     }
 
-    void start() noexcept { thread_pool->EnqueueOperation(this); }
+    void start() noexcept {
+      uint32_t priority = UINT32_MAX;
+      if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
+                                   internal::util::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
+        auto env = stdexec::get_env(receiver);
+        std::optional std_exec_envs = ex_actor::get_std_exec_env(env);
+
+        if (std_exec_envs.has_value()) {
+          auto iter = std_exec_envs->find("priority");
+          if (iter != std_exec_envs->end()) {
+            priority = std::stoi(iter->second);
+          }
+        }
+      }
+      thread_pool->EnqueueOperation(this, priority);
+    }
   };
 
   struct Scheduler;
 
   struct Sender : ex::sender_t {
     using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
-    WorkSharingThreadPool* thread_pool;
+    WorkSharingThreadPoolBase* thread_pool;
     struct Env {
-      WorkSharingThreadPool* thread_pool;
+      WorkSharingThreadPoolBase* thread_pool;
       template <class CPO>
       auto query(ex::get_completion_scheduler_t<CPO>) const noexcept -> Scheduler {
         return {.thread_pool = thread_pool};
@@ -66,7 +89,7 @@ class WorkSharingThreadPool {
   };
 
   struct Scheduler : ex::scheduler_t {
-    WorkSharingThreadPool* thread_pool;
+    WorkSharingThreadPoolBase* thread_pool;
     Sender schedule() const noexcept { return {.thread_pool = thread_pool}; }
     friend bool operator==(const Scheduler& lhs, const Scheduler& rhs) noexcept {
       return lhs.thread_pool == rhs.thread_pool;
@@ -75,24 +98,34 @@ class WorkSharingThreadPool {
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
-  void EnqueueOperation(TypeEasedOperation* operation) { queue_.enqueue(operation); }
+  void EnqueueOperation(TypeEasedOperation* operation, uint32_t priority = 0) {
+    if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
+                                 internal::util::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
+      queue_.Push(operation, priority);
+    } else {
+      queue_.Push(operation);
+    }
+  }
 
  private:
-  ex_actor::embedded_3rd::moodycamel::BlockingConcurrentQueue<TypeEasedOperation*> queue_;
+  size_t thread_count_;
+  Queue<TypeEasedOperation*> queue_;
   std::vector<std::jthread> workers_;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {
     internal::util::SetThreadName("ws_pool_worker");
-    TypeEasedOperation* operation = nullptr;
     while (!stop_token.stop_requested()) {
-      bool ok = queue_.wait_dequeue_timed(operation, std::chrono::milliseconds(10));
-      if (!ok) {
+      auto optional_operation = queue_.Pop(/*timeout_ms=*/10);
+      if (!optional_operation) {
         continue;
       }
-      operation->Execute();
+      optional_operation.value()->Execute();
     }
   }
 };
+
+using WorkSharingThreadPool = WorkSharingThreadPoolBase<internal::util::BoundedBlockingQueue>;
+using PriorityThreadPool = WorkSharingThreadPoolBase<internal::util::UnboundedBlockingPriorityQueue>;
 
 class WorkStealingThreadPool : public exec::static_thread_pool {
  public:

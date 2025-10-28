@@ -19,7 +19,7 @@
       "name": "(gdb) Launch",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/test/Debug/${fileBasenameNoExtension}",
+      "program": "${workspaceFolder}/build/test/Debug/${input:test_name}",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${fileDirname}",
@@ -72,6 +72,20 @@
         }
       ]
     }
-
+  ],
+  "inputs": [
+    {
+      "id": "test_name",
+      "type": "pickString",
+      "description": "Select test name",
+      "options": [
+        "basic_api_test",
+        "util_test",
+        "scheduler_test",
+        "stress_test",
+        "distributed_test",
+        "network_test"
+      ]
+    }
   ]
 }

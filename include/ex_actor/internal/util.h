@@ -10,6 +10,7 @@
 #include <spdlog/spdlog.h>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/logging.h"
 
@@ -113,6 +114,54 @@ struct LinearizableUnboundedQueue {
  private:
   std::queue<T> queue_;
   mutable std::mutex mutex_;
+};
+
+template <class T>
+class UnboundedBlockingPriorityQueue {
+ public:
+  void Push(T value, uint32_t priority) {
+    std::lock_guard lock(mutex_);
+    queue_.push({std::move(value), priority});
+    cv_.notify_one();
+  }
+
+  std::optional<T> Pop(uint64_t timeout_ms) {
+    std::unique_lock lock(mutex_);
+    bool ok = cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return !queue_.empty(); });
+    if (!ok) {
+      return std::nullopt;
+    }
+    auto value = std::move(const_cast<Element&>(queue_.top()).value);
+    queue_.pop();
+    return value;
+  }
+
+ private:
+  struct Element {
+    T value;
+    uint32_t priority;
+    friend bool operator<(const Element& lhs, const Element& rhs) { return lhs.priority > rhs.priority; }
+  };
+  std::priority_queue<Element> queue_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+};
+
+template <class T>
+class BoundedBlockingQueue {
+ public:
+  void Push(T value) { queue_.enqueue(std::move(value)); }
+  std::optional<T> Pop(uint64_t timeout_ms) {
+    T value;
+    bool ok = queue_.wait_dequeue_timed(value, std::chrono::milliseconds(timeout_ms));
+    if (!ok) {
+      return std::nullopt;
+    }
+    return value;
+  }
+
+ private:
+  ex_actor::embedded_3rd::moodycamel::BlockingConcurrentQueue<T> queue_;
 };
 
 template <class K, class V>

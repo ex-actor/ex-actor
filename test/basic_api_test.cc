@@ -99,8 +99,11 @@ TEST(BasicApiTest, NestActorRefCase) {
 TEST(BasicApiTest, CreateActorWithFullConfig) {
   ex_actor::WorkSharingThreadPool thread_pool(10);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-  auto counter = registry.CreateActor<Counter>(ex_actor::ActorConfig {.max_message_executed_per_activation = 10});
-  registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
+  auto counter = registry.CreateActor<Counter>(
+      ex_actor::ActorConfig {.max_message_executed_per_activation = 10, .actor_name = "counter1"});
+  registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter2"});
+  registry.CreateActor<Counter>(
+      ex_actor::ActorConfig {.std_exec_envs = std::unordered_map<std::string, std::string> {{"priority", "1"}}});
 
   static_assert(rfl::internal::has_reflection_type_v<ex_actor::ActorRef<Counter>>);
   // test pass by lvalue

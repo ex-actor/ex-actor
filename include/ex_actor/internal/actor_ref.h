@@ -89,8 +89,8 @@ class ActorRef {
     // remote call
     EXA_THROW_CHECK(message_broker_ != nullptr) << "Message broker not set";
     using Sig = reflect::Signature<decltype(kMethod)>;
-    serde::ActorMethodCallArgs<typename Sig::DecayedArgsRflTupleType> method_call_args {
-        .args_tuple = typename Sig::DecayedArgsRflTupleType(std::forward<Args>(args)...)};
+    serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
+        .args_tuple = typename Sig::DecayedArgsTupleType(std::forward<Args>(args)...)};
     auto serialized_args = serde::Serialize(method_call_args);
     constexpr std::optional<uint64_t> optional_method_index = reflect::GetActorMethodIndex<kMethod>();
     EXA_THROW_CHECK(optional_method_index.has_value())

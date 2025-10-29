@@ -93,7 +93,7 @@ class MoveOnlyConstructorActor {
 
   std::string GetData() const { return data_ ? *data_ : "null"; }
 
-  void SetData(std::unique_ptr<std::string> new_data) { data_ = std::move(new_data); }
+  void SetData(std::unique_ptr<std::string>&& new_data, const std::string&) { data_ = std::move(new_data); }
 
   size_t GetDataLength() const { return data_ ? data_->length() : 0; }
 
@@ -471,7 +471,8 @@ TEST(ComplexApiTest, MoveOnlyConstructorParameters) {
     EXPECT_EQ(data, "Initial");
 
     auto new_data = std::make_unique<std::string>("Updated");
-    co_await actor.template Send<&MoveOnlyConstructorActor::SetData>(std::move(new_data));
+    std::string lvalue;
+    co_await actor.template Send<&MoveOnlyConstructorActor::SetData>(std::move(new_data), lvalue);
 
     std::string updated_data = co_await actor.template Send<&MoveOnlyConstructorActor::GetData>();
     EXPECT_EQ(updated_data, "Updated");

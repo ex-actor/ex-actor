@@ -133,9 +133,9 @@ class ActorRegistry {
     uint64_t class_index_in_roster = GetActorClassIndexInRoster<UserClass>().value();
 
     // protocol: [message_type][class_index_in_roster][ActorCreationArgs]
-    typename CreateFnSig::DecayedArgsRflTupleType args_tuple {std::forward<Args>(args)...};
-    serde::ActorCreationArgs<typename CreateFnSig::DecayedArgsRflTupleType> actor_creation_args {config,
-                                                                                                 std::move(args_tuple)};
+    typename CreateFnSig::DecayedArgsTupleType args_tuple {std::forward<Args>(args)...};
+    serde::ActorCreationArgs<typename CreateFnSig::DecayedArgsTupleType> actor_creation_args {config,
+                                                                                              std::move(args_tuple)};
     std::vector<char> serialized = serde::Serialize(actor_creation_args);
 
     serde::BufferWriter buffer_writer(network::ByteBufferType {serialized.size() + sizeof(class_index_in_roster) +
@@ -264,7 +264,7 @@ class ActorRegistry {
         std::unique_ptr<TypeErasedActor>& actor = actor_id_to_actor_.at(actor_id);
         constexpr auto kMethodPtr = std::get<kMethodIndex>(kActorMethodsTuple);
         using Sig = reflect::Signature<decltype(kMethodPtr)>;
-        serde::ActorMethodCallArgs<typename Sig::DecayedArgsRflTupleType> call_args =
+        serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
             serde::DeserializeFnArgs<kMethodPtr>(data, size);
         // TODO process ActorRef in the args
         auto sender = actor->template CallActorMethodUseTuple<kMethodPtr>(std::move(call_args.args_tuple)) |

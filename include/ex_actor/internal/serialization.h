@@ -59,9 +59,9 @@ template <auto kFn>
 auto DeserializeFnArgs(const uint8_t* data, size_t size) {
   using Sig = reflect::Signature<decltype(kFn)>;
   if constexpr (std::is_member_function_pointer_v<decltype(kFn)>) {
-    return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsRflTupleType>>(data, size);
+    return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, size);
   } else {
-    return Deserialize<ActorCreationArgs<typename Sig::DecayedArgsRflTupleType>>(data, size);
+    return Deserialize<ActorCreationArgs<typename Sig::DecayedArgsTupleType>>(data, size);
   }
 }
 

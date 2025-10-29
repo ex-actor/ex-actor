@@ -17,7 +17,7 @@ template <class R, class... Args>
 struct Signature<R (*)(Args...)> {
   using ReturnType = R;
   using ArgsTupleType = std::tuple<Args...>;
-  using DecayedArgsRflTupleType = rfl::Tuple<std::decay_t<Args>...>;
+  using DecayedArgsTupleType = std::tuple<std::decay_t<Args>...>;
 };
 
 template <typename R, typename C, typename... Args>
@@ -25,7 +25,7 @@ struct Signature<R (C::*)(Args...)> {
   using ClassType = C;
   using ReturnType = R;
   using ArgsTupleType = std::tuple<Args...>;
-  using DecayedArgsRflTupleType = rfl::Tuple<std::decay_t<Args>...>;
+  using DecayedArgsTupleType = std::tuple<std::decay_t<Args>...>;
 };
 template <typename R, typename C, typename... Args>
 struct Signature<R (C::*)(Args...) const> : Signature<R (C::*)(Args...)> {};

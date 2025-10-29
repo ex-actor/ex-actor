@@ -44,7 +44,7 @@ class TypeErasedActor {
   ex::sender auto CallActorMethod(Args&&... args);
 
   template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethodUseTuple(rfl::Tuple<Args...> args_tuple);
+  ex::sender auto CallActorMethodUseTuple(std::tuple<Args...> args_tuple);
 
   const ActorConfig& GetActorConfig() const { return actor_config_; }
 
@@ -132,8 +132,8 @@ class Actor : public TypeErasedActor {
 
   template <typename... Args>
   static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(Scheduler scheduler, ActorConfig actor_config,
-                                                            rfl::Tuple<Args...> arg_tuple) {
-    return rfl::apply(
+                                                            std::tuple<Args...> arg_tuple) {
+    return std::apply(
         [scheduler = std::move(scheduler), actor_config = std::move(actor_config)](auto&&... args) {
           return std::make_unique<Actor<UserClass, Scheduler, /*kUseStaticCreateFn=*/true>>(
               std::move(scheduler), std::move(actor_config), std::move(args)...);
@@ -221,11 +221,11 @@ class Actor : public TypeErasedActor {
 
 template <auto kMethod, class... Args>
 ex::sender auto TypeErasedActor::CallActorMethod(Args&&... args) {
-  return CallActorMethodUseTuple<kMethod>(rfl::make_tuple(std::forward<Args>(args)...));
+  return CallActorMethodUseTuple<kMethod>(std::make_tuple(std::forward<Args>(args)...));
 }
 
 template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethodUseTuple(rfl::Tuple<Args...> args_tuple) {
+ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::tuple<Args...> args_tuple) {
   using Sig = reflect::Signature<decltype(kMethod)>;
   using ReturnType = Sig::ReturnType;
   using UserClass = Sig::ClassType;
@@ -236,13 +236,13 @@ ex::sender auto TypeErasedActor::CallActorMethodUseTuple(rfl::Tuple<Args...> arg
 
   if constexpr (kIsNested) {
     return std::move(start) | ex::let_value([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {
-             return rfl::apply(
+             return std::apply(
                  [user_class_instance](auto&&... args) { return (user_class_instance->*kMethod)(std::move(args)...); },
                  std::move(args_tuple));
            });
   } else {
     return std::move(start) | ex::then([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {
-             return rfl::apply(
+             return std::apply(
                  [user_class_instance](auto&&... args) { return (user_class_instance->*kMethod)(std::move(args)...); },
                  std::move(args_tuple));
            });

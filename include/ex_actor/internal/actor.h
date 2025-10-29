@@ -182,7 +182,8 @@ class Actor : public TypeErasedActor {
     }
 
     auto sender = ex::schedule(scheduler_) |
-                  ex::write_env(ex::prop {ex_actor::get_std_exec_env, GetActorConfig().std_exec_envs}) |
+                  ex::write_env(ex::prop {ex_actor::get_priority, GetActorConfig().priority}) |
+                  ex::write_env(ex::prop {ex_actor::get_scheduler_index, GetActorConfig().scheduler_index}) |
                   ex::then([this] { PullMailboxAndRun(); });
     async_scope_.spawn(std::move(sender));
   }

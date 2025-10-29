@@ -6,6 +6,7 @@
 
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
 #include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
@@ -56,14 +57,7 @@ class WorkSharingThreadPoolBase {
       if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
                                    internal::util::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
         auto env = stdexec::get_env(receiver);
-        std::optional std_exec_envs = ex_actor::get_std_exec_env(env);
-
-        if (std_exec_envs.has_value()) {
-          auto iter = std_exec_envs->find("priority");
-          if (iter != std_exec_envs->end()) {
-            priority = std::stoi(iter->second);
-          }
-        }
+        priority = ex_actor::get_priority(env);
       }
       thread_pool->EnqueueOperation(this, priority);
     }
@@ -131,5 +125,53 @@ class WorkStealingThreadPool : public exec::static_thread_pool {
  public:
   using exec::static_thread_pool::static_thread_pool;
   auto GetScheduler() { return get_scheduler(); }
+};
+
+template <class InnerScheduler>
+class SchedulerUnion {
+ public:
+  explicit SchedulerUnion(std::vector<InnerScheduler> schedulers, size_t default_scheduler_index = 0)
+      : schedulers_(std::move(schedulers)), default_scheduler_index_(default_scheduler_index) {
+    EXA_THROW_CHECK_GT(schedulers_.size(), 0) << "SchedulerUnion must have at least one scheduler";
+  }
+
+  class Scheduler;
+  class Sender;
+  template <ex::receiver R>
+  class Operation;
+
+  Scheduler GetScheduler() { return Scheduler {.scheduler_union = this}; }
+
+  struct Scheduler : ex::scheduler_t {
+    SchedulerUnion* scheduler_union;
+    Sender schedule() const noexcept { return {.scheduler_union = scheduler_union}; }
+    friend bool operator==(const Scheduler& lhs, const Scheduler& rhs) noexcept {
+      return lhs.scheduler_union == rhs.scheduler_union;
+    }
+  };
+
+  struct Sender : ex::sender_t {
+    using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
+    SchedulerUnion* scheduler_union;
+    struct Env {
+      SchedulerUnion* scheduler_union;
+      template <class CPO>
+      auto query(ex::get_completion_scheduler_t<CPO>) const noexcept -> Scheduler {
+        return {.thread_pool = scheduler_union};
+      }
+    };
+    auto get_env() const noexcept -> Env { return Env {.thread_pool = scheduler_union}; }
+
+    auto connect(ex::receiver auto receiver) {
+      auto env = stdexec::get_env(receiver);
+      auto scheduler_index = ex_actor::get_scheduler_index(env);
+      EXA_THROW_CHECK_LT(scheduler_index, scheduler_union->schedulers_.size()) << "Scheduler index out of range";
+      return scheduler_union->schedulers_[scheduler_index].schedule().connect(std::move(receiver));
+    }
+  };
+
+ private:
+  std::vector<InnerScheduler> schedulers_;
+  size_t default_scheduler_index_;
 };
 }  // namespace ex_actor

@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <thread>
 
 #include <gtest/gtest.h>
 
@@ -47,20 +48,17 @@ TEST(SchedulerTest, PrioritySchedulerTest) {
                    EXPECT_EQ(count, 0);
                    count++;
                  }) |
-                 ex::write_env(ex::prop {ex_actor::get_std_exec_env,
-                                         std::unordered_map<std::string, std::string> {{"priority", "1"}}});
+                 ex::write_env(ex::prop {ex_actor::get_priority, 1});
   auto sender2 = ex::schedule(scheduler) | ex::then([&count]() {
                    EXPECT_EQ(count, 2);
                    count++;
                  }) |
-                 ex::write_env(ex::prop {ex_actor::get_std_exec_env,
-                                         std::unordered_map<std::string, std::string> {{"priority", "3"}}});
+                 ex::write_env(ex::prop {ex_actor::get_priority, 3});
   auto sender3 = ex::schedule(scheduler) | ex::then([&count]() {
                    EXPECT_EQ(count, 1);
                    count++;
                  }) |
-                 ex::write_env(ex::prop {ex_actor::get_std_exec_env,
-                                         std::unordered_map<std::string, std::string> {{"priority", "2"}}});
+                 ex::write_env(ex::prop {ex_actor::get_priority, 2});
   exec::async_scope scope;
   scope.spawn(sender1);
   scope.spawn(sender2);
@@ -68,4 +66,19 @@ TEST(SchedulerTest, PrioritySchedulerTest) {
   thread_pool.StartWorkers();
   ex::sync_wait(scope.on_empty());
   ASSERT_EQ(count, 3);
+}
+
+TEST(SchedulerTest, SchedulerUnionTest) {
+  ex_actor::WorkSharingThreadPool thread_pool1(1);
+  ex_actor::WorkSharingThreadPool thread_pool2(1);
+  ex_actor::SchedulerUnion scheduler_union(std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {
+      thread_pool1.GetScheduler(), thread_pool2.GetScheduler()});
+  auto scheduler = scheduler_union.GetScheduler();
+  auto start = ex::schedule(scheduler) | ex::then([] { return std::this_thread::get_id(); });
+
+  auto sender1 = start | ex::write_env(ex::prop {ex_actor::get_scheduler_index, 0});
+  auto sender2 = start | ex::write_env(ex::prop {ex_actor::get_scheduler_index, 1});
+  auto [thread_id1] = ex::sync_wait(sender1).value();
+  auto [thread_id2] = ex::sync_wait(sender2).value();
+  ASSERT_NE(thread_id1, thread_id2);
 }

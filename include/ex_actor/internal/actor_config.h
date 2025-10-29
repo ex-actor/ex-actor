@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <unordered_map>
 
 #include <stdexec/execution.hpp>
 
@@ -13,17 +12,37 @@ struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
   uint32_t node_id = 0;
   std::optional<std::string> actor_name;
-  std::optional<std::unordered_map<std::string, std::string>> std_exec_envs;
+
+  /*
+  -----scheduler specific configs-----
+  */
+
+  // used in SchedulerUnion
+  size_t scheduler_index = 0;
+  // used in PriorityThreadPool
+  uint32_t priority = UINT32_MAX;
 };
 
-struct get_std_exec_env_t {
-  constexpr std::optional<std::unordered_map<std::string, std::string>> operator()(const auto& prop) const noexcept {
-    if constexpr (requires { prop.query(get_std_exec_env_t {}); }) {
-      return prop.query(get_std_exec_env_t {});
+struct get_priority_t {
+  constexpr uint32_t operator()(const auto& prop) const noexcept {
+    if constexpr (requires { prop.query(get_priority_t {}); }) {
+      return prop.query(get_priority_t {});
     } else {
-      return std::nullopt;
+      return UINT32_MAX;
     }
   }
 };
-constexpr inline get_std_exec_env_t get_std_exec_env {};
+
+struct get_scheduler_index_t {
+  constexpr uint32_t operator()(const auto& prop) const noexcept {
+    if constexpr (requires { prop.query(get_scheduler_index_t {}); }) {
+      return prop.query(get_scheduler_index_t {});
+    } else {
+      return 0;
+    }
+  }
+};
+
+constexpr inline get_priority_t get_priority {};
+constexpr inline get_scheduler_index_t get_scheduler_index {};
 }  // namespace ex_actor

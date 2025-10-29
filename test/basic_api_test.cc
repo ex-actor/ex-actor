@@ -1,5 +1,7 @@
 #include <cassert>
 #include <iostream>
+#include <memory>
+#include <stdexcept>
 
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
@@ -46,10 +48,24 @@ class Proxy {
   ex_actor::ActorRef<Counter> actor_ref_;
 };
 
-static ex_actor::WorkSharingThreadPool thread_pool(10);
+class TestActorWithNamedLookup {
+ public:
+  explicit TestActorWithNamedLookup(
+      std::weak_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> reg)
+      : registry_(std::move(reg)) {}
+  void LookUpActor() {
+    if (registry_.expired()) throw std::runtime_error("Registry pointer expired before we could look up the actor!");
+    auto ptr = registry_.lock();
+    (void)ptr->GetActorRefByName<Counter>("counter");
+  }
+
+ private:
+  std::weak_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> registry_;
+};
 
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
   auto coroutine = []() -> exec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(10);
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
     auto counter = registry.CreateActor<Counter>();
     co_await counter.Send<&Counter::Error>();
@@ -60,8 +76,8 @@ TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
 
 TEST(BasicApiTest, NestActorRefCase) {
   auto coroutine = []() -> exec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(10);
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     ex_actor::ActorRef counter = registry.CreateActor<Counter>();
     exec::async_scope scope;
     for (int i = 0; i < 100; ++i) {
@@ -81,13 +97,28 @@ TEST(BasicApiTest, NestActorRefCase) {
 }
 
 TEST(BasicApiTest, CreateActorWithFullConfig) {
+  ex_actor::WorkSharingThreadPool thread_pool(10);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-  auto counter = registry.CreateActor<Counter>(ex_actor::ActorConfig {.max_message_executed_per_activation = 10});
-  registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
+  auto counter = registry.CreateActor<Counter>(
+      ex_actor::ActorConfig {.max_message_executed_per_activation = 10, .actor_name = "counter1"});
+  registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter2"});
+  registry.CreateActor<Counter>(ex_actor::ActorConfig {.scheduler_index = 0, .priority = 1});
 
   static_assert(rfl::internal::has_reflection_type_v<ex_actor::ActorRef<Counter>>);
   // test pass by lvalue
   ex_actor::ActorConfig config = {.max_message_executed_per_activation = 10};
   registry.CreateActor<Proxy>(config, counter);
   registry.DestroyActor(counter);
+}
+
+TEST(BasicApiTest, LookUpNamedActor) {
+  auto coroutine = []() -> exec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(10);
+    auto registry_ptr = std::make_shared<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>>(
+        thread_pool.GetScheduler());
+    registry_ptr->CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
+    auto test_retriever_actor = registry_ptr->CreateActor<TestActorWithNamedLookup>(registry_ptr);
+    co_await test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();
+  };
+  ASSERT_NO_THROW(ex::sync_wait(coroutine()));
 }

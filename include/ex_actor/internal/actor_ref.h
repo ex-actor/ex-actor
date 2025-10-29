@@ -75,8 +75,8 @@ class ActorRef {
    * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>
-  auto Send(Args&&... args) const
-      -> exec::task<typename decltype(reflect::UnwrapRetrunSenderIfNested<kMethod>())::type> {
+  [[nodiscard]] auto Send(Args&&... args) const
+      -> exec::task<typename decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
     if (!IsEmpty()) [[unlikely]] {
@@ -88,10 +88,9 @@ class ActorRef {
 
     // remote call
     EXA_THROW_CHECK(message_broker_ != nullptr) << "Message broker not set";
-    // protocol: [request_type][class_index_in_roster][method_index][actor_id][ActorMethodCallArgs]
     using Sig = reflect::Signature<decltype(kMethod)>;
-    serde::ActorMethodCallArgs<typename Sig::DecayedArgsRflTupleType> method_call_args {
-        .args_tuple = typename Sig::DecayedArgsRflTupleType(std::forward<Args>(args)...)};
+    serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
+        .args_tuple = typename Sig::DecayedArgsTupleType(std::forward<Args>(args)...)};
     auto serialized_args = serde::Serialize(method_call_args);
     constexpr std::optional<uint64_t> optional_method_index = reflect::GetActorMethodIndex<kMethod>();
     EXA_THROW_CHECK(optional_method_index.has_value())
@@ -100,13 +99,14 @@ class ActorRef {
     serde::BufferWriter buffer_writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) +
                                                                sizeof(class_index_in_roster_) + sizeof(method_index) +
                                                                sizeof(actor_id_) + serialized_args.size()});
+    // protocol: [request_type][class_index_in_roster][method_index][actor_id][ActorMethodCallArgs]
     buffer_writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallRequest);
     buffer_writer.WritePrimitive(class_index_in_roster_);
     buffer_writer.WritePrimitive(method_index);
     buffer_writer.WritePrimitive(actor_id_);
     buffer_writer.CopyFrom(serialized_args.data(), serialized_args.size());
 
-    using UnwrappedType = decltype(reflect::UnwrapRetrunSenderIfNested<kMethod>())::type;
+    using UnwrappedType = decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type;
     auto sender = message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut()) |
                   ex::then([](network::ByteBufferType response_buffer) {
                     serde::BufferReader reader {std::move(response_buffer)};
@@ -131,7 +131,7 @@ class ActorRef {
    * @brief Send message to a local actor. Has better performance than the generic Send(). No heap allocation.
    */
   template <auto kMethod, class... Args>
-  ex::sender auto SendLocal(Args&&... args) const {
+  [[nodiscard]] ex::sender auto SendLocal(Args&&... args) const {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
     if (!IsEmpty()) [[unlikely]] {

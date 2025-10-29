@@ -5,25 +5,17 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
-#include <ex_actor/internal/reflect.h>
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
 #include <rfl/Tuple.hpp>
 #include <rfl/apply.hpp>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/util.h"
-
-namespace ex_actor {
-struct ActorConfig {
-  size_t max_message_executed_per_activation = 100;
-  uint32_t node_id = 0;
-  std::optional<std::string> actor_name;
-};
-}  // namespace ex_actor
 
 namespace ex_actor::internal {
 struct ActorMessage {
@@ -41,7 +33,9 @@ struct DestroyMessage : ActorMessage {
   Type GetType() const override { return Type::kDestroy; }
 };
 
-struct TypeErasedActor {
+class TypeErasedActor {
+ public:
+  explicit TypeErasedActor(ActorConfig actor_config) : actor_config_(std::move(actor_config)) {}
   virtual ~TypeErasedActor() = default;
   virtual void PushMessage(ActorMessage* task) = 0;
   virtual void* GetUserClassAddress() = 0;
@@ -50,7 +44,12 @@ struct TypeErasedActor {
   ex::sender auto CallActorMethod(Args&&... args);
 
   template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethodUseTuple(rfl::Tuple<Args...> args_tuple);
+  ex::sender auto CallActorMethodUseTuple(std::tuple<Args...> args_tuple);
+
+  const ActorConfig& GetActorConfig() const { return actor_config_; }
+
+ protected:
+  ActorConfig actor_config_;
 };
 
 // ---------------std::execution Scheduler Adaption-----------------
@@ -123,7 +122,7 @@ class Actor : public TypeErasedActor {
  public:
   template <typename... Args>
   explicit Actor(Scheduler scheduler, ActorConfig actor_config, Args&&... args)
-      : scheduler_(std::move(scheduler)), actor_config_(std::move(actor_config)) {
+      : TypeErasedActor(std::move(actor_config)), scheduler_(std::move(scheduler)) {
     if constexpr (kUseStaticCreateFn) {
       user_class_instance_ = std::make_unique<UserClass>(UserClass::Create(std::forward<Args>(args)...));
     } else {
@@ -133,8 +132,8 @@ class Actor : public TypeErasedActor {
 
   template <typename... Args>
   static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(Scheduler scheduler, ActorConfig actor_config,
-                                                            rfl::Tuple<Args...> arg_tuple) {
-    return rfl::apply(
+                                                            std::tuple<Args...> arg_tuple) {
+    return std::apply(
         [scheduler = std::move(scheduler), actor_config = std::move(actor_config)](auto&&... args) {
           return std::make_unique<Actor<UserClass, Scheduler, /*kUseStaticCreateFn=*/true>>(
               std::move(scheduler), std::move(actor_config), std::move(args)...);
@@ -165,7 +164,6 @@ class Actor : public TypeErasedActor {
 
  private:
   Scheduler scheduler_;
-  ActorConfig actor_config_;
   util::LinearizableUnboundedQueue<ActorMessage*> mailbox_;
   std::atomic_size_t pending_message_count_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
@@ -183,7 +181,10 @@ class Actor : public TypeErasedActor {
       return;
     }
 
-    auto sender = ex::schedule(scheduler_) | ex::then([this] { PullMailboxAndRun(); });
+    auto sender = ex::schedule(scheduler_) |
+                  ex::write_env(ex::prop {ex_actor::get_priority, GetActorConfig().priority}) |
+                  ex::write_env(ex::prop {ex_actor::get_scheduler_index, GetActorConfig().scheduler_index}) |
+                  ex::then([this] { PullMailboxAndRun(); });
     async_scope_.spawn(std::move(sender));
   }
 
@@ -220,11 +221,11 @@ class Actor : public TypeErasedActor {
 
 template <auto kMethod, class... Args>
 ex::sender auto TypeErasedActor::CallActorMethod(Args&&... args) {
-  return CallActorMethodUseTuple<kMethod>(rfl::make_tuple(std::forward<Args>(args)...));
+  return CallActorMethodUseTuple<kMethod>(std::make_tuple(std::forward<Args>(args)...));
 }
 
 template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethodUseTuple(rfl::Tuple<Args...> args_tuple) {
+ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::tuple<Args...> args_tuple) {
   using Sig = reflect::Signature<decltype(kMethod)>;
   using ReturnType = Sig::ReturnType;
   using UserClass = Sig::ClassType;
@@ -235,13 +236,13 @@ ex::sender auto TypeErasedActor::CallActorMethodUseTuple(rfl::Tuple<Args...> arg
 
   if constexpr (kIsNested) {
     return std::move(start) | ex::let_value([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {
-             return rfl::apply(
+             return std::apply(
                  [user_class_instance](auto&&... args) { return (user_class_instance->*kMethod)(std::move(args)...); },
                  std::move(args_tuple));
            });
   } else {
     return std::move(start) | ex::then([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {
-             return rfl::apply(
+             return std::apply(
                  [user_class_instance](auto&&... args) { return (user_class_instance->*kMethod)(std::move(args)...); },
                  std::move(args_tuple));
            });

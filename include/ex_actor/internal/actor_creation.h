@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -74,15 +75,21 @@ class ActorRegistry {
   template <class UserClass, class... Args>
   ActorRef<UserClass> CreateActor(ActorConfig config, Args&&... args) {
     EXA_THROW_CHECK_EQ(config.node_id, this_node_id_)
-        << "`CreteActor` can only be used to create actor at current node, to create actor at remote node, use "
+        << "`CreateActor` can only be used to create actor at current node, to create actor at remote node, use "
            "`CreateActorUseStaticCreateFn`, because we need a unique construction signature.";
     auto actor_id = GenerateRandomActorId();
+    auto actor_name = config.actor_name;
     auto actor =
         std::make_unique<Actor<UserClass, Scheduler>>(scheduler_, std::move(config), std::forward<Args>(args)...);
     auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id,
                                       GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                       message_broker_.get());
     actor_id_to_actor_[actor_id] = std::move(actor);
+    if (actor_name) {
+      const auto& name = *actor_name;
+      EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
+      actor_name_to_id_.emplace(name, actor_id);
+    }
     return handle;
   }
 
@@ -115,6 +122,11 @@ class ActorRegistry {
                                         GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                         message_broker_.get());
       actor_id_to_actor_[actor_id] = std::move(actor);
+      if (config.actor_name.has_value()) {
+        std::string& name = *config.actor_name;
+        EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
+        actor_name_to_id_.emplace(name, actor_id);
+      }
       return handle;
     }
 
@@ -125,8 +137,9 @@ class ActorRegistry {
     uint64_t class_index_in_roster = GetActorClassIndexInRoster<UserClass>().value();
 
     // protocol: [message_type][class_index_in_roster][ActorCreationArgs]
-    serde::ActorCreationArgs<typename CreateFnSig::DecayedArgsRflTupleType> actor_creation_args {
-        config, typename CreateFnSig::DecayedArgsRflTupleType {std::forward<Args>(args)...}};
+    typename CreateFnSig::DecayedArgsTupleType args_tuple {std::forward<Args>(args)...};
+    serde::ActorCreationArgs<typename CreateFnSig::DecayedArgsTupleType> actor_creation_args {config,
+                                                                                              std::move(args_tuple)};
     std::vector<char> serialized = serde::Serialize(actor_creation_args);
 
     serde::BufferWriter buffer_writer(network::ByteBufferType {serialized.size() + sizeof(class_index_in_roster) +
@@ -168,6 +181,16 @@ class ActorRegistry {
     EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
     auto& actor = actor_id_to_actor_.at(actor_id);
     actor_id_to_actor_.erase(actor_id);
+    std::erase_if(actor_name_to_id_, [actor_id](const auto& pair) { return pair.second == actor_id; });
+  }
+
+  template <class UserClass>
+  ActorRef<UserClass> GetActorRefByName(const std::string& name) const {
+    const auto actor_id = actor_name_to_id_.at(name);
+    const auto& actor = actor_id_to_actor_.at(actor_id);
+    return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id,
+                               GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
+                               message_broker_.get());
   }
 
  private:
@@ -179,15 +202,16 @@ class ActorRegistry {
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unique_ptr<network::MessageBroker> message_broker_;
   exec::async_scope async_scope_;
+  std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
 
   template <class UserClass>
-  std::optional<uint64_t> GetActorClassIndexInRoster() {
-    constexpr auto actor_class_index = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
-    if (is_distributed_mode_ && !actor_class_index.has_value()) {
-      EXA_THROW_CHECK(actor_class_index.has_value())
+  std::optional<uint64_t> GetActorClassIndexInRoster() const {
+    constexpr auto kActorClassIndex = reflect::GetIndexInParamPack<UserClass, ActorClasses...>();
+    if (is_distributed_mode_ && !kActorClassIndex.has_value()) {
+      EXA_THROW_CHECK(kActorClassIndex.has_value())
           << "Can't find actor class in roster, class=" << typeid(UserClass).name();
     }
-    return actor_class_index;
+    return kActorClassIndex;
   }
   void InitRandomNumGenerator() {
     std::random_device rd;
@@ -276,7 +300,7 @@ void HandleNetworkRequest(uint64_t receive_request_id, network::ByteBufferType r
         std::unique_ptr<TypeErasedActor>& actor = actor_id_to_actor_.at(actor_id);
         constexpr auto kMethodPtr = std::get<kMethodIndex>(kActorMethodsTuple);
         using Sig = reflect::Signature<decltype(kMethodPtr)>;
-        serde::ActorMethodCallArgs<typename Sig::DecayedArgsRflTupleType> call_args =
+        serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
             serde::DeserializeFnArgs<kMethodPtr>(data, size);
         // TODO process ActorRef in the args
         auto sender = actor->template CallActorMethodUseTuple<kMethodPtr>(std::move(call_args.args_tuple)) |

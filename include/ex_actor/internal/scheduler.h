@@ -118,7 +118,7 @@ class WorkSharingThreadPoolBase {
   }
 };
 
-using WorkSharingThreadPool = WorkSharingThreadPoolBase<internal::util::BoundedBlockingQueue>;
+using WorkSharingThreadPool = WorkSharingThreadPoolBase<internal::util::UnboundedBlockingQueue>;
 using PriorityThreadPool = WorkSharingThreadPoolBase<internal::util::UnboundedBlockingPriorityQueue>;
 
 class WorkStealingThreadPool : public exec::static_thread_pool {

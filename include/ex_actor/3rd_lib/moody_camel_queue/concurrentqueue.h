@@ -35,7 +35,6 @@
 #undef BLOCK_SIZE
 
 #ifdef MOODYCAMEL_ALIGNAS
-#pragma message("MOODYCAMEL_ALIGNAS is defined, undefining it.");
 #undef MOODYCAMEL_ALIGNAS
 #endif
 
@@ -3810,3 +3809,8 @@ inline void swap(typename ConcurrentQueue<T, Traits>::ImplicitProducerKVP& a,
 #endif
 
 #pragma pop_macro("BLOCK_SIZE")
+
+// undef it in order not to pollute user's own moody_camel_queue.h
+#ifdef MOODYCAMEL_ALIGNAS
+#undef MOODYCAMEL_ALIGNAS
+#endif

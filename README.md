@@ -98,4 +98,4 @@ We are [Beijing Qianxiang Private Fund Management Co., Ltd (乾象投资)](https
 
 In the process of engineering our trading system, we discovered that no existing actor framework on the market could meet our specific requirements. Consequently, we built one from the ground up.
 
-While this framework has some successful applications internally, we believe there are more valuable use case in the community which can make it more sophisticated. So we open-source ex_actor, look forward to building it together with you!
+While this framework has some successful applications internally, we believe there are more valuable use case in the community which can make it more mature. So we open-source ex_actor, look forward to building it together with you!

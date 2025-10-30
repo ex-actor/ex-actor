@@ -148,7 +148,7 @@ class UnboundedBlockingPriorityQueue {
 };
 
 template <class T>
-class BoundedBlockingQueue {
+class UnboundedBlockingQueue {
  public:
   void Push(T value) { queue_.enqueue(std::move(value)); }
   std::optional<T> Pop(uint64_t timeout_ms) {

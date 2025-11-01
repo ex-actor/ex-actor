@@ -3,11 +3,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <latch>
-#include <mutex>
 #include <thread>
 
 #include <exec/async_scope.hpp>
@@ -36,10 +34,16 @@ struct Identifier {
   MessageFlag flag;
 };
 
+struct HeartbeatConfig {
+  std::chrono::milliseconds heartbeat_timeout;
+  std::chrono::milliseconds heartbeat_interval;
+};
+
 class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
-                         std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler);
+                         std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler,
+                         HeartbeatConfig hearbeat_config);
   ~MessageBroker();
 
   void ClusterAlignedStop();
@@ -99,8 +103,8 @@ class MessageBroker {
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
   void HandleReceivedMessage(zmq::multipart_t multi);
-  void CheckHeartbeat(std::chrono::milliseconds waitting_time);
-  void SendHeartbeat(std::chrono::milliseconds period);
+  void CheckHeartbeat();
+  void SendHeartbeat();
 
   struct ReplyOperation {
     Identifier identifier;
@@ -110,6 +114,7 @@ class MessageBroker {
   std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;
   std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler_;
+  HeartbeatConfig hearbeat_;
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;
 
@@ -126,9 +131,9 @@ class MessageBroker {
   std::jthread recv_thread_;
   bool stopped_ = false;
   std::latch quit_latch_;
-  exec::async_scope scope_;
+  exec::async_scope async_scope_;
 
-  using TimePoint = std::chrono::time_point<std::chrono::high_resolution_clock>;
+  using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
   TimePoint last_heartbeat_;
   std::unordered_map<uint32_t, TimePoint> last_seen_;
 };

@@ -37,15 +37,21 @@ class ActorRegistry {
    * @brief Constructor for distributed mode.
    */
   explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         ActorRoster<ActorClasses...> /*actor_roster*/
-                         )
+                         ActorRoster<ActorClasses...> /*actor_roster*/,
+                         network::HeartbeatConfig heartbeat_config =
+                             {
+                                 .heartbeat_timeout = std::chrono::milliseconds(2000),
+                                 .heartbeat_interval = std::chrono::milliseconds(500),
+                             })
       : is_distributed_mode_(true),
         scheduler_(std::move(scheduler)),
         this_node_id_(this_node_id),
         message_broker_(std::make_unique<network::MessageBroker>(
-            cluster_node_info, this_node_id, [this](uint64_t receive_request_id, network::ByteBufferType data) {
+            cluster_node_info, this_node_id,
+            [this](uint64_t receive_request_id, network::ByteBufferType data) {
               HandleNetworkRequest(receive_request_id, std::move(data));
-            })) {
+            },
+            heartbeat_config)) {
     logging::SetupProcessWideLoggingConfig();
     InitRandomNumGenerator();
     for (const auto& node : cluster_node_info) {

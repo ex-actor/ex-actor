@@ -1,4 +1,3 @@
-#include <chrono>
 #include <exception>
 #include <memory>
 #include <thread>
@@ -63,7 +62,6 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     spdlog::info("node {} creating remote actor B", this_node_id);
     auto remote_b = registry.CreateActorUseStaticCreateFn<B>(ex_actor::ActorConfig {.node_id = remote_node_id}, 1,
                                                              "asd", std::make_unique<int>());
-
     // test remote call
     auto ping_worker =
         registry.CreateActorUseStaticCreateFn<PingWorker>(ex_actor::ActorConfig {.node_id = remote_node_id},

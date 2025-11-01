@@ -2,11 +2,8 @@
 
 #include <atomic>
 #include <chrono>
-#include <exception>
 #include <functional>
-#include <mutex>
 #include <thread>
-#include <type_traits>
 #include <utility>
 
 #include <exec/async_scope.hpp>
@@ -18,16 +15,18 @@
 namespace ex_actor::internal::network {
 
 MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t this_node_id,
-                             std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler)
+                             std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler,
+                             HeartbeatConfig hearbeat_config)
     : node_list_(std::move(node_list)),
       this_node_id_(this_node_id),
       request_handler_(std::move(request_handler)),
+      hearbeat_(hearbeat_config),
       quit_latch_(node_list_.size()),
-      last_heartbeat_(std::chrono::high_resolution_clock::now()) {
+      last_heartbeat_(std::chrono::steady_clock::now()) {
   logging::SetupProcessWideLoggingConfig();
   EstablishConnections();
 
-  auto start_time_point = std::chrono::high_resolution_clock::now();
+  auto start_time_point = std::chrono::steady_clock::now();
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_) {
       last_seen_.emplace(node.node_id, start_time_point);
@@ -138,7 +137,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
       multi.addmem(serialized_identifier.data(), serialized_identifier.size());
       multi.add(std::move(operation->data));
       auto& send_socket = node_id_to_send_socket_.At(operation->identifier.response_node_id);
-      last_heartbeat_ = std::chrono::high_resolution_clock::now();
+      last_heartbeat_ = std::chrono::steady_clock::now();
       EXA_THROW_CHECK(multi.send(send_socket));
       if (operation->identifier.flag == MessageFlag::kQuit || operation->identifier.flag == MessageFlag::kHeartbeat) {
         // quit operation and heartbeat has no response, complete it immediately
@@ -152,10 +151,10 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
       zmq::multipart_t multi;
       multi.addmem(serialized_identifier.data(), serialized_identifier.size());
       multi.add(std::move(reply_operation.data));
-      last_heartbeat_ = std::chrono::high_resolution_clock::now();
+      last_heartbeat_ = std::chrono::steady_clock::now();
       EXA_THROW_CHECK(multi.send(send_socket));
     }
-    SendHeartbeat(std::chrono::milliseconds(100));
+    SendHeartbeat();
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 }
@@ -165,7 +164,7 @@ void MessageBroker::ReceiveProcessLoop(const std::stop_token& stop_token) {
   recv_socket_.set(zmq::sockopt::rcvtimeo, 100);
 
   while (!stop_token.stop_requested()) {
-    CheckHeartbeat(std::chrono::milliseconds(500));
+    CheckHeartbeat();
     zmq::multipart_t multi;
     if (!multi.recv(recv_socket_)) {
       continue;
@@ -190,8 +189,8 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
     return;
   }
 
-  // Request, response and hearbeat will update the last seen time;
-  last_seen_[identifier.request_node_id] = std::chrono::high_resolution_clock::now();
+  // Request, response and heartbeat will update the last seen time;
+  last_seen_[identifier.request_node_id] = std::chrono::steady_clock::now();
   if (identifier.flag == MessageFlag::kHeartbeat) {
     return;
   }
@@ -211,25 +210,25 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   }
 }
 
-void MessageBroker::CheckHeartbeat(std::chrono::milliseconds waitting_time) {
+void MessageBroker::CheckHeartbeat() {
   for (auto& node : node_list_) {
     if (node.node_id != this_node_id_ &&
-        std::chrono::high_resolution_clock::now() - last_seen_[node.node_id] >= waitting_time) {
-      EXA_THROW << " Dead node detected";
+        std::chrono::steady_clock::now() - last_seen_[node.node_id] >= hearbeat_.heartbeat_timeout) {
+      spdlog::error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
+      std::exit(1);
     }
   }
 }
 
-void MessageBroker::SendHeartbeat(std::chrono::milliseconds period) {
-  // If this node is already stopped, we should not send hearbeat
-  if (std::chrono::high_resolution_clock::now() - last_heartbeat_ >= period) {
+void MessageBroker::SendHeartbeat() {
+  if (std::chrono::steady_clock::now() - last_heartbeat_ >= hearbeat_.heartbeat_interval) {
     for (auto& node : node_list_) {
       if (node.node_id != this_node_id_) {
         // Use ex::then to suppress a compilation error, which is likely caused by
         // SendRequestSender not supporting cancellation.
         auto hearbeat =
             SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kHeartbeat) | ex::then([](auto&& null) {});
-        scope_.spawn(std::move(hearbeat));
+        async_scope_.spawn(std::move(hearbeat));
       }
     }
   }

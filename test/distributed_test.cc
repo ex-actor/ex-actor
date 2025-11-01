@@ -1,11 +1,13 @@
+#include <chrono>
+#include <exception>
 #include <memory>
+#include <thread>
 
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
-#include "ex_actor/internal/actor.h"
-#include "ex_actor/internal/util.h"
+#include "spdlog/common.h"
 
 using testing::HasSubstr;
 using testing::Property;
@@ -69,7 +71,6 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
     auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
     ASSERT_EQ(ping_res, "ack from Alice, msg got: hello");
-
     // TODO: test error propagation
     auto error = ping_worker.Send<&PingWorker::Error>();
 

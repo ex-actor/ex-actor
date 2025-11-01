@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <unordered_set>
 
 #include <spdlog/spdlog.h>
 #include <stdexec/execution.hpp>
@@ -185,10 +186,46 @@ class LockGuardedMap {
     map_.erase(key);
   }
 
+  bool Contains(const K& key) {
+    std::lock_guard lock(mutex_);
+    return map_.contains(key);
+  }
+
   std::mutex& GetMutex() const { return mutex_; }
 
  private:
   std::unordered_map<K, V> map_;
+  mutable std::mutex mutex_;
+};
+
+template <class T>
+class LockGuardedSet {
+ public:
+  bool Insert(T value) {
+    std::lock_guard lock(mutex_);
+    auto [iter, inserted] = set_.emplace(std::move(value));
+    return inserted;
+  }
+
+  void Erase(const T& value) {
+    std::lock_guard lock(mutex_);
+    set_.erase(value);
+  }
+
+  bool Empty() {
+    std::lock_guard lock(mutex_);
+    return set_.empty();
+  }
+
+  bool Contains(T value) {
+    std::lock_guard lock(mutex_);
+    return set_.contains(value);
+  }
+
+  std::mutex& GetMutex() const { return mutex_; }
+
+ private:
+  std::unordered_set<T> set_;
   mutable std::mutex mutex_;
 };
 

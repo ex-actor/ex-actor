@@ -4,7 +4,8 @@ function(ex_actor_test NAME)
     set(TEST_TIMEOUT 3)
   endif()
   add_executable(${NAME} ${NAME}.cc)
-  target_link_libraries(${NAME} PRIVATE ex_actor GTest::gtest GTest::gtest_main GTest::gmock)
+  target_link_libraries(${NAME} PRIVATE ex_actor GTest::gtest GTest::gtest_main
+                                        GTest::gmock)
   add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${NAME}>)
   set_tests_properties(${NAME} PROPERTIES TIMEOUT ${TEST_TIMEOUT})
 endfunction()
@@ -18,18 +19,23 @@ ex_actor_test(complex_api_test)
 ex_actor_test(distributed_test)
 ex_actor_test(network_test)
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # multi-process test
 if(NOT WIN32)
   add_executable(multi_process_test multi_process_test.cc)
-  target_link_libraries(multi_process_test PRIVATE ex_actor GTest::gtest GTest::gmock)
-  configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/multi_process_test.sh
-    ${CMAKE_CURRENT_BINARY_DIR}/multi_process_test.sh
-    COPYONLY
-  )
-  add_test(
-    NAME multi_process_test
-    COMMAND multi_process_test.sh $<TARGET_FILE:multi_process_test>
-  )
+  target_link_libraries(multi_process_test PRIVATE ex_actor GTest::gtest
+                                                   GTest::gmock)
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/multi_process_test.sh
+                 ${CMAKE_CURRENT_BINARY_DIR}/multi_process_test.sh COPYONLY)
+  add_test(NAME multi_process_test COMMAND multi_process_test.sh
+                                           $<TARGET_FILE:multi_process_test>)
   set_tests_properties(multi_process_test PROPERTIES TIMEOUT 3)
+
+  add_test(
+    NAME heartbeat_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/heartbeat_test.py
+            $<TARGET_FILE:multi_process_test>)
+
+  set_tests_properties(heartbeat_test PROPERTIES TIMEOUT 3)
+
 endif()

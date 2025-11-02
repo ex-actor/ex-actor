@@ -44,8 +44,8 @@ class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                          std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler,
-                         HeartbeatConfig hearbeat_config = {.heartbeat_timeout = kDefaultTimeout,
-                                                            .heartbeat_interval = kDefaultTimeout});
+                         HeartbeatConfig hearbeat_config = {.heartbeat_timeout = kDefaultHeartbeatTimeout,
+                                                            .heartbeat_interval = kDefaultHeartbeatInterval});
   ~MessageBroker();
 
   void ClusterAlignedStop();

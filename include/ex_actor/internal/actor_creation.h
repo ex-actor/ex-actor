@@ -40,8 +40,8 @@ class ActorRegistry {
                          ActorRoster<ActorClasses...> /*actor_roster*/,
                          network::HeartbeatConfig heartbeat_config =
                              {
-                                 .heartbeat_timeout = kDefaultTimeout,
-                                 .heartbeat_interval = kDefaultInterval,
+                                 .heartbeat_timeout = kDefaultHeartbeatTimeout,
+                                 .heartbeat_interval = kDefaultHeartbeatInterval,
                              })
       : is_distributed_mode_(true),
         scheduler_(std::move(scheduler)),

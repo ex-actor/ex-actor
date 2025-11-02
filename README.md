@@ -9,18 +9,19 @@
 
 **ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework turns you C++ class into a remote service(so called actor). All method calls to it will be pushed into the mailbox(a queue) of the actor and executed in serial. So in your class you don't need any lock, just focus on your logic.
+This framework turns you C++ class into a stateful async service(so-called actor). All method calls to it will be pushed into the mailbox(a FIFO queue) of the actor and executed in serial.
 
-When the actor is local, args in method will be moved directly in memory. When it's a remote actor, I'll help you to serialize them, send through network, and get the return value back.
+The actor can be local or remote, When it's local, args in method will be passed directly in memory. When it's a remote actor, we'll help you to serialize them, send through network, and get the return value back.
 
-This programming model is called "Actor Model". Where each actor can receive message, execute it, and send to other actors. It's a very easy way to write highly parallelized programs, because you don't need any locks in your code. Just write normal classes.
+This programming model is called "Actor Model". Where each actor can receive message, execute it, and send to other actors. **It's a very easy way to write highly parallelized programs, because you don't need any locks in your code. Just write normal classes.**
 
 [This video](https://www.youtube.com/watch?v=ELwEdb_pD0k) gives a good introduction to the Actor Model from high level.
 
 # Key Features
 
-1. **Easy to Use** - Turn your existing class into an actor. No arcane macros and inheritance.
-2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide some out-of-box, e.g. work-sharing & work-stealing thread pool.
+1. **Easy to Use** - Non-intrusive API, turn your existing class into an actor. No arcane macros and inheritance.
+2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work-sharing, work-stealing
+custom priority and so on.
 3. **Standard-Compliant API** - Our actor returns a standard `std::execution::task`, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
 
 
@@ -48,9 +49,8 @@ exec::task<int> Test() {
   ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
 
   // 3. Call it! It returns a `std::execution::task`.
-  auto task = actor.Send<&YourClass::Add>(1) 
-              | stdexec::then([](int value) { return value + 1; });
-  co_return co_await std::move(task);
+  int res = co_await actor.Send<&YourClass::Add>(1);
+  co_return res + 1;
 }
 
 int main() {
@@ -64,13 +64,19 @@ int main() {
 
 ## Installation
 
-See [installation](https://ex-actor.github.io/ex-actor/installation/) page.
+See ⚙️[Installation](https://ex-actor.github.io/ex-actor/installation/) page in our documentation.
 
 ## Contributing
 
-For any questions, bugs or feature requests, open an issue to let us know! We'll try our best to help you!
+### Have questions about any part of the project?
 
-We'll also be very glad if you can implement anything yourself! Just open a pull request, we'll review and merge it in short time.
+Participating in this project is not limited to writing code, your usage and feedback are also invaluable contributions!
+
+If you find any bugs or have any feature requests, open an issue to let us know, we'll try our best to help you.
+
+### Want to implement something yourself?
+
+Have a look at existing issues and pick what you're interested in, especially those with "good first issue" label, such issues are relatively easy to implement.
 
 For more guides, see [contributing](https://ex-actor.github.io/ex-actor/contributing/) page for more details like [how to build from source](https://ex-actor.github.io/ex-actor/contributing/#how-to-build-from-source).
 

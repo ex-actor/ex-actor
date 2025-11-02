@@ -2,26 +2,19 @@
 
 First thank you for considering to contribute to `ex_actor`!
 
-## Have Questions about any part of the project?
+## Have questions about any part of the project?
 
-Open an issue, we'll try our best to help you!
+Participating in this project is not limited to writing code, your usage and feedback are also invaluable contributions!
 
-## Bugs & Features Requests
+If you find any bugs or have any feature requests, open an issue to let us know, we'll try our best to help you.
 
-If you find any bugs or have any feature requests, welcome to open an issue to let us know!
+## Want to implement something yourself?
 
-For small changes, you can directly open a pull request without an issue, we'll review and merge it in short time.
+Have a look at existing issues and pick what you're interested in, especially those with "good first issue" label, such issues are relatively easy to implement.
 
-⚠️ For non-trivial changes which will cost you a lot time to implement, in order to save both our time, please open an issue to discuss with us first.
-By this way we can refine the design in advance and avoid potential duplicate work.
-
-## Roadmap
-
-You can find our roadmap [here](https://github.com/orgs/ex-actor/projects/2). That's what we want to achieve in the future.
-
-Have a look and pick what you're interested in, discuss with us in the related issue, and start coding!
-
-If you have other ideas, welcome to open an issue to discuss with us!
+If you have your own ideas:
+* For small changes, you can directly open a pull request without an issue, we'll review and merge it in short time.
+* ⚠️ For non-trivial changes which will cost you a lot time to implement, in order to save both our time, please open an issue to discuss with us first. By this way we can refine the design in advance and avoid potential duplicate work.
 
 ## How to build from source
 

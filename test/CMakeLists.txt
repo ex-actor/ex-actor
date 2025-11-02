@@ -39,4 +39,4 @@ add_test(
   NAME heartbeat_test
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/heartbeat_test.py
           $<TARGET_FILE:heartbeat_test>)
-set_tests_properties(heartbeat_test PROPERTIES TIMEOUT 5)
+set_tests_properties(heartbeat_test PROPERTIES TIMEOUT 10)

@@ -16,11 +16,11 @@ namespace ex_actor::internal::network {
 
 MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t this_node_id,
                              std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler,
-                             HeartbeatConfig hearbeat_config)
+                             HeartbeatConfig heartbeat_config)
     : node_list_(std::move(node_list)),
       this_node_id_(this_node_id),
       request_handler_(std::move(request_handler)),
-      hearbeat_(hearbeat_config),
+      heartbeat_(heartbeat_config),
       quit_latch_(node_list_.size()),
       last_heartbeat_(std::chrono::steady_clock::now()) {
   logging::SetupProcessWideLoggingConfig();
@@ -213,7 +213,7 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
 void MessageBroker::CheckHeartbeat() {
   for (auto& node : node_list_) {
     if (node.node_id != this_node_id_ &&
-        std::chrono::steady_clock::now() - last_seen_[node.node_id] >= hearbeat_.heartbeat_timeout) {
+        std::chrono::steady_clock::now() - last_seen_[node.node_id] >= heartbeat_.heartbeat_timeout) {
       spdlog::error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
       std::exit(1);
     }
@@ -221,14 +221,14 @@ void MessageBroker::CheckHeartbeat() {
 }
 
 void MessageBroker::SendHeartbeat() {
-  if (std::chrono::steady_clock::now() - last_heartbeat_ >= hearbeat_.heartbeat_interval) {
+  if (std::chrono::steady_clock::now() - last_heartbeat_ >= heartbeat_.heartbeat_interval) {
     for (auto& node : node_list_) {
       if (node.node_id != this_node_id_) {
         // Use ex::then to suppress a compilation error, which is likely caused by
         // SendRequestSender not supporting cancellation.
-        auto hearbeat =
+        auto heartbeat =
             SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kHeartbeat) | ex::then([](auto&& null) {});
-        async_scope_.spawn(std::move(hearbeat));
+        async_scope_.spawn(std::move(heartbeat));
       }
     }
   }

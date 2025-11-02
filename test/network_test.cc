@@ -1,6 +1,5 @@
 #include "ex_actor/internal/network.h"
 
-#include <chrono>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -9,7 +8,6 @@
 #include "ex_actor/api.h"
 
 using ex_actor::internal::network::ByteBufferType;
-using ex_actor::internal::network::HeartbeatConfig;
 
 TEST(NetworkTest, MessageBrokerTest) {
   auto test_once = []() {
@@ -21,12 +19,9 @@ TEST(NetworkTest, MessageBrokerTest) {
       ex_actor::internal::util::SetThreadName("node_" + std::to_string(node_id));
       ex_actor::internal::network::MessageBroker message_broker(
           node_list,
-          /*this_node_id=*/node_id,
-          [&message_broker](uint64_t receive_request_id, ByteBufferType data) {
+          /*this_node_id=*/node_id, [&message_broker](uint64_t receive_request_id, ByteBufferType data) {
             message_broker.ReplyRequest(receive_request_id, std::move(data));
-          },
-          HeartbeatConfig {.heartbeat_timeout = std::chrono::milliseconds(2000),
-                           .heartbeat_interval = std::chrono::milliseconds(500)});
+          });
       uint32_t to_node_id = (node_id + 1) % node_list.size();
       exec::async_scope scope;
       for (int i = 0; i < 5; ++i) {

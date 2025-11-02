@@ -13,6 +13,7 @@
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
+#include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
@@ -43,7 +44,8 @@ class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                          std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler,
-                         HeartbeatConfig hearbeat_config);
+                         HeartbeatConfig hearbeat_config = {.heartbeat_timeout = kDefaultTimeout,
+                                                            .heartbeat_interval = kDefaultTimeout});
   ~MessageBroker();
 
   void ClusterAlignedStop();

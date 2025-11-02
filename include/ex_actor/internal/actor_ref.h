@@ -167,7 +167,7 @@ template <class UserClass>
 struct hash<ex_actor::ActorRef<UserClass>> {
   size_t operator()(const ex_actor::ActorRef<UserClass>& ref) const {
     if (!ref.IsEmpty()) {
-      return 10086;
+      return ex_actor::internal::kEmptyActorRefHashVal;
     }
     return std::hash<uint64_t>()(ref.GetActorId()) ^ std::hash<uint32_t>()(ref.GetNodeId());
   }

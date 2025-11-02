@@ -7,11 +7,11 @@
 
 **ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework turns you C++ class into a remote service(so called actor). All method calls to it will be pushed into the mailbox(a queue) of the actor and executed in serial. So in your class you don't need any lock, just focus on your logic.
+This framework turns you C++ class into a stateful async service(so-called actor). All method calls to it will be pushed into the mailbox(a FIFO queue) of the actor and executed in serial.
 
-When the actor is local, args in method will be moved directly in memory. When it's a remote actor, I'll help you to serialize them, send through network, and get the return value back.
+The actor can be local or remote, When it's local, args in method will be passed directly in memory. When it's a remote actor, we'll help you to serialize them, send through network, and get the return value back.
 
-This programming model is called "Actor Model". Where each actor can receive message, execute it, and send to other actors. It's a very easy way to write highly parallelized programs, because you don't need any locks in your code. Just write normal classes.
+This programming model is called "Actor Model". Where each actor can receive message, execute it, and send to other actors. **It's a very easy way to write highly parallelized programs, because you don't need any locks in your code. Just write normal classes.**
 
 [This video](https://www.youtube.com/watch?v=ELwEdb_pD0k) gives a good introduction to the Actor Model from high level.
 
@@ -46,9 +46,8 @@ exec::task<int> Test() {
   ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
 
   // 3. Call it! It returns a `std::execution::task`.
-  auto task = actor.Send<&YourClass::Add>(1) 
-              | stdexec::then([](int value) { return value + 1; });
-  co_return co_await std::move(task);
+  int res = co_await actor.Send<&YourClass::Add>(1);
+  co_return res + 1;
 }
 
 int main() {

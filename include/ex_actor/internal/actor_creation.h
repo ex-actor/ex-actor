@@ -8,6 +8,7 @@
 #include <random>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/actor_ref.h"
@@ -36,14 +37,21 @@ class ActorRegistry {
    * @brief Constructor for distributed mode.
    */
   explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         ActorRoster<ActorClasses...> /*actor_roster*/)
+                         ActorRoster<ActorClasses...> /*actor_roster*/,
+                         network::HeartbeatConfig heartbeat_config =
+                             {
+                                 .heartbeat_timeout = kDefaultHeartbeatTimeout,
+                                 .heartbeat_interval = kDefaultHeartbeatInterval,
+                             })
       : is_distributed_mode_(true),
         scheduler_(std::move(scheduler)),
         this_node_id_(this_node_id),
         message_broker_(std::make_unique<network::MessageBroker>(
-            cluster_node_info, this_node_id, [this](uint64_t receive_request_id, network::ByteBufferType data) {
+            cluster_node_info, this_node_id,
+            [this](uint64_t receive_request_id, network::ByteBufferType data) {
               HandleNetworkRequest(receive_request_id, std::move(data));
-            })) {
+            },
+            heartbeat_config)) {
     logging::SetupProcessWideLoggingConfig();
     InitRandomNumGenerator();
     for (const auto& node : cluster_node_info) {
@@ -62,6 +70,7 @@ class ActorRegistry {
     for (auto& [_, actor] : actor_id_to_actor_) {
       actor->PushMessage(destroy_msg.get());
     }
+    ex::sync_wait(async_scope_.on_empty());
     actor_id_to_actor_.clear();
   }
 

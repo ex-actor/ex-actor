@@ -1,17 +1,19 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
-#include <cstdlib>
+#include <exception>
 #include <functional>
 #include <latch>
-#include <mutex>
 #include <thread>
 
+#include <exec/async_scope.hpp>
 #include <exec/task.hpp>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
+#include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
@@ -24,17 +26,26 @@ struct NodeInfo {
 namespace ex_actor::internal::network {
 using ByteBufferType = zmq::message_t;
 
+enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kHeartbeat };
+
 struct Identifier {
   uint32_t request_node_id;
   uint32_t response_node_id;
   uint64_t request_id_in_node;
-  bool quit_flag = false;
+  MessageFlag flag;
+};
+
+struct HeartbeatConfig {
+  std::chrono::milliseconds heartbeat_timeout;
+  std::chrono::milliseconds heartbeat_interval;
 };
 
 class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
-                         std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler);
+                         std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler,
+                         HeartbeatConfig hearbeat_config = {.heartbeat_timeout = kDefaultHeartbeatTimeout,
+                                                            .heartbeat_interval = kDefaultHeartbeatInterval});
   ~MessageBroker();
 
   void ClusterAlignedStop();
@@ -84,7 +95,7 @@ class MessageBroker {
    * @brief Send buffer to the remote node.
    * @return A sender containing raw response buffer.
    */
-  SendRequestSender SendRequest(uint32_t to_node_id, ByteBufferType data, bool quit_flag = false);
+  SendRequestSender SendRequest(uint32_t to_node_id, ByteBufferType data, MessageFlag flag = MessageFlag::kNormal);
 
   void ReplyRequest(uint64_t receive_request_id, ByteBufferType data);
 
@@ -94,6 +105,8 @@ class MessageBroker {
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
   void HandleReceivedMessage(zmq::multipart_t multi);
+  void CheckHeartbeat();
+  void SendHeartbeat();
 
   struct ReplyOperation {
     Identifier identifier;
@@ -103,6 +116,7 @@ class MessageBroker {
   std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;
   std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler_;
+  HeartbeatConfig hearbeat_;
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;
 
@@ -119,6 +133,11 @@ class MessageBroker {
   std::jthread recv_thread_;
   bool stopped_ = false;
   std::latch quit_latch_;
+  exec::async_scope async_scope_;
+
+  using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
+  TimePoint last_heartbeat_;
+  std::unordered_map<uint32_t, TimePoint> last_seen_;
 };
 
 }  // namespace ex_actor::internal::network

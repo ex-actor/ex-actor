@@ -38,7 +38,7 @@ MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t
 }
 
 MessageBroker::~MessageBroker() {
-  if (!stopped_) {
+  if (!stopped_.load()) {
     ClusterAlignedStop();
   }
 }
@@ -48,16 +48,16 @@ void MessageBroker::ClusterAlignedStop() {
   spdlog::info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_id_);
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_) {
-      auto sender = SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kQuit);
-      // TODO: async_scope.spawn() won't compile, figure it out later
-      stdexec::sync_wait(std::move(sender));
+      auto sender = SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kQuit) | ex::then([](auto empty) {});
+      async_scope_.spawn(std::move(sender));
     }
   }
 
   quit_latch_.count_down();
   // wait until all nodes are going to quit
   quit_latch_.wait();
-  stopped_ = true;
+  stopped_.store(true);
+  ex::sync_wait(async_scope_.on_empty());
   spdlog::info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_id_);
   // stop io threads first
   send_thread_.request_stop();
@@ -211,7 +211,7 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
 }
 
 void MessageBroker::CheckHeartbeat() {
-  for (auto& node : node_list_) {
+  for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_ &&
         std::chrono::steady_clock::now() - last_seen_[node.node_id] >= heartbeat_.heartbeat_timeout) {
       spdlog::error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
@@ -221,11 +221,9 @@ void MessageBroker::CheckHeartbeat() {
 }
 
 void MessageBroker::SendHeartbeat() {
-  if (std::chrono::steady_clock::now() - last_heartbeat_ >= heartbeat_.heartbeat_interval) {
-    for (auto& node : node_list_) {
+  if (!stopped_.load() && std::chrono::steady_clock::now() - last_heartbeat_ >= heartbeat_.heartbeat_interval) {
+    for (const auto& node : node_list_) {
       if (node.node_id != this_node_id_) {
-        // Use ex::then to suppress a compilation error, which is likely caused by
-        // SendRequestSender not supporting cancellation.
         auto heartbeat =
             SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kHeartbeat) | ex::then([](auto&& null) {});
         async_scope_.spawn(std::move(heartbeat));

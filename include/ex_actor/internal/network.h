@@ -131,7 +131,7 @@ class MessageBroker {
 
   std::jthread send_thread_;
   std::jthread recv_thread_;
-  bool stopped_ = false;
+  std::atomic_bool stopped_ = false;
   std::latch quit_latch_;
   exec::async_scope async_scope_;
 

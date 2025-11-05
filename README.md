@@ -20,8 +20,7 @@ This programming model is called "Actor Model". **It offers a simple way to buil
 # Key Features
 
 1. **Easy to Use** - Non-intrusive API, turn your existing class into an actor. No arcane macros and inheritance.
-2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work-sharing, work-stealing
-custom priority and so on.
+2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work-sharing, work-stealing, custom priority and so on.
 3. **Standard-Compliant API** - Our actor returns a standard `std::execution::task`, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
 
 

@@ -34,6 +34,9 @@ enum class NetworkRequestType : uint8_t {
   kActorMethodCallRequest,
   kActorMethodCallReturn,
   kActorMethodCallError,
+  kActorLookUpRequest,
+  kActorLookUpReturn,
+  kActorLookUpError,
 };
 
 template <class Tuple>

@@ -53,10 +53,10 @@ class TestActorWithNamedLookup {
   explicit TestActorWithNamedLookup(
       std::weak_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> reg)
       : registry_(std::move(reg)) {}
-  void LookUpActor() {
+  auto LookUpActor() {
     if (registry_.expired()) throw std::runtime_error("Registry pointer expired before we could look up the actor!");
     auto ptr = registry_.lock();
-    (void)ptr->GetActorRefByName<Counter>("counter");
+    return ptr->GetActorRefByName<Counter>("counter");
   }
 
  private:
@@ -112,13 +112,22 @@ TEST(BasicApiTest, CreateActorWithFullConfig) {
 }
 
 TEST(BasicApiTest, LookUpNamedActor) {
-  auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(10);
-    auto registry_ptr = std::make_shared<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>>(
-        thread_pool.GetScheduler());
-    registry_ptr->CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
-    auto test_retriever_actor = registry_ptr->CreateActor<TestActorWithNamedLookup>(registry_ptr);
-    co_await test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();
-  };
-  ASSERT_NO_THROW(ex::sync_wait(coroutine()));
+  ex_actor::WorkSharingThreadPool thread_pool(10);
+  auto registry_ptr =
+      std::make_shared<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>>(thread_pool.GetScheduler());
+  registry_ptr->CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
+  auto test_retriever_actor = registry_ptr->CreateActor<TestActorWithNamedLookup>(registry_ptr);
+
+  auto lookup_sender = test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();
+  auto lookup_reply = ex::sync_wait(std::move(lookup_sender));
+  ASSERT_EQ(lookup_reply.has_value(), true);
+  auto [lookup_result] = lookup_reply.value();
+  ASSERT_EQ(lookup_result.has_value(), true);
+
+  auto actor = lookup_result.value();
+  auto getvalue_sender = actor.Send<&Counter::GetValue>();
+  auto getvalue_reply = ex::sync_wait(std::move(getvalue_sender));
+  ASSERT_EQ(getvalue_reply.has_value(), true);
+  auto [value] = getvalue_reply.value();
+  ASSERT_EQ(value, 0);
 }

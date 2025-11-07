@@ -34,6 +34,9 @@ enum class NetworkRequestType : uint8_t {
   kActorMethodCallRequest,
   kActorMethodCallReturn,
   kActorMethodCallError,
+  kActorLookUpRequest,
+  kActorLookUpReturn,
+  kActorLookUpError,
 };
 
 template <class Tuple>
@@ -50,6 +53,10 @@ struct ActorMethodCallArgs {
 template <class T>
 struct ActorMethodReturnValue {
   T return_value;
+};
+
+struct ActorLookUpRequest {
+  std::string actor_name;
 };
 
 template <>

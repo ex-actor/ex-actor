@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <random>
 #include <type_traits>
 #include <unordered_map>
@@ -92,7 +93,7 @@ class ActorRegistry {
     actor_id_to_actor_[actor_id] = std::move(actor);
     if (actor_name) {
       const auto& name = *actor_name;
-      EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
+      EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists.";
       actor_name_to_id_.emplace(name, actor_id);
     }
     return handle;
@@ -178,12 +179,48 @@ class ActorRegistry {
   }
 
   template <class UserClass>
-  ActorRef<UserClass> GetActorRefByName(const std::string& name) const {
-    const auto actor_id = actor_name_to_id_.at(name);
-    const auto& actor = actor_id_to_actor_.at(actor_id);
-    return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id,
-                               GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
-                               message_broker_.get());
+  std::optional<ActorRef<UserClass>> GetActorRefByName(const std::string& name) const {
+    if (actor_name_to_id_.contains(name)) {
+      const auto actor_id = actor_name_to_id_.at(name);
+      const auto& actor = actor_id_to_actor_.at(actor_id);
+      return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id,
+                                 GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
+                                 message_broker_.get());
+    }
+
+    return std::nullopt;
+  }
+
+  template <class UserClass>
+  std::optional<ActorRef<UserClass>> GetActorRefByName(const uint32_t& node_id, const std::string& name) const {
+    if (node_id == this_node_id_) {
+      return GetActorRefByName<UserClass>(name);
+    }
+
+    std::vector<char> serialized = serde::Serialize(serde::ActorLookUpRequest {name});
+
+    serde::BufferWriter<network::ByteBufferType> writer(
+        network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
+    writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpRequest);
+    writer.CopyFrom(serialized.data(), serialized.size());
+
+    auto sender = message_broker_->SendRequest(node_id, network::ByteBufferType {std::move(writer).MoveBufferOut()}) |
+                  ex::then([](network::ByteBufferType buffer) -> std::optional<uint64_t> {
+                    serde::BufferReader<network::ByteBufferType> reader(std::move(buffer));
+                    auto type = reader.NextPrimitive<serde::NetworkRequestType>();
+                    if (type == serde::NetworkRequestType::kActorLookUpReturn) {
+                      return reader.NextPrimitive<uint64_t>();
+                    }
+                    return std::nullopt;
+                  });
+
+    auto [actor_id] = ex::sync_wait(std::move(sender)).value();
+    if (actor_id.has_value()) {
+      return ActorRef<UserClass>(this_node_id_, node_id, actor_id.value(),
+                                 GetActorClassIndexInRoster<UserClass>().value(), nullptr, message_broker_.get());
+    }
+
+    return std::nullopt;
   }
 
  private:
@@ -243,6 +280,26 @@ class ActorRegistry {
                              reader.RemainingSize());
       return;
     }
+
+    if (message_type == serde::NetworkRequestType::kActorLookUpRequest) {
+      auto actor_name =
+          serde::Deserialize<serde::ActorLookUpRequest>(reader.Current(), reader.RemainingSize()).actor_name;
+
+      if (actor_name_to_id_.contains(actor_name)) {
+        serde::BufferWriter<network::ByteBufferType> writer(
+            network::ByteBufferType(sizeof(serde::NetworkRequestType) + sizeof(uint64_t)));
+        auto actor_id = actor_name_to_id_.at(actor_name);
+        writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpReturn);
+        writer.WritePrimitive(actor_id);
+        message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+      } else {
+        serde::BufferWriter writer(network::ByteBufferType(sizeof(serde::NetworkRequestType)));
+        writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpError);
+        message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+      }
+
+      return;
+    }
     EXA_THROW << "Invalid message type: " << static_cast<int>(message_type);
   }
 
@@ -252,9 +309,15 @@ class ActorRegistry {
       using ActorClass = reflect::ParamPackElement<kClassIndex, ActorClasses...>;
       constexpr auto kFactoryCreateFn = &ActorClass::Create;
       serde::ActorCreationArgs creation_args = serde::DeserializeFnArgs<kFactoryCreateFn>(data, size);
+      auto actor_id = GenerateRandomActorId();
+      auto& actor_name = creation_args.actor_config.actor_name;
+      if (actor_name.has_value()) {
+        EXA_THROW_CHECK(!actor_name_to_id_.contains(actor_name.value()))
+            << "An actor with the same name already exists.";
+        actor_name_to_id_.emplace(actor_name.value(), actor_id);
+      }
       std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, Scheduler>::CreateUseArgTuple(
           scheduler_, std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
-      auto actor_id = GenerateRandomActorId();
       actor_id_to_actor_[actor_id] = std::move(actor);
       return actor_id;
     }

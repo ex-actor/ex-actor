@@ -39,6 +39,15 @@ class PingWorker {
   std::string name_;
 };
 
+class Echoer {
+ public:
+  static Echoer Create() { return Echoer(); }
+
+  std::string Echo(const std::string& message) { return message; }
+
+  static constexpr std::tuple kActorMethods = {&Echoer::Echo};
+};
+
 TEST(DistributedTest, ConstructionInDistributedMode) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
@@ -86,22 +95,30 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
 TEST(DistributedTest, ActorLookUpInDistributeMode) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRoster<A> roster;
+    ex_actor::ActorRoster<Echoer> roster;
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
                                      /*this_node_id=*/this_node_id, cluster_node_info, roster);
 
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
-    auto remote_actor = registry.CreateActorUseStaticCreateFn<A>(
+    auto remote_actor = registry.CreateActorUseStaticCreateFn<Echoer>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Alice"});
-    auto lookup_result = registry.GetActorRefByName<A>(remote_node_id, "Alice");
-    auto lookup_error = registry.GetActorRefByName<A>(remote_node_id, "A");
+    auto lookup_result = registry.GetActorRefByName<Echoer>(remote_node_id, "Alice");
+    auto lookup_error = registry.GetActorRefByName<Echoer>(remote_node_id, "A");
 
     ASSERT_EQ(lookup_result.has_value(), true);
     ASSERT_EQ(lookup_result.value().GetActorId(), remote_actor.GetActorId());
     ASSERT_EQ(lookup_error.has_value(), false);
+
+    auto actor = lookup_result.value();
+    auto sender = actor.Send<&Echoer::Echo>("hello");
+    auto reply = stdexec::sync_wait(std::move(sender));
+    ASSERT_EQ(reply.has_value(), true);
+    auto [reply_msg] = reply.value();
+    ASSERT_EQ(reply_msg, "hello");
   };
+
   std::jthread node_0(node_main, 0);
   std::jthread node_1(node_main, 1);
 

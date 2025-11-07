@@ -197,7 +197,11 @@ class ActorRegistry {
       return GetActorRefByName<UserClass>(name);
     }
 
-    std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnValue(name));
+    struct ActorName {
+      std::string name;
+    };
+    std::vector<char> serialized = serde::Serialize(ActorName {name});
+
     serde::BufferWriter<network::ByteBufferType> writer(
         network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
     writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpRequest);

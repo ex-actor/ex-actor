@@ -55,6 +55,11 @@ struct ActorMethodReturnValue {
   T return_value;
 };
 
+template <class T>
+struct ActorLookUpRequest {
+  T actor_name;
+};
+
 template <>
 struct ActorMethodReturnValue<void> {};
 

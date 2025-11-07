@@ -8,7 +8,6 @@
 
 #include "ex_actor/api.h"
 #include "ex_actor/internal/actor_creation.h"
-#include "stdexec/__detail/__sync_wait.hpp"
 
 namespace ex = stdexec;
 

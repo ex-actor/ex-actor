@@ -283,8 +283,7 @@ class ActorRegistry {
 
     if (message_type == serde::NetworkRequestType::kActorLookUpRequest) {
       auto actor_name =
-          serde::Deserialize<serde::ActorLookUpRequest<std::string>>(reader.Current(), reader.RemainingSize())
-              .actor_name;
+          serde::Deserialize<serde::ActorLookUpRequest>(reader.Current(), reader.RemainingSize()).actor_name;
 
       if (actor_name_to_id_.contains(actor_name)) {
         serde::BufferWriter<network::ByteBufferType> writer(

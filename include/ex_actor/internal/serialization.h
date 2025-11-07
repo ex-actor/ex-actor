@@ -55,9 +55,8 @@ struct ActorMethodReturnValue {
   T return_value;
 };
 
-template <class T>
 struct ActorLookUpRequest {
-  T actor_name;
+  std::string actor_name;
 };
 
 template <>

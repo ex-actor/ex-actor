@@ -281,7 +281,8 @@ class ActorRegistry {
         writer.WritePrimitive(actor_id);
         message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
       } catch (std::exception& error) {
-        std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnValue {std::string(error.what())});
+        auto error_msg = std::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
+        std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnValue {std::move(error_msg)});
         serde::BufferWriter<network::ByteBufferType> writer(
             network::ByteBufferType(sizeof(serde::NetworkReplyType) + serialized.size()));
         writer.WritePrimitive(serde::NetworkReplyType::kActorCreationError);
@@ -358,32 +359,32 @@ class ActorRegistry {
         serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
             serde::DeserializeFnArgs<kMethodPtr>(data, size);
         // TODO process ActorRef in the args
-        auto sender = actor->template CallActorMethodUseTuple<kMethodPtr>(std::move(call_args.args_tuple)) |
-                      ex::then([this, receive_request_id](auto return_value) {
-                        std::vector<char> serialized =
-                            serde::Serialize(serde::ActorMethodReturnValue {std::move(return_value)});
-                        serde::BufferWriter writer(
-                            network::ByteBufferType {sizeof(serde::NetworkRequestType) + serialized.size()});
-                        // TODO optimize the copy here
-                        writer.WritePrimitive(serde::NetworkReplyType::kActorMethodCallReturn);
-                        writer.CopyFrom(serialized.data(), serialized.size());
-                        message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
-                      }) |
-                      ex::upon_error([this, receive_request_id](auto error) {
-                        try {
-                          if (error) {
-                            std::rethrow_exception(error);
-                          }
-                        } catch (std::exception& error) {
-                          std::vector<char> serialized =
-                              serde::Serialize(serde::ActorMethodReturnValue {std::string(error.what())});
-                          serde::BufferWriter writer(
-                              network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
-                          writer.WritePrimitive(serde::NetworkReplyType::kActorMethodCallError);
-                          writer.CopyFrom(serialized.data(), serialized.size());
-                          message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
-                        }
-                      });
+        auto sender =
+            actor->template CallActorMethodUseTuple<kMethodPtr>(std::move(call_args.args_tuple)) |
+            ex::then([this, receive_request_id](auto return_value) {
+              std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnValue {std::move(return_value)});
+              serde::BufferWriter writer(
+                  network::ByteBufferType {sizeof(serde::NetworkRequestType) + serialized.size()});
+              // TODO optimize the copy here
+              writer.WritePrimitive(serde::NetworkReplyType::kActorMethodCallReturn);
+              writer.CopyFrom(serialized.data(), serialized.size());
+              message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+            }) |
+            ex::upon_error([this, receive_request_id](auto error) {
+              try {
+                if (error) {
+                  std::rethrow_exception(error);
+                }
+              } catch (std::exception& error) {
+                auto error_msg = std::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
+                std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnValue {std::move(error_msg)});
+                serde::BufferWriter writer(
+                    network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
+                writer.WritePrimitive(serde::NetworkReplyType::kActorMethodCallError);
+                writer.CopyFrom(serialized.data(), serialized.size());
+                message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+              }
+            });
         async_scope_.spawn(std::move(sender));
         return;
       }

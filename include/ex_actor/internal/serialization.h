@@ -32,17 +32,27 @@ T Deserialize(const uint8_t* data, size_t size) {
 enum class NetworkRequestType : uint8_t {
   kActorCreationRequest = 0,
   kActorMethodCallRequest,
+  kActorLookUpRequest,
+};
+
+enum class NetworkReplyType : uint8_t {
+  kActorCreationReturn = 0,
+  kActorCreationError,
   kActorMethodCallReturn,
   kActorMethodCallError,
-  kActorLookUpRequest,
   kActorLookUpReturn,
   kActorLookUpError,
+
 };
 
 template <class Tuple>
 struct ActorCreationArgs {
   ActorConfig actor_config;
   Tuple args_tuple;
+};
+
+struct ActorCreationError {
+  std::string error;
 };
 
 template <class Tuple>
@@ -55,12 +65,12 @@ struct ActorMethodReturnValue {
   T return_value;
 };
 
+template <>
+struct ActorMethodReturnValue<void> {};
+
 struct ActorLookUpRequest {
   std::string actor_name;
 };
-
-template <>
-struct ActorMethodReturnValue<void> {};
 
 template <auto kFn>
 auto DeserializeFnArgs(const uint8_t* data, size_t size) {

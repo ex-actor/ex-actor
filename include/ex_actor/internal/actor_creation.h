@@ -130,7 +130,7 @@ class ActorRegistry {
       actor_id_to_actor_[actor_id] = std::move(actor);
       if (config.actor_name.has_value()) {
         std::string& name = *config.actor_name;
-        EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "Actor already exists";
+        EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists.";
         actor_name_to_id_.emplace(name, actor_id);
       }
       return handle;
@@ -157,12 +157,17 @@ class ActorRegistry {
     EXA_THROW_CHECK(buffer_writer.EndReached()) << "Buffer writer not ended";
 
     // send to remote
-    auto sender = message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut()) |
-                  ex::then([](network::ByteBufferType response_buffer) {
-                    serde::BufferReader reader(std::move(response_buffer));
-                    auto actor_id = reader.template NextPrimitive<uint64_t>();
-                    return actor_id;
-                  });
+    auto sender =
+        message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut()) |
+        ex::then([](network::ByteBufferType response_buffer) {
+          serde::BufferReader reader(std::move(response_buffer));
+          auto type = reader.template NextPrimitive<serde::NetworkReplyType>();
+          if (type == serde::NetworkReplyType::kActorCreationError) {
+            EXA_THROW << serde::Deserialize<serde::ActorCreationError>(reader.Current(), reader.RemainingSize()).error;
+          }
+          auto actor_id = reader.template NextPrimitive<uint64_t>();
+          return actor_id;
+        });
     // sync wait and create handle
     auto [actor_id] = stdexec::sync_wait(std::move(sender)).value();
     return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, GetActorClassIndexInRoster<UserClass>().value(),
@@ -198,7 +203,6 @@ class ActorRegistry {
     }
 
     std::vector<char> serialized = serde::Serialize(serde::ActorLookUpRequest {name});
-
     serde::BufferWriter<network::ByteBufferType> writer(
         network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
     writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpRequest);
@@ -207,8 +211,8 @@ class ActorRegistry {
     auto sender = message_broker_->SendRequest(node_id, network::ByteBufferType {std::move(writer).MoveBufferOut()}) |
                   ex::then([](network::ByteBufferType buffer) -> std::optional<uint64_t> {
                     serde::BufferReader<network::ByteBufferType> reader(std::move(buffer));
-                    auto type = reader.NextPrimitive<serde::NetworkRequestType>();
-                    if (type == serde::NetworkRequestType::kActorLookUpReturn) {
+                    auto type = reader.NextPrimitive<serde::NetworkReplyType>();
+                    if (type == serde::NetworkReplyType::kActorLookUpReturn) {
                       return reader.NextPrimitive<uint64_t>();
                     }
                     return std::nullopt;
@@ -243,10 +247,12 @@ class ActorRegistry {
     }
     return kActorClassIndex;
   }
+
   void InitRandomNumGenerator() {
     std::random_device rd;
     random_num_generator_ = std::mt19937(rd());
   }
+
   uint64_t GenerateRandomActorId() {
     while (true) {
       auto id = random_num_generator_();
@@ -264,14 +270,27 @@ class ActorRegistry {
   void HandleNetworkRequest(uint64_t receive_request_id, network::ByteBufferType request_buffer) {
     serde::BufferReader<network::ByteBufferType> reader(std::move(request_buffer));
     auto message_type = reader.NextPrimitive<serde::NetworkRequestType>();
+
     if (message_type == serde::NetworkRequestType::kActorCreationRequest) {
       auto actor_cls_index = reader.NextPrimitive<uint64_t>();
-      uint64_t actor_id = FindClassAndCreateActor(actor_cls_index, reader.Current(), reader.RemainingSize());
-      serde::BufferWriter<network::ByteBufferType> writer(network::ByteBufferType(sizeof(actor_id)));
-      writer.WritePrimitive(actor_id);
-      message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+      try {
+        uint64_t actor_id = FindClassAndCreateActor(actor_cls_index, reader.Current(), reader.RemainingSize());
+        serde::BufferWriter<network::ByteBufferType> writer(
+            network::ByteBufferType(sizeof(serde::NetworkReplyType) + sizeof(actor_id)));
+        writer.WritePrimitive(serde::NetworkReplyType::kActorCreationReturn);
+        writer.WritePrimitive(actor_id);
+        message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+      } catch (std::exception& error) {
+        std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnValue {std::string(error.what())});
+        serde::BufferWriter<network::ByteBufferType> writer(
+            network::ByteBufferType(sizeof(serde::NetworkReplyType) + serialized.size()));
+        writer.WritePrimitive(serde::NetworkReplyType::kActorCreationError);
+        writer.CopyFrom(serialized.data(), serialized.size());
+        message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
+      }
       return;
     }
+
     if (message_type == serde::NetworkRequestType::kActorMethodCallRequest) {
       auto class_index_in_roster = reader.NextPrimitive<uint64_t>();
       auto method_index = reader.NextPrimitive<uint64_t>();
@@ -289,12 +308,12 @@ class ActorRegistry {
         serde::BufferWriter<network::ByteBufferType> writer(
             network::ByteBufferType(sizeof(serde::NetworkRequestType) + sizeof(uint64_t)));
         auto actor_id = actor_name_to_id_.at(actor_name);
-        writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpReturn);
+        writer.WritePrimitive(serde::NetworkReplyType::kActorLookUpReturn);
         writer.WritePrimitive(actor_id);
         message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
       } else {
         serde::BufferWriter writer(network::ByteBufferType(sizeof(serde::NetworkRequestType)));
-        writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpError);
+        writer.WritePrimitive(serde::NetworkReplyType::kActorLookUpError);
         message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
       }
 
@@ -346,7 +365,7 @@ class ActorRegistry {
                         serde::BufferWriter writer(
                             network::ByteBufferType {sizeof(serde::NetworkRequestType) + serialized.size()});
                         // TODO optimize the copy here
-                        writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallReturn);
+                        writer.WritePrimitive(serde::NetworkReplyType::kActorMethodCallReturn);
                         writer.CopyFrom(serialized.data(), serialized.size());
                         message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
                       }) |
@@ -360,7 +379,7 @@ class ActorRegistry {
                               serde::Serialize(serde::ActorMethodReturnValue {std::string(error.what())});
                           serde::BufferWriter writer(
                               network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
-                          writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallError);
+                          writer.WritePrimitive(serde::NetworkReplyType::kActorMethodCallError);
                           writer.CopyFrom(serialized.data(), serialized.size());
                           message_broker_->ReplyRequest(receive_request_id, std::move(writer).MoveBufferOut());
                         }

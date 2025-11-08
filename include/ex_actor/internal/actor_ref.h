@@ -110,8 +110,8 @@ class ActorRef {
     auto sender = message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut()) |
                   ex::then([](network::ByteBufferType response_buffer) {
                     serde::BufferReader reader {std::move(response_buffer)};
-                    auto type = reader.NextPrimitive<serde::NetworkRequestType>();
-                    if (type == serde::NetworkRequestType::kActorMethodCallError) {
+                    auto type = reader.NextPrimitive<serde::NetworkReplyType>();
+                    if (type == serde::NetworkReplyType::kActorMethodCallError) {
                       EXA_THROW << serde::Deserialize<serde::ActorMethodReturnValue<std::string>>(
                                        reader.Current(), reader.RemainingSize())
                                        .return_value;

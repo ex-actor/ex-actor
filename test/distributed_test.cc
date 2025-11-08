@@ -39,6 +39,13 @@ class PingWorker {
   std::string name_;
 };
 
+class Error {
+ public:
+  static Error Create() { return Error(); }
+
+  Error() { throw std::runtime_error("Just an error"); }
+};
+
 class Echoer {
  public:
   static Echoer Create() { return Echoer(); }
@@ -51,7 +58,7 @@ class Echoer {
 TEST(DistributedTest, ConstructionInDistributedMode) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRoster<A, B, PingWorker> roster;
+    ex_actor::ActorRoster<A, B, Error, PingWorker> roster;
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
@@ -67,10 +74,24 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     // test remote creation
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
     spdlog::info("node {} creating remote actor A", this_node_id);
-    auto remote_a = registry.CreateActorUseStaticCreateFn<A>(ex_actor::ActorConfig {.node_id = remote_node_id});
+    auto remote_a =
+        registry.CreateActorUseStaticCreateFn<A>(ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "A"});
     spdlog::info("node {} creating remote actor B", this_node_id);
-    auto remote_b = registry.CreateActorUseStaticCreateFn<B>(ex_actor::ActorConfig {.node_id = remote_node_id}, 1,
-                                                             "asd", std::make_unique<int>());
+    auto remote_b = registry.CreateActorUseStaticCreateFn<B>(
+        ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "B"}, 1, "asd", std::make_unique<int>());
+
+    // test remote creation error propagation
+    ASSERT_THAT(
+        [&]() { registry.CreateActorUseStaticCreateFn<Error>(ex_actor::ActorConfig {.node_id = remote_node_id}); },
+        Throws<std::exception>(Property(&std::exception::what, HasSubstr("Just an error"))));
+
+    ASSERT_THAT(
+        [&]() {
+          registry.CreateActorUseStaticCreateFn<A>(
+              ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "A"});
+        },
+        Throws<std::exception>(Property(&std::exception::what, HasSubstr("same name"))));
+
     // test remote call
     auto ping_worker =
         registry.CreateActorUseStaticCreateFn<PingWorker>(ex_actor::ActorConfig {.node_id = remote_node_id},
@@ -78,9 +99,9 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
     auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
     ASSERT_EQ(ping_res, "ack from Alice, msg got: hello");
-    // TODO: test error propagation
-    auto error = ping_worker.Send<&PingWorker::Error>();
 
+    // test remote call error propagation
+    auto error = ping_worker.Send<&PingWorker::Error>();
     ASSERT_THAT([&error] { stdexec::sync_wait(std::move(error)); },
                 Throws<std::exception>(Property(&std::exception::what, HasSubstr("error"))));
   };

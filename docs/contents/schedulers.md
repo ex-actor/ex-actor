@@ -109,8 +109,7 @@ int main() {
 <!-- doc test end -->
 
 It's a scheduler that combines multiple schedulers. You can set the scheduler index of an actor when creating it.
-When an actor is activated, it will be pushed to the scheduler with its scheduler index.
-The scheduler will execute the tasks with the same scheduler index first.
+When an actor is activated, it will be pushed to the specified scheduler.
 
 It's useful when you want to split actors by groups. E.g. some control-flow actors and some data-processing actors, and you want the control-flow
 actors run in a dedicated thread pool, so it won't be blocked by the data-processing actors.

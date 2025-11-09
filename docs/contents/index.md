@@ -5,15 +5,18 @@
 
 ![image](assets/ex_actor_banner.jpg)
 
-**ex_actor** is a modern C++ [actor framework](https://en.wikipedia.org/wiki/Actor_model) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
+**ex_actor** is a modern C++ actor framework based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework turns you C++ class into a stateful async service(so-called actor). All method calls to it will be pushed into the mailbox(a FIFO queue) of the actor and executed sequentially.
+This framework **turns you C++ class into a stateful async service**(so-called actor). All method calls to it will be pushed into the mailbox(a FIFO queue) of the actor and executed sequentially.
 
 The actor can be local or remote. When it's local, args in method are passed directly in memory. When it's a remote actor, we'll help you to serialize them, send through network, and get the return value back.
 
 This programming model is called "Actor Model". **It offers a simple way to build highly parallel programs — no locks, no race conditions — just write plain classes.**
 
-[This video](https://www.youtube.com/watch?v=ELwEdb_pD0k) gives a good introduction to the Actor Model from high level.
+Learning resources for newbies to actor model:
+
+ - [Actor Model Explained (Video)](https://www.youtube.com/watch?v=ELwEdb_pD0k)
+ - [Wikipedia - Actor Model](https://en.wikipedia.org/wiki/Actor_model)
 
 # Key Features
 

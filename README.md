@@ -13,12 +13,7 @@ This framework **turns you C++ class into a stateful async service**(so-called a
 
 The actor can be local or remote. When it's local, args in method are passed directly in memory. When it's a remote actor, we'll help you to serialize them, send through network, and get the return value back.
 
-This programming model is called "Actor Model". **It offers a simple way to build highly parallel programs — no locks, no race conditions — just write plain classes.**
-
-Learning resources for newbies to actor model:
-
- - [Actor Model Explained (Video)](https://www.youtube.com/watch?v=ELwEdb_pD0k)
- - [Wikipedia - Actor Model](https://en.wikipedia.org/wiki/Actor_model)
+**It offers a simple way to build highly concurrent programs — no locks, no race conditions — just write plain classes.**
 
 # Key Features
 
@@ -68,20 +63,6 @@ int main() {
 
 See ⚙️[Installation](https://ex-actor.github.io/ex-actor/installation/) page in our documentation.
 
-## Contributing
-
-### Have questions about any part of the project?
-
-Participating in this project is not limited to writing code, your usage and feedback are also invaluable contributions!
-
-If you find any bugs or have any feature requests, open an issue to let us know, we'll try our best to help you.
-
-### Want to implement something yourself?
-
-Have a look at existing issues and pick what you're interested in, especially those with "good first issue" label, such issues are relatively easy to implement.
-
-For more guides, see [contributing](https://ex-actor.github.io/ex-actor/contributing/) page for more details like [how to build from source](https://ex-actor.github.io/ex-actor/contributing/#how-to-build-from-source).
-
 # FAQs
 
 ## `std::execution` is in C++26, why you only requires C++20?
@@ -99,6 +80,13 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 The single-process mode is heavily tested in our company's production environment. While minor bugs can occur due to version divergence btw open source & internal codes, the overall quality is good, feel free to use it in production.
 
 The distributed mode is still in early stage. Welcome to have a try and build together with us!
+
+## Learning Resources
+
+Theoretical learning resources for newbies to actor model:
+
+ - [Actor Model Explained (Video)](https://www.youtube.com/watch?v=ELwEdb_pD0k)
+ - [Wikipedia - Actor Model](https://en.wikipedia.org/wiki/Actor_model)
 
 ## The Team Behind `ex_actor`
 

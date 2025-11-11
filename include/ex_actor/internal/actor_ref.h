@@ -170,6 +170,13 @@ class ActorRef {
   TypeErasedActor* type_erased_actor_ = nullptr;
   network::MessageBroker* message_broker_ = nullptr;
 };
+
+template <typename T>
+constexpr bool kIsActorRef = false;
+
+template <typename U>
+constexpr bool kIsActorRef<ActorRef<U>> = true;
+
 }  // namespace ex_actor::internal
 
 namespace ex_actor {

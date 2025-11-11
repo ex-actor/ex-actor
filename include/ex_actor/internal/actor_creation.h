@@ -372,7 +372,9 @@ class ActorRegistry {
         using Sig = reflect::Signature<decltype(kMethodPtr)>;
         serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
             serde::DeserializeFnArgs<kMethodPtr>(data, size);
-        // TODO process ActorRef in the args
+
+        std::apply([&](auto&... elems) { (..., AdjustActorRef(elems)); }, call_args.args_tuple);
+
         auto sender =
             actor->template CallActorMethodUseTuple<kMethodPtr>(std::move(call_args.args_tuple)) |
             ex::then([this, receive_request_id](auto return_value) {
@@ -423,6 +425,19 @@ class ActorRegistry {
     }
     EXA_THROW << "Can't find actor class in roster, actor_cls_index=" << actor_cls_index;
   }
+
+  template <typename Arg>
+  void AdjustActorRef(Arg& arg) {
+    if constexpr (kIsActorRef<std::decay_t<Arg>>) {
+      TypeErasedActor* actor = nullptr;
+      auto node_id = arg.GetNodeId();
+      auto actor_id = arg.GetActorId();
+      if (node_id == this_node_id_ && actor_id_to_actor_.contains(actor_id)) {
+        actor = actor_id_to_actor_.at(actor_id).get();
+      }
+      arg.SetLocalRuntimeInfo(this_node_id_, actor, message_broker_.get());
+    }
+  };
 };
 }  // namespace ex_actor::internal
 

@@ -6,3 +6,4 @@ docs/.config
 docs/site
 MODULE.bazel.lock
 TARGET_COMPILE_PDB.pdb
+bazel-*

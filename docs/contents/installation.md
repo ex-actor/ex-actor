@@ -104,7 +104,12 @@ cc_binary(
 
 ### Legacy WORKSPACE style
 
-First, add [rules_foreign_cc](https://github.com/bazel-contrib/rules_foreign_cc) to your WORKSPACE file.
+Since Legacy WORKSPACE style bazel project doesn't have package manager(bzlmod). We add a [rules_foreign_cc](https://github.com/bazel-contrib/rules_foreign_cc) target `@ex_actor//:ex_actor_cmake` for you, which delegates everything to cmake.
+
+But if you are able to setup all the dependencies manually. You can still use `@ex_actor//:ex_actor`.
+Which is less likely to cause dependency conflicts, and can build faster.
+
+To use `@ex_actor//:ex_actor_cmake`, first, add rules_foreign_cc to your WORKSPACE file.
 
 ```bazel
 # ------------------------ rules_foreign_cc setup ------------------------
@@ -151,14 +156,14 @@ http_archive(
 )
 ```
 
-Finally, use `@ex_actor` as your dependencies.
+Finally, use `@ex_actor//:ex_actor_cmake` as your dependencies.
 
 ```bazel
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 cc_binary(
     name = "main",
     srcs = ["main.cc"],
-    deps = ["@ex_actor"],
+    deps = ["@ex_actor//:ex_actor_cmake"],
 )
 ```
 

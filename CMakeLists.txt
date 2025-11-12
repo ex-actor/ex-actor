@@ -75,30 +75,18 @@ CPMAddPackage(
 )
 
 # ------------------- targets -------------------
-
-add_library(ex_actor_network STATIC src/ex_actor/internal/network.cc)
-target_include_directories(ex_actor_network PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
-target_link_libraries(
-  ex_actor_network
-  PRIVATE STDEXEC::stdexec reflectcpp::reflectcpp cppzmq-static spdlog::spdlog
-)
-
-add_library(ex_actor INTERFACE)
-target_include_directories(ex_actor INTERFACE
+add_library(ex_actor STATIC src/ex_actor/internal/network.cc)
+target_include_directories(ex_actor PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(
   ex_actor
-  INTERFACE
+  PUBLIC
   STDEXEC::stdexec
   reflectcpp::reflectcpp
   cppzmq-static
   spdlog::spdlog
-  ex_actor_network
 )
 # to suppress subobject linkage warnings in stdexec
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
@@ -122,7 +110,7 @@ if(EX_ACTOR_BUILD_TESTS)
 endif()
 
 # ------------------- install -------------------
-install(TARGETS ex_actor ex_actor_network EXPORT ex_actor-targets)
+install(TARGETS ex_actor EXPORT ex_actor-targets)
 install(DIRECTORY include/ DESTINATION include)
 install(
   EXPORT ex_actor-targets

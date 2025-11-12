@@ -24,5 +24,6 @@ popd
 echo "Final MODULE.bazel:"
 cat MODULE.bazel
 
+bazel run @ex_actor//:distributed_test
 bazel build //:main
 bazel clean

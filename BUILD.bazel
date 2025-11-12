@@ -7,15 +7,45 @@ filegroup(
     srcs = glob(["**"]),
 )
 
-cmake(
+cc_library(
     name = "ex_actor",
+    srcs = [
+        "src/ex_actor/internal/network.cc",
+    ],
+    hdrs = glob(["include/**/*.h"]),
+    includes = ["include"],
+    deps = [
+        "@capnp-cpp//src/capnp",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@cppzmq",
+        "@libzmq",
+        "@reflect-cpp",
+        "@spdlog",
+        "@stdexec",
+    ],
+)
+
+cc_test(
+    name = "distributed_test",
+    srcs = [
+        "test/distributed_test.cc",
+    ],
+    linkstatic = True,
+    deps = [
+        ":ex_actor",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cmake(
+    name = "ex_actor_cmake",
     cache_entries = {
         "EX_ACTOR_BUILD_TESTS": "OFF",
     },
     generate_args = ["-GNinja"],
     lib_source = ":all_srcs",
     out_static_libs = [
-        "libex_actor_network.a",
+        "libex_actor.a",
         "libreflectcpp.a",
         "libcapnpc.a",
         "libcapnp-json.a",

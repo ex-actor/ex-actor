@@ -33,25 +33,6 @@ struct ActorRefRflType {
   uint64_t class_index_in_roster {};
 };
 
-struct LocalRunTimeInfo {
-  uint32_t this_node_id = 0;
-  std::function<TypeErasedActor*(uint64_t)> look_up;
-  network::MessageBroker* message_broker = nullptr;
-};
-
-class LocalRunTimeInfoCtx {
- public:
-  explicit LocalRunTimeInfoCtx(LocalRunTimeInfo info) : prev_(std::move(Info())) { Info() = std::move(info); }
-  ~LocalRunTimeInfoCtx() { Info() = std::move(prev_); };
-  static LocalRunTimeInfo& Info() {
-    thread_local LocalRunTimeInfo info;
-    return info;
-  }
-
- private:
-  LocalRunTimeInfo prev_;
-};
-
 template <class UserClass>
 class ActorRef {
  public:
@@ -193,8 +174,37 @@ class ActorRef {
   network::MessageBroker* message_broker_ = nullptr;
 };
 
+class LocalRunTimeInfo {
+ public:
+  static LocalRunTimeInfo& GetThreadLocalInstance() {
+    static thread_local LocalRunTimeInfo instance {0, nullptr, nullptr};
+    return instance;
+  }
+
+  static void InitThreadLocalInstacne(uint32_t this_node_id, std::function<TypeErasedActor*(uint64_t)> look_up,
+                                      network::MessageBroker* broker) {
+    auto& inst = GetThreadLocalInstance();
+    if (inst.initialized_) {
+      return;
+    }
+    inst.this_node_id_ = this_node_id;
+    inst.look_up_ = std::move(look_up);
+    inst.message_broker_ = broker;
+    inst.initialized_ = true;
+  }
+
+  bool initialized_ = false;
+  uint32_t this_node_id_;
+  std::function<TypeErasedActor*(uint64_t)> look_up_;
+  network::MessageBroker* message_broker_;
+
+ private:
+  LocalRunTimeInfo(uint32_t this_node_id, std::function<TypeErasedActor*(uint64_t)> look_up,
+                   network::MessageBroker* message_broker)
+      : this_node_id_(this_node_id), look_up_(std::move(look_up)), message_broker_(message_broker) {};
+};
 }  // namespace ex_actor::internal
-//
+
 namespace ex_actor {
 using internal::ActorRef;
 }  // namespace ex_actor
@@ -210,11 +220,11 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
   };
 
   static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
-    auto info = ex_actor::internal::LocalRunTimeInfoCtx::Info();
+    auto& info = ex_actor::internal::LocalRunTimeInfo::GetThreadLocalInstance();
 
-    ex_actor::internal::ActorRef<U> actor(info.this_node_id, rfl_type.node_id, rfl_type.actor_id,
-                                          rfl_type.class_index_in_roster, info.look_up(rfl_type.actor_id),
-                                          info.message_broker);
+    ex_actor::internal::ActorRef<U> actor(info.this_node_id_, rfl_type.node_id, rfl_type.actor_id,
+                                          rfl_type.class_index_in_roster, info.look_up_(rfl_type.actor_id),
+                                          info.message_broker_);
     return actor;
   }
 

@@ -370,16 +370,15 @@ class ActorRegistry {
         std::unique_ptr<TypeErasedActor>& actor = actor_id_to_actor_.at(actor_id);
         constexpr auto kMethodPtr = std::get<kMethodIndex>(kActorMethodsTuple);
         using Sig = reflect::Signature<decltype(kMethodPtr)>;
-
-        LocalRunTimeInfo info {.this_node_id = this_node_id_,
-                               .look_up = [this](uint32_t actor_id) -> TypeErasedActor* {
-                                 if (actor_id_to_actor_.contains(actor_id)) {
-                                   return actor_id_to_actor_.at(actor_id).get();
-                                 }
-                                 return nullptr;
-                               },
-                               .message_broker = message_broker_.get()};
-        LocalRunTimeInfoCtx ctx {info};
+        LocalRunTimeInfo::InitThreadLocalInstacne(
+            this_node_id_,
+            [this](uint32_t actor_id) -> TypeErasedActor* {
+              if (actor_id_to_actor_.contains(actor_id)) {
+                return actor_id_to_actor_.at(actor_id).get();
+              }
+              return nullptr;
+            },
+            message_broker_.get());
 
         serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
             serde::DeserializeFnArgs<kMethodPtr>(data, size);

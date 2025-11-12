@@ -1,6 +1,7 @@
 #include <exception>
 #include <memory>
 #include <thread>
+#include <vector>
 
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
@@ -58,7 +59,18 @@ class Echoer {
     return result;
   }
 
-  static constexpr std::tuple kActorMethods = {&Echoer::Echo, &Echoer::Proxy};
+  std::vector<std::string> ProxyTwoActor(const std::string& message,
+                                         const std::vector<ex_actor::ActorRef<Echoer>>& echoers) {
+    std::vector<std::string> strs;
+    for (const auto& echoer : echoers) {
+      auto sender = echoer.Send<&Echoer::Echo>(message);
+      auto [reply] = stdexec::sync_wait(std::move(sender)).value();
+      strs.push_back(reply);
+    }
+    return strs;
+  }
+
+  static constexpr std::tuple kActorMethods = {&Echoer::Echo, &Echoer::Proxy, &Echoer::ProxyTwoActor};
 };
 
 TEST(DistributedTest, ConstructionInDistributedMode) {
@@ -165,15 +177,16 @@ TEST(DistributedTest, ActorRefSerializationTest) {
 
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
 
-    auto local_actor = registry.CreateActor<Echoer>();
+    auto local_actor_a = registry.CreateActor<Echoer>();
+    auto local_actor_b = registry.CreateActor<Echoer>();
     auto remote_actor_a = registry.CreateActorUseStaticCreateFn<Echoer>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Alice"});
     auto remote_actor_b = registry.CreateActorUseStaticCreateFn<Echoer>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Bob"});
-
     std::string msg = "hi";
+
     // Pass the local actor to remote actor
-    auto proxy_sender = remote_actor_a.Send<&Echoer::Proxy>(msg, local_actor);
+    auto proxy_sender = remote_actor_a.Send<&Echoer::Proxy>(msg, local_actor_a);
     auto [proxy_reply] = stdexec::sync_wait(std::move(proxy_sender)).value();
     ASSERT_EQ(proxy_reply, msg);
 
@@ -181,6 +194,13 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     auto sender = remote_actor_a.Send<&Echoer::Proxy>(msg, remote_actor_b);
     auto [reply] = stdexec::sync_wait(std::move(sender)).value();
     ASSERT_EQ(reply, msg);
+
+    // Pass a vector to the remote actor
+    std::vector<ex_actor::ActorRef<Echoer>> echoers = {local_actor_a, local_actor_b};
+    auto vec_sender = remote_actor_a.Send<&Echoer::ProxyTwoActor>(msg, echoers);
+    auto [vec_reply] = stdexec::sync_wait(std::move(vec_sender)).value();
+    std::vector<std::string> expected_vec_relpy = {msg, msg};
+    ASSERT_EQ(vec_reply, expected_vec_relpy);
   };
 
   std::jthread node_0(node_main, 0);

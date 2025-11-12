@@ -23,6 +23,7 @@
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
+#include "rfl/internal/has_reflector.hpp"
 
 namespace ex_actor::internal {
 struct ActorRefRflType {
@@ -78,6 +79,8 @@ class ActorRef {
     }
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
   }
+
+  friend rfl::Reflector<ActorRef<UserClass>>;
 
   /**
    * @brief Send message to an actor. Returns a coroutine carrying the result. Dynamic memory allocation will happen due
@@ -171,14 +174,8 @@ class ActorRef {
   network::MessageBroker* message_broker_ = nullptr;
 };
 
-template <typename T>
-constexpr bool kIsActorRef = false;
-
-template <typename U>
-constexpr bool kIsActorRef<ActorRef<U>> = true;
-
 }  // namespace ex_actor::internal
-
+//
 namespace ex_actor {
 using internal::ActorRef;
 }  // namespace ex_actor

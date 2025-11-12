@@ -37,6 +37,25 @@ namespace ex_actor::internal {
 template <class... Classes>
 struct ActorRoster {};
 
+struct LocalRunTimeInfo {
+  uint32_t this_node_id = 0;
+  std::function<TypeErasedActor*(uint64_t)> look_up;
+  network::MessageBroker* message_broker = nullptr;
+};
+
+class LocalRunTimeInfoCtx {
+ public:
+  explicit LocalRunTimeInfoCtx(LocalRunTimeInfo info) : prev_(std::move(Info())) { Info() = std::move(info); }
+  ~LocalRunTimeInfoCtx() { Info() = std::move(prev_); };
+  static LocalRunTimeInfo& Info() {
+    thread_local LocalRunTimeInfo info;
+    return info;
+  }
+
+ private:
+  LocalRunTimeInfo prev_;
+};
+
 template <ex::scheduler Scheduler, class... ActorClasses>
 class ActorRegistry {
  public:
@@ -251,6 +270,7 @@ class ActorRegistry {
   std::unique_ptr<network::MessageBroker> message_broker_;
   exec::async_scope async_scope_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
+  LocalRunTimeInfo info_;
 
   template <class UserClass>
   std::optional<uint64_t> GetActorClassIndexInRoster() const {
@@ -370,10 +390,19 @@ class ActorRegistry {
         std::unique_ptr<TypeErasedActor>& actor = actor_id_to_actor_.at(actor_id);
         constexpr auto kMethodPtr = std::get<kMethodIndex>(kActorMethodsTuple);
         using Sig = reflect::Signature<decltype(kMethodPtr)>;
+
+        LocalRunTimeInfo info {.this_node_id = this_node_id_,
+                               .look_up = [this](uint32_t actor_id) -> TypeErasedActor* {
+                                 if (actor_id_to_actor_.contains(actor_id)) {
+                                   return actor_id_to_actor_.at(actor_id).get();
+                                 }
+                                 return nullptr;
+                               },
+                               .message_broker = message_broker_.get()};
+        LocalRunTimeInfoCtx ctx {info};
+
         serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
             serde::DeserializeFnArgs<kMethodPtr>(data, size);
-
-        std::apply([&](auto&... elems) { (..., AdjustActorRef(elems)); }, call_args.args_tuple);
 
         auto sender =
             actor->template CallActorMethodUseTuple<kMethodPtr>(std::move(call_args.args_tuple)) |
@@ -425,21 +454,36 @@ class ActorRegistry {
     }
     EXA_THROW << "Can't find actor class in roster, actor_cls_index=" << actor_cls_index;
   }
-
-  template <typename Arg>
-  void AdjustActorRef(Arg& arg) {
-    if constexpr (kIsActorRef<std::decay_t<Arg>>) {
-      TypeErasedActor* actor = nullptr;
-      auto node_id = arg.GetNodeId();
-      auto actor_id = arg.GetActorId();
-      if (node_id == this_node_id_ && actor_id_to_actor_.contains(actor_id)) {
-        actor = actor_id_to_actor_.at(actor_id).get();
-      }
-      arg.SetLocalRuntimeInfo(this_node_id_, actor, message_broker_.get());
-    }
-  };
 };
 }  // namespace ex_actor::internal
+
+namespace rfl {
+template <typename U>
+struct Reflector<ex_actor::internal::ActorRef<U>> {
+  struct ReflType {
+    bool is_valid {};
+    uint32_t node_id {};
+    uint64_t actor_id {};
+    uint64_t class_index_in_roster {};
+  };
+
+  static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
+    auto info = ex_actor::internal::LocalRunTimeInfoCtx::Info();
+
+    ex_actor::internal::ActorRef<U> actor(info.this_node_id, rfl_type.node_id, rfl_type.actor_id,
+                                          rfl_type.class_index_in_roster, info.look_up(rfl_type.actor_id),
+                                          info.message_broker);
+    return actor;
+  }
+
+  static ReflType from(const ex_actor::internal::ActorRef<U>& actor_ref) {
+    return {.is_valid = actor_ref.is_empty_,
+            .node_id = actor_ref.node_id_,
+            .actor_id = actor_ref.actor_id_,
+            .class_index_in_roster = actor_ref.class_index_in_roster_};
+  }
+};
+}  // namespace rfl
 
 namespace ex_actor {
 using ex_actor::internal::ActorRegistry;

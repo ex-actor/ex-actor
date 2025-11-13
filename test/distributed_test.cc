@@ -212,8 +212,8 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     std::vector<ex_actor::ActorRef<Echoer>> echoers = {local_actor_a, local_actor_b};
     auto vec_sender = remote_actor_a.Send<&Echoer::ProxyTwoActor>(msg, echoers);
     auto [vec_reply] = stdexec::sync_wait(std::move(vec_sender)).value();
-    std::vector<std::string> expected_vec_relpy = {msg, msg};
-    ASSERT_EQ(vec_reply, expected_vec_relpy);
+    std::vector<std::string> expected_vec_reply = {msg, msg};
+    ASSERT_EQ(vec_reply, expected_vec_reply);
 
     // Pass a local actor to the constructor of remote actor
     auto proxy_echoer = registry.CreateActorUseStaticCreateFn<ProxyEchoer>(

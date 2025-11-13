@@ -23,15 +23,9 @@
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
+#include "rfl/internal/has_reflector.hpp"
 
 namespace ex_actor::internal {
-struct ActorRefRflType {
-  bool is_valid {};
-  uint32_t node_id {};
-  uint64_t actor_id {};
-  uint64_t class_index_in_roster {};
-};
-
 template <class UserClass>
 class ActorRef {
  public:
@@ -47,37 +41,14 @@ class ActorRef {
         type_erased_actor_(actor),
         message_broker_(message_broker) {}
 
-  /**
-   * @brief Called after deserialization. Some fields will change after deserialization in another node, like
-   * this_node_id and message_broker.
-   */
-  void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor, network::MessageBroker* message_broker) {
-    this_node_id_ = this_node_id;
-    type_erased_actor_ = actor;
-    message_broker_ = message_broker;
-  }
-
-  // reflect-cpp adaption start
-  using ReflectionType = ActorRefRflType;
-  explicit ActorRef(ActorRefRflType rfl_type)
-      : is_empty_(rfl_type.is_valid),
-        node_id_(rfl_type.node_id),
-        actor_id_(rfl_type.actor_id),
-        class_index_in_roster_(rfl_type.class_index_in_roster) {}
-  ReflectionType reflection() const {
-    return {.is_valid = is_empty_,
-            .node_id = node_id_,
-            .actor_id = actor_id_,
-            .class_index_in_roster = class_index_in_roster_};
-  }
-  // reflect-cpp adaption end
-
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
     if (lhs.is_empty_ == false && rhs.is_empty_ == false) {
       return true;
     }
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
   }
+
+  friend rfl::Reflector<ActorRef<UserClass>>;
 
   /**
    * @brief Send message to an actor. Returns a coroutine carrying the result. Dynamic memory allocation will happen due
@@ -170,11 +141,51 @@ class ActorRef {
   TypeErasedActor* type_erased_actor_ = nullptr;
   network::MessageBroker* message_broker_ = nullptr;
 };
+
+class ActorRefDeserializationInfo {
+ public:
+  static ActorRefDeserializationInfo& GetThreadLocalInstance() {
+    static thread_local ActorRefDeserializationInfo instance;
+    return instance;
+  }
+
+  uint32_t this_node_id = 0;
+  std::function<TypeErasedActor*(uint64_t)> look_up;
+  network::MessageBroker* message_broker = nullptr;
+};
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
 using internal::ActorRef;
 }  // namespace ex_actor
+
+namespace rfl {
+template <typename U>
+struct Reflector<ex_actor::internal::ActorRef<U>> {
+  struct ReflType {
+    bool is_valid {};
+    uint32_t node_id {};
+    uint64_t actor_id {};
+    uint64_t class_index_in_roster {};
+  };
+
+  static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
+    auto& info = ex_actor::internal::ActorRefDeserializationInfo::GetThreadLocalInstance();
+
+    ex_actor::internal::ActorRef<U> actor(info.this_node_id, rfl_type.node_id, rfl_type.actor_id,
+                                          rfl_type.class_index_in_roster, info.look_up(rfl_type.actor_id),
+                                          info.message_broker);
+    return actor;
+  }
+
+  static ReflType from(const ex_actor::internal::ActorRef<U>& actor_ref) {
+    return {.is_valid = actor_ref.is_empty_,
+            .node_id = actor_ref.node_id_,
+            .actor_id = actor_ref.actor_id_,
+            .class_index_in_roster = actor_ref.class_index_in_roster_};
+  }
+};
+}  // namespace rfl
 
 namespace std {
 template <class UserClass>

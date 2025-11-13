@@ -73,6 +73,19 @@ class Echoer {
   static constexpr std::tuple kActorMethods = {&Echoer::Echo, &Echoer::Proxy, &Echoer::ProxyTwoActor};
 };
 
+struct ProxyEchoer {
+  ex_actor::ActorRef<Echoer> echoer;
+
+  std::string Echo(const std::string& str) const {
+    auto sender = echoer.Send<&Echoer::Echo>(str);
+    auto [reply] = stdexec::sync_wait(std::move(sender)).value();
+    return reply;
+  }
+
+  static ProxyEchoer Create(ex_actor::ActorRef<Echoer> echoer) { return ProxyEchoer(echoer); }
+  static constexpr std::tuple kActorMethods = {&ProxyEchoer::Echo};
+};
+
 TEST(DistributedTest, ConstructionInDistributedMode) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
@@ -169,7 +182,7 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
 TEST(DistributedTest, ActorRefSerializationTest) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRoster<Echoer> roster;
+    ex_actor::ActorRoster<Echoer, ProxyEchoer> roster;
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
@@ -201,6 +214,13 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     auto [vec_reply] = stdexec::sync_wait(std::move(vec_sender)).value();
     std::vector<std::string> expected_vec_relpy = {msg, msg};
     ASSERT_EQ(vec_reply, expected_vec_relpy);
+
+    // Pass a local actor to the constructor of remote actor
+    auto proxy_echoer = registry.CreateActorUseStaticCreateFn<ProxyEchoer>(
+        ex_actor::ActorConfig {.node_id = remote_node_id}, local_actor_a);
+    auto proxy_echoer_sender = proxy_echoer.Send<&ProxyEchoer::Echo>(msg);
+    auto [proxy_echoer_reply] = stdexec::sync_wait(std::move(proxy_echoer_sender)).value();
+    ASSERT_EQ(proxy_echoer_reply, msg);
   };
 
   std::jthread node_0(node_main, 0);

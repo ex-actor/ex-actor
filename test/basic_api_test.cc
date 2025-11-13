@@ -8,6 +8,7 @@
 
 #include "ex_actor/api.h"
 #include "ex_actor/internal/actor_creation.h"
+#include "rfl/internal/has_reflector.hpp"
 
 namespace ex = stdexec;
 
@@ -104,7 +105,8 @@ TEST(BasicApiTest, CreateActorWithFullConfig) {
   registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter2"});
   registry.CreateActor<Counter>(ex_actor::ActorConfig {.scheduler_index = 0, .priority = 1});
 
-  static_assert(rfl::internal::has_reflection_type_v<ex_actor::ActorRef<Counter>>);
+  static_assert(rfl::internal::has_read_reflector<ex_actor::ActorRef<Counter>>);
+  static_assert(rfl::internal::has_write_reflector<ex_actor::ActorRef<Counter>>);
   // test pass by lvalue
   ex_actor::ActorConfig config = {.max_message_executed_per_activation = 10};
   registry.CreateActor<Proxy>(config, counter);

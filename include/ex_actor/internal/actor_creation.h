@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <type_traits>
@@ -31,6 +32,7 @@
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
+#include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal {
 
@@ -80,13 +82,20 @@ class ActorRegistry {
     if (is_distributed_mode_) {
       message_broker_->ClusterAlignedStop();
     }
+
     // bulk destroy actors
     auto destroy_msg = std::make_unique<DestroyMessage>();
-    for (auto& [_, actor] : actor_id_to_actor_) {
-      actor->PushMessage(destroy_msg.get());
+    {
+      auto& mutex = actor_id_to_actor_.GetMutex();
+      std::lock_guard guard(mutex);
+      auto& actor_id_to_actor = actor_id_to_actor_.GetMap();
+      for (auto& [_, actor] : actor_id_to_actor) {
+        actor->PushMessage(destroy_msg.get());
+      }
     }
+
     ex::sync_wait(async_scope_.on_empty());
-    actor_id_to_actor_.clear();
+    actor_id_to_actor_.Clear();
   }
 
   /**
@@ -104,7 +113,7 @@ class ActorRegistry {
     auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id,
                                       GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                       message_broker_.get());
-    actor_id_to_actor_[actor_id] = std::move(actor);
+    actor_id_to_actor_.Insert(actor_id, std::move(actor));
     if (actor_name) {
       const auto& name = *actor_name;
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists.";
@@ -141,7 +150,7 @@ class ActorRegistry {
       auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id,
                                         GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                         message_broker_.get());
-      actor_id_to_actor_[actor_id] = std::move(actor);
+      actor_id_to_actor_.Insert(actor_id, std::move(actor));
       if (config.actor_name.has_value()) {
         std::string& name = *config.actor_name;
         EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists.";
@@ -191,9 +200,9 @@ class ActorRegistry {
   template <class UserClass>
   void DestroyActor(const ActorRef<UserClass>& actor_ref) {
     auto actor_id = actor_ref.GetActorId();
-    EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
-    auto& actor = actor_id_to_actor_.at(actor_id);
-    actor_id_to_actor_.erase(actor_id);
+    EXA_THROW_CHECK(actor_id_to_actor_.Contains(actor_id)) << "Actor with id " << actor_id << " not found";
+    auto& actor = actor_id_to_actor_.At(actor_id);
+    actor_id_to_actor_.Erase(actor_id);
     std::erase_if(actor_name_to_id_, [actor_id](const auto& pair) { return pair.second == actor_id; });
   }
 
@@ -201,7 +210,7 @@ class ActorRegistry {
   std::optional<ActorRef<UserClass>> GetActorRefByName(const std::string& name) const {
     if (actor_name_to_id_.contains(name)) {
       const auto actor_id = actor_name_to_id_.at(name);
-      const auto& actor = actor_id_to_actor_.at(actor_id);
+      const auto& actor = actor_id_to_actor_.At(actor_id);
       return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id,
                                  GetActorClassIndexInRoster<UserClass>().value_or(UINT64_MAX), actor.get(),
                                  message_broker_.get());
@@ -247,7 +256,7 @@ class ActorRegistry {
   std::mt19937 random_num_generator_;
   uint32_t this_node_id_ = 0;
   std::unordered_map<uint32_t, std::string> node_id_to_address_;
-  std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
+  util::LockGuardedMap<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unique_ptr<network::MessageBroker> message_broker_;
   exec::async_scope async_scope_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
@@ -270,7 +279,7 @@ class ActorRegistry {
   uint64_t GenerateRandomActorId() {
     while (true) {
       auto id = random_num_generator_();
-      if (!actor_id_to_actor_.contains(id)) {
+      if (!actor_id_to_actor_.Contains(id)) {
         return id;
       }
     }
@@ -352,7 +361,7 @@ class ActorRegistry {
       }
       std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, Scheduler>::CreateUseArgTuple(
           scheduler_, std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
-      actor_id_to_actor_[actor_id] = std::move(actor);
+      actor_id_to_actor_.Insert(actor_id, std::move(actor));
       return actor_id;
     }
     if constexpr (kClassIndex + 1 < sizeof...(ActorClasses)) {
@@ -367,18 +376,19 @@ class ActorRegistry {
     constexpr auto kActorMethodsTuple = reflect::GetActorMethodsTuple<ActorClass>();
     if constexpr (std::tuple_size_v<decltype(kActorMethodsTuple)> > 0) {
       if (kMethodIndex == method_index) {
-        std::unique_ptr<TypeErasedActor>& actor = actor_id_to_actor_.at(actor_id);
+        std::unique_ptr<TypeErasedActor>& actor = actor_id_to_actor_.At(actor_id);
         constexpr auto kMethodPtr = std::get<kMethodIndex>(kActorMethodsTuple);
         using Sig = reflect::Signature<decltype(kMethodPtr)>;
-        LocalRunTimeInfo::InitThreadLocalInstacne(
-            this_node_id_,
-            [this](uint32_t actor_id) -> TypeErasedActor* {
-              if (actor_id_to_actor_.contains(actor_id)) {
-                return actor_id_to_actor_.at(actor_id).get();
-              }
-              return nullptr;
-            },
-            message_broker_.get());
+
+        auto& info = ActorRefDeserializationInfo::GetThreadLocalInstance();
+        info.this_node_id = this_node_id_;
+        info.message_broker = message_broker_.get();
+        info.look_up = [this](uint64_t actor_id) -> TypeErasedActor* {
+          if (actor_id_to_actor_.Contains(actor_id)) {
+            return actor_id_to_actor_.At(actor_id).get();
+          }
+          return nullptr;
+        };
 
         serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
             serde::DeserializeFnArgs<kMethodPtr>(data, size);

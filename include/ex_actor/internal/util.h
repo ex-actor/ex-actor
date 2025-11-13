@@ -16,10 +16,10 @@
 
 #include <atomic>
 #include <cstdint>
-#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <unordered_map>
 #include <unordered_set>
 
 #include <spdlog/spdlog.h>
@@ -195,6 +195,13 @@ class LockGuardedMap {
     return iter->second;
   }
 
+  const V& At(const K& key) const {
+    std::lock_guard lock(mutex_);
+    auto iter = map_.find(key);
+    EXA_THROW_CHECK(iter != map_.end()) << "Key not found: " << key;
+    return iter->second;
+  }
+
   void Erase(const K& key) {
     std::lock_guard lock(mutex_);
     map_.erase(key);
@@ -205,6 +212,12 @@ class LockGuardedMap {
     return map_.contains(key);
   }
 
+  void Clear() {
+    std::lock_guard lock(mutex_);
+    map_.clear();
+  }
+
+  std::unordered_map<K, V>& GetMap() { return map_; }
   std::mutex& GetMutex() const { return mutex_; }
 
  private:

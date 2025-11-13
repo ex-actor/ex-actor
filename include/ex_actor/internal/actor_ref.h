@@ -26,13 +26,6 @@
 #include "rfl/internal/has_reflector.hpp"
 
 namespace ex_actor::internal {
-struct ActorRefRflType {
-  bool is_valid {};
-  uint32_t node_id {};
-  uint64_t actor_id {};
-  uint64_t class_index_in_roster {};
-};
-
 template <class UserClass>
 class ActorRef {
  public:
@@ -47,31 +40,6 @@ class ActorRef {
         class_index_in_roster_(class_index_in_roster),
         type_erased_actor_(actor),
         message_broker_(message_broker) {}
-
-  /**
-   * @brief Called after deserialization. Some fields will change after deserialization in another node, like
-   * this_node_id and message_broker.
-   */
-  void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor, network::MessageBroker* message_broker) {
-    this_node_id_ = this_node_id;
-    type_erased_actor_ = actor;
-    message_broker_ = message_broker;
-  }
-
-  // reflect-cpp adaption start
-  using ReflectionType = ActorRefRflType;
-  explicit ActorRef(ActorRefRflType rfl_type)
-      : is_empty_(rfl_type.is_valid),
-        node_id_(rfl_type.node_id),
-        actor_id_(rfl_type.actor_id),
-        class_index_in_roster_(rfl_type.class_index_in_roster) {}
-  ReflectionType reflection() const {
-    return {.is_valid = is_empty_,
-            .node_id = node_id_,
-            .actor_id = actor_id_,
-            .class_index_in_roster = class_index_in_roster_};
-  }
-  // reflect-cpp adaption end
 
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
     if (lhs.is_empty_ == false && rhs.is_empty_ == false) {
@@ -174,34 +142,16 @@ class ActorRef {
   network::MessageBroker* message_broker_ = nullptr;
 };
 
-class LocalRunTimeInfo {
+class ActorRefDeserializationInfo {
  public:
-  static LocalRunTimeInfo& GetThreadLocalInstance() {
-    static thread_local LocalRunTimeInfo instance {0, nullptr, nullptr};
+  static ActorRefDeserializationInfo& GetThreadLocalInstance() {
+    static thread_local ActorRefDeserializationInfo instance;
     return instance;
   }
 
-  static void InitThreadLocalInstacne(uint32_t this_node_id, std::function<TypeErasedActor*(uint64_t)> look_up,
-                                      network::MessageBroker* broker) {
-    auto& inst = GetThreadLocalInstance();
-    if (inst.initialized_) {
-      return;
-    }
-    inst.this_node_id_ = this_node_id;
-    inst.look_up_ = std::move(look_up);
-    inst.message_broker_ = broker;
-    inst.initialized_ = true;
-  }
-
-  bool initialized_ = false;
-  uint32_t this_node_id_;
-  std::function<TypeErasedActor*(uint64_t)> look_up_;
-  network::MessageBroker* message_broker_;
-
- private:
-  LocalRunTimeInfo(uint32_t this_node_id, std::function<TypeErasedActor*(uint64_t)> look_up,
-                   network::MessageBroker* message_broker)
-      : this_node_id_(this_node_id), look_up_(std::move(look_up)), message_broker_(message_broker) {};
+  uint32_t this_node_id = 0;
+  std::function<TypeErasedActor*(uint64_t)> look_up;
+  network::MessageBroker* message_broker = nullptr;
 };
 }  // namespace ex_actor::internal
 
@@ -220,11 +170,11 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
   };
 
   static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
-    auto& info = ex_actor::internal::LocalRunTimeInfo::GetThreadLocalInstance();
+    auto& info = ex_actor::internal::ActorRefDeserializationInfo::GetThreadLocalInstance();
 
-    ex_actor::internal::ActorRef<U> actor(info.this_node_id_, rfl_type.node_id, rfl_type.actor_id,
-                                          rfl_type.class_index_in_roster, info.look_up_(rfl_type.actor_id),
-                                          info.message_broker_);
+    ex_actor::internal::ActorRef<U> actor(info.this_node_id, rfl_type.node_id, rfl_type.actor_id,
+                                          rfl_type.class_index_in_roster, info.look_up(rfl_type.actor_id),
+                                          info.message_broker);
     return actor;
   }
 

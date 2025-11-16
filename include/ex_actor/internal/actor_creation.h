@@ -31,33 +31,48 @@
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/remote_handler_registry.h"
+#include "ex_actor/internal/scheduler.h"
 #include "ex_actor/internal/serialization.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal {
 
-template <ex::scheduler Scheduler>
 class ActorRegistry {
  public:
   /**
-   * @brief Constructor for single-node mode.
+   * @brief Construct in single-node mode, use the default work-sharing thread pool as the scheduler.
    */
-  explicit ActorRegistry(Scheduler scheduler) : scheduler_(std::move(scheduler)) {
+  explicit ActorRegistry(uint32_t thread_pool_size)
+      : default_work_sharing_thread_pool_(thread_pool_size),
+        scheduler_(std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
+            default_work_sharing_thread_pool_.GetScheduler())) {
+    logging::SetupProcessWideLoggingConfig();
+    InitRandomNumGenerator();
+  }
+  /**
+   * @brief Construct in single-node mode, use specified scheduler.
+   */
+  template <ex::scheduler Scheduler>
+  explicit ActorRegistry(Scheduler scheduler)
+      : scheduler_(std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler)) {
     logging::SetupProcessWideLoggingConfig();
     InitRandomNumGenerator();
   }
 
   /**
-   * @brief Constructor for distributed mode.
+   * @brief Construct in distributed mode, use the default work-sharing thread pool as the scheduler.
    */
-  explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
+  explicit ActorRegistry(uint32_t thread_pool_size, uint32_t this_node_id,
+                         const std::vector<NodeInfo>& cluster_node_info,
                          network::HeartbeatConfig heartbeat_config =
                              {
                                  .heartbeat_timeout = kDefaultHeartbeatTimeout,
                                  .heartbeat_interval = kDefaultHeartbeatInterval,
                              })
       : is_distributed_mode_(true),
-        scheduler_(std::move(scheduler)),
+        default_work_sharing_thread_pool_(thread_pool_size),
+        scheduler_(std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
+            default_work_sharing_thread_pool_.GetScheduler())),
         this_node_id_(this_node_id),
         message_broker_(std::make_unique<network::MessageBroker>(
             cluster_node_info, this_node_id,
@@ -67,10 +82,31 @@ class ActorRegistry {
             heartbeat_config)) {
     logging::SetupProcessWideLoggingConfig();
     InitRandomNumGenerator();
-    for (const auto& node : cluster_node_info) {
-      EXA_THROW_CHECK(!node_id_to_address_.contains(node.node_id)) << "Duplicate node id: " << node.node_id;
-      node_id_to_address_[node.node_id] = node.address;
-    }
+    ValidateNodeInfo(cluster_node_info);
+  }
+
+  /**
+   * @brief Construct in distributed mode, use specified scheduler.
+   */
+  template <ex::scheduler Scheduler>
+  explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
+                         network::HeartbeatConfig heartbeat_config =
+                             {
+                                 .heartbeat_timeout = kDefaultHeartbeatTimeout,
+                                 .heartbeat_interval = kDefaultHeartbeatInterval,
+                             })
+      : is_distributed_mode_(true),
+        scheduler_(std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler)),
+        this_node_id_(this_node_id),
+        message_broker_(std::make_unique<network::MessageBroker>(
+            cluster_node_info, this_node_id,
+            [this](uint64_t received_request_id, network::ByteBufferType data) {
+              HandleNetworkRequest(received_request_id, std::move(data));
+            },
+            heartbeat_config)) {
+    logging::SetupProcessWideLoggingConfig();
+    InitRandomNumGenerator();
+    ValidateNodeInfo(cluster_node_info);
   }
 
   ~ActorRegistry() {
@@ -118,8 +154,8 @@ class ActorRegistry {
     // local actor, create directly
     if (config.node_id == this_node_id_) {
       auto actor_id = GenerateRandomActorId();
-      auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(
-          std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler_), config, std::forward<Args>(args)...);
+      auto actor =
+          std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::forward<Args>(args)...);
       auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, actor.get(), message_broker_.get());
       if (config.actor_name.has_value()) {
         std::string& name = *config.actor_name;
@@ -230,7 +266,8 @@ class ActorRegistry {
 
  private:
   bool is_distributed_mode_ = false;
-  Scheduler scheduler_;
+  WorkSharingThreadPool default_work_sharing_thread_pool_ {0};
+  std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   std::mt19937 random_num_generator_;
   uint32_t this_node_id_ = 0;
   std::unordered_map<uint32_t, std::string> node_id_to_address_;
@@ -250,6 +287,13 @@ class ActorRegistry {
       if (!actor_id_to_actor_.Contains(id)) {
         return id;
       }
+    }
+  }
+
+  void ValidateNodeInfo(const std::vector<NodeInfo>& cluster_node_info) {
+    for (const auto& node : cluster_node_info) {
+      EXA_THROW_CHECK(!node_id_to_address_.contains(node.node_id)) << "Duplicate node id: " << node.node_id;
+      node_id_to_address_[node.node_id] = node.address;
     }
   }
 
@@ -322,7 +366,7 @@ class ActorRegistry {
       auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(handler_key);
       auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
           .request_buffer = std::move(reader),
-          .scheduler = std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler_),
+          .scheduler = scheduler_->Clone(),
       });
       uint64_t actor_id = GenerateRandomActorId();
       if (result.actor_name.has_value()) {

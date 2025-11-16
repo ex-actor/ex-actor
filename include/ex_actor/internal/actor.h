@@ -73,6 +73,7 @@ class TypeErasedActorScheduler {
  public:
   virtual ~TypeErasedActorScheduler() = default;
   virtual void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope) = 0;
+  virtual std::unique_ptr<TypeErasedActorScheduler> Clone() const = 0;
 };
 
 template <ex::scheduler Scheduler>
@@ -85,6 +86,10 @@ class AnyStdExecScheduler : public TypeErasedActorScheduler {
                   ex::write_env(ex::prop {ex_actor::get_scheduler_index, actor_config.scheduler_index}) |
                   ex::then([actor] { actor->PullMailboxAndRun(); });
     async_scope.spawn(std::move(sender));
+  }
+
+  std::unique_ptr<TypeErasedActorScheduler> Clone() const override {
+    return std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler_);
   }
 
  private:

@@ -19,8 +19,8 @@ TEST(NetworkTest, MessageBrokerTest) {
       ex_actor::internal::util::SetThreadName("node_" + std::to_string(node_id));
       ex_actor::internal::network::MessageBroker message_broker(
           node_list,
-          /*this_node_id=*/node_id, [&message_broker](uint64_t receive_request_id, ByteBufferType data) {
-            message_broker.ReplyRequest(receive_request_id, std::move(data));
+          /*this_node_id=*/node_id, [&message_broker](uint64_t received_request_id, ByteBufferType data) {
+            message_broker.ReplyRequest(received_request_id, std::move(data));
           });
       uint32_t to_node_id = (node_id + 1) % node_list.size();
       exec::async_scope scope;

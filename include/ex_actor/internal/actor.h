@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -62,8 +63,32 @@ class TypeErasedActor {
 
   const ActorConfig& GetActorConfig() const { return actor_config_; }
 
+  virtual void PullMailboxAndRun() = 0;
+
  protected:
   ActorConfig actor_config_;
+};
+
+class TypeErasedActorScheduler {
+ public:
+  virtual ~TypeErasedActorScheduler() = default;
+  virtual void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope) = 0;
+};
+
+template <ex::scheduler Scheduler>
+class AnyStdExecScheduler : public TypeErasedActorScheduler {
+ public:
+  explicit AnyStdExecScheduler(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
+  void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope) override {
+    const auto& actor_config = actor->GetActorConfig();
+    auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, actor_config.priority}) |
+                  ex::write_env(ex::prop {ex_actor::get_scheduler_index, actor_config.scheduler_index}) |
+                  ex::then([actor] { actor->PullMailboxAndRun(); });
+    async_scope.spawn(std::move(sender));
+  }
+
+ private:
+  Scheduler scheduler_;
 };
 
 // ---------------std::execution Scheduler Adaption-----------------
@@ -131,26 +156,26 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
 
 // ---------------Actor Class---------------
 
-template <class UserClass, ex::scheduler Scheduler, bool kUseStaticCreateFn = false>
+template <class UserClass, auto kCreateFn = nullptr>
 class Actor : public TypeErasedActor {
  public:
   template <typename... Args>
-  explicit Actor(Scheduler scheduler, ActorConfig actor_config, Args&&... args)
+  explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args&&... args)
       : TypeErasedActor(std::move(actor_config)), scheduler_(std::move(scheduler)) {
-    if constexpr (kUseStaticCreateFn) {
-      user_class_instance_ = std::make_unique<UserClass>(UserClass::Create(std::forward<Args>(args)...));
+    if constexpr (kCreateFn != nullptr) {
+      user_class_instance_ = std::make_unique<UserClass>(kCreateFn(std::forward<Args>(args)...));
     } else {
       user_class_instance_ = std::make_unique<UserClass>(std::forward<Args>(args)...);
     }
   }
 
   template <typename... Args>
-  static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(Scheduler scheduler, ActorConfig actor_config,
-                                                            std::tuple<Args...> arg_tuple) {
+  static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(std::unique_ptr<TypeErasedActorScheduler> scheduler,
+                                                            ActorConfig actor_config, std::tuple<Args...> arg_tuple) {
     return std::apply(
-        [scheduler = std::move(scheduler), actor_config = std::move(actor_config)](auto&&... args) {
-          return std::make_unique<Actor<UserClass, Scheduler, /*kUseStaticCreateFn=*/true>>(
-              std::move(scheduler), std::move(actor_config), std::move(args)...);
+        [scheduler = std::move(scheduler), actor_config = std::move(actor_config)](auto&&... args) mutable {
+          return std::make_unique<Actor<UserClass, kCreateFn>>(std::move(scheduler), std::move(actor_config),
+                                                               std::move(args)...);
         },
         std::move(arg_tuple));
   }
@@ -177,7 +202,7 @@ class Actor : public TypeErasedActor {
   void* GetUserClassAddress() override { return user_class_instance_.get(); }
 
  private:
-  Scheduler scheduler_;
+  std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   util::LinearizableUnboundedQueue<ActorMessage*> mailbox_;
   std::atomic_size_t pending_message_count_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
@@ -194,15 +219,10 @@ class Actor : public TypeErasedActor {
     if (!changed) {
       return;
     }
-
-    auto sender = ex::schedule(scheduler_) |
-                  ex::write_env(ex::prop {ex_actor::get_priority, GetActorConfig().priority}) |
-                  ex::write_env(ex::prop {ex_actor::get_scheduler_index, GetActorConfig().scheduler_index}) |
-                  ex::then([this] { PullMailboxAndRun(); });
-    async_scope_.spawn(std::move(sender));
+    scheduler_->Schedule(this, async_scope_);
   }
 
-  void PullMailboxAndRun() {
+  void PullMailboxAndRun() override {
     if (user_class_instance_ == nullptr) [[unlikely]] {
       // already destroyed
       return;

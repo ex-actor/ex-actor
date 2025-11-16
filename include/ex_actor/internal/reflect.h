@@ -160,6 +160,13 @@ constexpr auto UnwrapReturnSenderIfNested() {
     return std::type_identity<ReturnType> {};
   }
 }
+
+template <auto kFunc>
+std::string GetUniqueNameForFunction() {
+  // TODO: according to the standard, typeid().name() is not guaranteed to be unique, but in modern gcc&clang,
+  // it's an unique mangled name. So it works now, maybe replace it with a more robust way in the future.
+  return typeid(kFunc).name();
+}
 }  // namespace ex_actor::internal::reflect
 
 namespace ex_actor::reflect {

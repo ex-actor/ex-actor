@@ -9,30 +9,24 @@ class PingWorker {
 
   std::string Ping(const std::string& message) { return "ack from " + name_ + ", msg got: " + message; }
 
-  // Boilerplate 2, the kActorMethods tuple.
-  // The name can be adjusted by defining `EXA_ACTOR_METHODS_KEYWORD`
-  static constexpr std::tuple kActorMethods = {&PingWorker::Ping};
-
  private:
   std::string name_;
 };
+
+EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping);
 
 int main(int /*argc*/, char** argv) {
   uint32_t this_node_id = std::atoi(argv[1]);
   ex_actor::WorkSharingThreadPool thread_pool(4);
 
-  // split by comma, e.g. ActorRoster<A, B, C...>
-  ex_actor::ActorRoster<PingWorker> roster;
-
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
-                                   /*this_node_id=*/this_node_id, cluster_node_info, roster);
+                                   /*this_node_id=*/this_node_id, cluster_node_info);
 
   uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
-  auto ping_worker =
-      registry.CreateActorUseStaticCreateFn<PingWorker>(ex_actor::ActorConfig {.node_id = remote_node_id},
-                                                        /*name=*/"Alice");
+  auto ping_worker = registry.CreateActor<PingWorker, &PingWorker::Create>(
+      ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
   // Loop forever
   while (true) {
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");

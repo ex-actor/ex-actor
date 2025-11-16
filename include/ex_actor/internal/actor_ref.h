@@ -29,20 +29,19 @@ namespace ex_actor::internal {
 template <class UserClass>
 class ActorRef {
  public:
-  ActorRef() : is_empty_(false) {}
+  ActorRef() : is_empty_(true) {}
 
-  ActorRef(uint32_t this_node_id, uint32_t node_id, uint64_t actor_id, uint64_t class_index_in_roster,
-           TypeErasedActor* actor, network::MessageBroker* message_broker)
-      : is_empty_(true),
+  ActorRef(uint32_t this_node_id, uint32_t node_id, uint64_t actor_id, TypeErasedActor* actor,
+           network::MessageBroker* message_broker)
+      : is_empty_(false),
         this_node_id_(this_node_id),
         node_id_(node_id),
         actor_id_(actor_id),
-        class_index_in_roster_(class_index_in_roster),
         type_erased_actor_(actor),
         message_broker_(message_broker) {}
 
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
-    if (lhs.is_empty_ == false && rhs.is_empty_ == false) {
+    if (lhs.is_empty_ && rhs.is_empty_) {
       return true;
     }
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
@@ -64,7 +63,7 @@ class ActorRef {
       -> exec::task<typename decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
-    if (!IsEmpty()) [[unlikely]] {
+    if (IsEmpty()) [[unlikely]] {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
     if (node_id_ == this_node_id_) {
@@ -77,39 +76,34 @@ class ActorRef {
     serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
         .args_tuple = typename Sig::DecayedArgsTupleType(std::forward<Args>(args)...)};
     auto serialized_args = serde::Serialize(method_call_args);
-    constexpr std::optional<uint64_t> optional_method_index = reflect::GetActorMethodIndex<kMethod>();
-    EXA_THROW_CHECK(optional_method_index.has_value())
-        << "Can't find method index in actor methods. Please put this method to your actor class's method tuple.";
-    uint64_t method_index = optional_method_index.value();
-    serde::BufferWriter buffer_writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) +
-                                                               sizeof(class_index_in_roster_) + sizeof(method_index) +
+    std::string handler_key = reflect::GetUniqueNameForFunction<kMethod>();
+    serde::BufferWriter buffer_writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) + sizeof(uint64_t) +
+                                                               sizeof(handler_key.size()) + handler_key.size() +
                                                                sizeof(actor_id_) + serialized_args.size()});
-    // protocol: [request_type][class_index_in_roster][method_index][actor_id][ActorMethodCallArgs]
+    // protocol: [request_type][handler_key_len][handler_key][actor_id][ActorMethodCallArgs]
     buffer_writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallRequest);
-    buffer_writer.WritePrimitive(class_index_in_roster_);
-    buffer_writer.WritePrimitive(method_index);
+    buffer_writer.WritePrimitive(handler_key.size());
+    buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
     buffer_writer.WritePrimitive(actor_id_);
     buffer_writer.CopyFrom(serialized_args.data(), serialized_args.size());
 
     using UnwrappedType = decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type;
-    auto sender = message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut()) |
-                  ex::then([](network::ByteBufferType response_buffer) {
-                    serde::BufferReader reader {std::move(response_buffer)};
-                    auto type = reader.NextPrimitive<serde::NetworkReplyType>();
-                    if (type == serde::NetworkReplyType::kActorMethodCallError) {
-                      EXA_THROW << serde::Deserialize<serde::ActorMethodReturnValue<std::string>>(
-                                       reader.Current(), reader.RemainingSize())
-                                       .return_value;
-                    }
-                    if constexpr (std::is_void_v<UnwrappedType>) {
-                      return;
-                    } else {
-                      return serde::Deserialize<serde::ActorMethodReturnValue<UnwrappedType>>(reader.Current(),
-                                                                                              reader.RemainingSize())
-                          .return_value;
-                    }
-                  });
-    co_return co_await std::move(sender);
+    network::ByteBufferType response_buffer =
+        co_await message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut());
+    serde::BufferReader reader {std::move(response_buffer)};
+    auto type = reader.NextPrimitive<serde::NetworkReplyType>();
+    if (type == serde::NetworkReplyType::kActorMethodCallError) {
+      auto res =
+          serde::Deserialize<serde::ActorMethodReturnValue<std::string>>(reader.Current(), reader.RemainingSize());
+      EXA_THROW << res.return_value;
+    }
+    if constexpr (std::is_void_v<UnwrappedType>) {
+      co_return;
+    } else {
+      auto res =
+          serde::Deserialize<serde::ActorMethodReturnValue<UnwrappedType>>(reader.Current(), reader.RemainingSize());
+      co_return res.return_value;
+    }
   }
 
   /**
@@ -119,7 +113,7 @@ class ActorRef {
   [[nodiscard]] ex::sender auto SendLocal(Args&&... args) const {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
-    if (!IsEmpty()) [[unlikely]] {
+    if (IsEmpty()) [[unlikely]] {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
     EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
@@ -130,27 +124,25 @@ class ActorRef {
 
   uint32_t GetNodeId() const { return node_id_; }
   uint64_t GetActorId() const { return actor_id_; }
-  std::optional<uint32_t> ActorIdInNetworkProtocol() const { return class_index_in_roster_; }
 
  private:
   bool is_empty_;
   uint32_t this_node_id_ = 0;
   uint32_t node_id_ = 0;
   uint64_t actor_id_ = 0;
-  uint64_t class_index_in_roster_ = 0;
   TypeErasedActor* type_erased_actor_ = nullptr;
   network::MessageBroker* message_broker_ = nullptr;
 };
 
-class ActorRefDeserializationInfo {
+class ActorRefDeserializationContext {
  public:
-  static ActorRefDeserializationInfo& GetThreadLocalInstance() {
-    static thread_local ActorRefDeserializationInfo instance;
+  static ActorRefDeserializationContext& GetThreadLocalInstance() {
+    static thread_local ActorRefDeserializationContext instance;
     return instance;
   }
 
   uint32_t this_node_id = 0;
-  std::function<TypeErasedActor*(uint64_t)> look_up;
+  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
   network::MessageBroker* message_broker = nullptr;
 };
 }  // namespace ex_actor::internal
@@ -166,23 +158,22 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
     bool is_valid {};
     uint32_t node_id {};
     uint64_t actor_id {};
-    uint64_t class_index_in_roster {};
   };
 
   static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
-    auto& info = ex_actor::internal::ActorRefDeserializationInfo::GetThreadLocalInstance();
+    auto& info = ex_actor::internal::ActorRefDeserializationContext::GetThreadLocalInstance();
 
     ex_actor::internal::ActorRef<U> actor(info.this_node_id, rfl_type.node_id, rfl_type.actor_id,
-                                          rfl_type.class_index_in_roster, info.look_up(rfl_type.actor_id),
-                                          info.message_broker);
+                                          info.actor_look_up_fn(rfl_type.actor_id), info.message_broker);
     return actor;
   }
 
   static ReflType from(const ex_actor::internal::ActorRef<U>& actor_ref) {
-    return {.is_valid = actor_ref.is_empty_,
-            .node_id = actor_ref.node_id_,
-            .actor_id = actor_ref.actor_id_,
-            .class_index_in_roster = actor_ref.class_index_in_roster_};
+    return {
+        .is_valid = actor_ref.is_empty_,
+        .node_id = actor_ref.node_id_,
+        .actor_id = actor_ref.actor_id_,
+    };
   }
 };
 }  // namespace rfl
@@ -191,7 +182,7 @@ namespace std {
 template <class UserClass>
 struct hash<ex_actor::ActorRef<UserClass>> {
   size_t operator()(const ex_actor::ActorRef<UserClass>& ref) const {
-    if (!ref.IsEmpty()) {
+    if (ref.IsEmpty()) {
       return ex_actor::internal::kEmptyActorRefHashVal;
     }
     return std::hash<uint64_t>()(ref.GetActorId()) ^ std::hash<uint32_t>()(ref.GetNodeId());

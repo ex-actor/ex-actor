@@ -22,7 +22,7 @@ YourClass FactoryCreate() { return YourClass(); }
 EXA_REMOTE(&YourClass::FactoryCreate, &YourClass::Method1, &YourClass::Method2);
 ```
 
-In the `EX_REMOTE` macro, the first argument is a factory function to create your class, and the rest are the methods you want to call remotely.
+In the `EXA_REMOTE` macro, the first argument is a factory function to create your class, and the rest are the methods you want to call remotely.
 
 This is used to generate a serialization schema for network communication.
 

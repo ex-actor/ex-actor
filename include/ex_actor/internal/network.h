@@ -57,7 +57,7 @@ struct HeartbeatConfig {
 class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
-                         std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler,
+                         std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
                          HeartbeatConfig heartbeat_config = {.heartbeat_timeout = kDefaultHeartbeatTimeout,
                                                              .heartbeat_interval = kDefaultHeartbeatInterval});
   ~MessageBroker();
@@ -111,7 +111,7 @@ class MessageBroker {
    */
   SendRequestSender SendRequest(uint32_t to_node_id, ByteBufferType data, MessageFlag flag = MessageFlag::kNormal);
 
-  void ReplyRequest(uint64_t receive_request_id, ByteBufferType data);
+  void ReplyRequest(uint64_t received_request_id, ByteBufferType data);
 
  private:
   void EstablishConnections();
@@ -129,7 +129,7 @@ class MessageBroker {
 
   std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;
-  std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler_;
+  std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
   HeartbeatConfig heartbeat_;
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;

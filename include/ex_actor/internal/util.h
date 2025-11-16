@@ -207,7 +207,7 @@ class LockGuardedMap {
     map_.erase(key);
   }
 
-  bool Contains(const K& key) {
+  bool Contains(const K& key) const {
     std::lock_guard lock(mutex_);
     return map_.contains(key);
   }

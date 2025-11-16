@@ -29,7 +29,7 @@
 namespace ex_actor::internal::network {
 
 MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t this_node_id,
-                             std::function<void(uint64_t receive_request_id, ByteBufferType data)> request_handler,
+                             std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
                              HeartbeatConfig heartbeat_config)
     : node_list_(std::move(node_list)),
       this_node_id_(this_node_id),
@@ -126,9 +126,9 @@ MessageBroker::SendRequestSender MessageBroker::SendRequest(uint32_t to_node_id,
   };
 }
 
-void MessageBroker::ReplyRequest(uint64_t receive_request_id, ByteBufferType data) {
-  auto identifier = received_request_id_to_identifier_.At(receive_request_id);
-  received_request_id_to_identifier_.Erase(receive_request_id);
+void MessageBroker::ReplyRequest(uint64_t received_request_id, ByteBufferType data) {
+  auto identifier = received_request_id_to_identifier_.At(received_request_id);
+  received_request_id_to_identifier_.Erase(received_request_id);
 
   pending_reply_operations_.Push(ReplyOperation {
       .identifier = identifier,
@@ -216,9 +216,9 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
     operation->Complete(std::move(data_bytes));
   } else if (identifier.response_node_id == this_node_id_) {
     // Request from remote node - pass to handler, which will send response back
-    auto receive_request_id = received_request_id_counter_.fetch_add(1);
-    received_request_id_to_identifier_.Insert(receive_request_id, identifier);
-    request_handler_(receive_request_id, std::move(data_bytes));
+    auto received_request_id = received_request_id_counter_.fetch_add(1);
+    received_request_id_to_identifier_.Insert(received_request_id, identifier);
+    request_handler_(received_request_id, std::move(data_bytes));
   } else {
     EXA_THROW << "Invalid identifier, " << EXA_DUMP_VARS(identifier);
   }

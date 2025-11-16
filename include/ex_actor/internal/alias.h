@@ -14,9 +14,12 @@
 
 #pragma once
 
+#include <spdlog/spdlog.h>
 #include <stdexec/execution.hpp>
 
 namespace ex_actor {
 // NOLINTNEXTLINE(misc-unused-alias-decls)
 namespace ex = stdexec;
+// NOLINTNEXTLINE(misc-unused-alias-decls)
+namespace fmt_lib = spdlog::fmt_lib;
 }  // namespace ex_actor

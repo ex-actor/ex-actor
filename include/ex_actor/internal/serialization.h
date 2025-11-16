@@ -122,6 +122,13 @@ class BufferReader {
     return value;
   }
 
+  std::string PullString(size_t length) {
+    EXA_THROW_CHECK_LE(offset_ + length, size_) << "Buffer overflow, offset: " << offset_ << ", size: " << size_;
+    std::string value(reinterpret_cast<const char*>(Current()), length);
+    offset_ += length;
+    return value;
+  }
+
   const uint8_t* Current() const { return start_ + offset_; }
 
   size_t RemainingSize() const { return size_ - offset_; }

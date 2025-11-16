@@ -17,13 +17,18 @@ class A {
  public:
   static A Create() { return A(); }
 };
+EXA_REMOTE(&A::Create);
 
 class B {
  public:
   static B Create(int, const std::string&, std::unique_ptr<int>) { return B(); }
 };
+EXA_REMOTE(&B::Create);
 
-class C {};
+class C {
+ public:
+  static C Create() { return C(); }
+};
 
 class PingWorker {
  public:
@@ -34,11 +39,12 @@ class PingWorker {
 
   std::string Error() { throw std::runtime_error("error from " + name_); }
 
-  static constexpr std::tuple kActorMethods = {&PingWorker::Ping, &PingWorker::Error};
+  void NotRegisteredFunc() {}
 
  private:
   std::string name_;
 };
+EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping, &PingWorker::Error);
 
 class Error {
  public:
@@ -46,6 +52,7 @@ class Error {
 
   Error() { throw std::runtime_error("Just an error"); }
 };
+EXA_REMOTE(&Error::Create);
 
 class Echoer {
  public:
@@ -69,9 +76,8 @@ class Echoer {
     }
     return strs;
   }
-
-  static constexpr std::tuple kActorMethods = {&Echoer::Echo, &Echoer::Proxy, &Echoer::ProxyTwoActor};
 };
+EXA_REMOTE(&Echoer::Create, &Echoer::Echo, &Echoer::Proxy, &Echoer::ProxyTwoActor);
 
 struct ProxyEchoer {
   ex_actor::ActorRef<Echoer> echoer;
@@ -83,55 +89,68 @@ struct ProxyEchoer {
   }
 
   static ProxyEchoer Create(ex_actor::ActorRef<Echoer> echoer) { return ProxyEchoer(echoer); }
-  static constexpr std::tuple kActorMethods = {&ProxyEchoer::Echo};
 };
+EXA_REMOTE(&ProxyEchoer::Create, &ProxyEchoer::Echo);
 
 TEST(DistributedTest, ConstructionInDistributedMode) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRoster<A, B, Error, PingWorker> roster;
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
-                                     /*this_node_id=*/this_node_id, cluster_node_info, roster);
+                                     /*this_node_id=*/this_node_id, cluster_node_info);
 
     // test local creation
     auto local_a = registry.CreateActor<A>();
     auto local_b = registry.CreateActor<B>();
-    EXPECT_THAT([&registry] { registry.CreateActor<C>(); },
-                Throws<std::exception>(Property(&std::exception::what, HasSubstr("Can't find"))));
-    auto local_a2 = registry.CreateActorUseStaticCreateFn<A>(ex_actor::ActorConfig {.node_id = this_node_id});
+    auto local_a2 = registry.CreateActor<A>(ex_actor::ActorConfig {.node_id = this_node_id});
 
     // test remote creation
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
+
     spdlog::info("node {} creating remote actor A", this_node_id);
     auto remote_a =
-        registry.CreateActorUseStaticCreateFn<A>(ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "A"});
+        registry.CreateActor<A, &A::Create>(ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "A"});
+
     spdlog::info("node {} creating remote actor B", this_node_id);
-    auto remote_b = registry.CreateActorUseStaticCreateFn<B>(
+    auto remote_b = registry.CreateActor<B, &B::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "B"}, 1, "asd", std::make_unique<int>());
 
-    // test remote creation error propagation
+    spdlog::info("creating remote actor C without static create function");
     ASSERT_THAT(
-        [&]() { registry.CreateActorUseStaticCreateFn<Error>(ex_actor::ActorConfig {.node_id = remote_node_id}); },
-        Throws<std::exception>(Property(&std::exception::what, HasSubstr("Just an error"))));
+        [&]() { registry.CreateActor<C>(ex_actor::ActorConfig {.node_id = remote_node_id}); },
+        Throws<std::exception>(Property(&std::exception::what, HasSubstr("can only be used to create local actor"))));
 
-    ASSERT_THAT(
-        [&]() {
-          registry.CreateActorUseStaticCreateFn<A>(
-              ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "A"});
-        },
-        Throws<std::exception>(Property(&std::exception::what, HasSubstr("same name"))));
+    spdlog::info("creating remote actor C without registering with EXA_REMOTE");
+    auto do_create = [&]() { registry.CreateActor<C, &C::Create>(ex_actor::ActorConfig {.node_id = remote_node_id}); };
+    ASSERT_THAT(do_create, Throws<std::exception>(
+                               Property(&std::exception::what, HasSubstr("forgot to register it with EXA_REMOTE"))));
+
+    // test remote creation error propagation
+    auto do_create_error = [&]() {
+      registry.CreateActor<Error, &Error::Create>(ex_actor::ActorConfig {.node_id = remote_node_id});
+    };
+    ASSERT_THAT(do_create_error, Throws<std::exception>(Property(&std::exception::what, HasSubstr("Just an error"))));
 
     // test remote call
+    spdlog::info("creating remote actor PingWorker");
     auto ping_worker =
-        registry.CreateActorUseStaticCreateFn<PingWorker>(ex_actor::ActorConfig {.node_id = remote_node_id},
-                                                          /*name=*/"Alice");
+        registry.CreateActor<PingWorker, &PingWorker::Create>(ex_actor::ActorConfig {.node_id = remote_node_id},
+                                                              /*name=*/"Alice");
+
+    // test call a not registered function
+    spdlog::info("calling PingWorker::NotRegisteredFunc");
+    ASSERT_THAT(
+        [&]() { stdexec::sync_wait(ping_worker.Send<&PingWorker::NotRegisteredFunc>()); },
+        Throws<std::exception>(Property(&std::exception::what, HasSubstr("forgot to register it with EXA_REMOTE"))));
+
+    spdlog::info("calling PingWorker::Ping");
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
     auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
     ASSERT_EQ(ping_res, "ack from Alice, msg got: hello");
 
     // test remote call error propagation
+    spdlog::info("calling PingWorker::Error");
     auto error = ping_worker.Send<&PingWorker::Error>();
     ASSERT_THAT([&error] { stdexec::sync_wait(std::move(error)); },
                 Throws<std::exception>(Property(&std::exception::what, HasSubstr("error"))));
@@ -147,14 +166,13 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
 TEST(DistributedTest, ActorLookUpInDistributeMode) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRoster<Echoer> roster;
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
-                                     /*this_node_id=*/this_node_id, cluster_node_info, roster);
+                                     /*this_node_id=*/this_node_id, cluster_node_info);
 
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
-    auto remote_actor = registry.CreateActorUseStaticCreateFn<Echoer>(
+    auto remote_actor = registry.CreateActor<Echoer, &Echoer::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Alice"});
     auto lookup_result = registry.GetActorRefByName<Echoer>(remote_node_id, "Alice");
     auto lookup_error = registry.GetActorRefByName<Echoer>(remote_node_id, "A");
@@ -182,19 +200,18 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
 TEST(DistributedTest, ActorRefSerializationTest) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRoster<Echoer, ProxyEchoer> roster;
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
-                                     /*this_node_id=*/this_node_id, cluster_node_info, roster);
+                                     /*this_node_id=*/this_node_id, cluster_node_info);
 
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
 
     auto local_actor_a = registry.CreateActor<Echoer>();
     auto local_actor_b = registry.CreateActor<Echoer>();
-    auto remote_actor_a = registry.CreateActorUseStaticCreateFn<Echoer>(
+    auto remote_actor_a = registry.CreateActor<Echoer, &Echoer::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Alice"});
-    auto remote_actor_b = registry.CreateActorUseStaticCreateFn<Echoer>(
+    auto remote_actor_b = registry.CreateActor<Echoer, &Echoer::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Bob"});
     std::string msg = "hi";
 
@@ -216,7 +233,7 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     ASSERT_EQ(vec_reply, expected_vec_reply);
 
     // Pass a local actor to the constructor of remote actor
-    auto proxy_echoer = registry.CreateActorUseStaticCreateFn<ProxyEchoer>(
+    auto proxy_echoer = registry.CreateActor<ProxyEchoer, &ProxyEchoer::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id}, local_actor_a);
     auto proxy_echoer_sender = proxy_echoer.Send<&ProxyEchoer::Echo>(msg);
     auto [proxy_echoer_reply] = stdexec::sync_wait(std::move(proxy_echoer_sender)).value();

@@ -51,9 +51,7 @@ class Proxy {
 
 class TestActorWithNamedLookup {
  public:
-  explicit TestActorWithNamedLookup(
-      std::weak_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> reg)
-      : registry_(std::move(reg)) {}
+  explicit TestActorWithNamedLookup(std::weak_ptr<ex_actor::ActorRegistry> reg) : registry_(std::move(reg)) {}
   auto LookUpActor() {
     if (registry_.expired()) throw std::runtime_error("Registry pointer expired before we could look up the actor!");
     auto ptr = registry_.lock();
@@ -61,8 +59,18 @@ class TestActorWithNamedLookup {
   }
 
  private:
-  std::weak_ptr<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>> registry_;
+  std::weak_ptr<ex_actor::ActorRegistry> registry_;
 };
+
+TEST(BasicApiTest, ActorRegistryCreationWithDefaultScheduler) {
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+  auto counter = registry.CreateActor<Counter>();
+  auto getvalue_sender = counter.Send<&Counter::GetValue>();
+  auto getvalue_reply = ex::sync_wait(std::move(getvalue_sender));
+  ASSERT_EQ(getvalue_reply.has_value(), true);
+  auto [value] = getvalue_reply.value();
+  ASSERT_EQ(value, 0);
+}
 
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
   auto coroutine = []() -> exec::task<void> {
@@ -115,8 +123,7 @@ TEST(BasicApiTest, CreateActorWithFullConfig) {
 
 TEST(BasicApiTest, LookUpNamedActor) {
   ex_actor::WorkSharingThreadPool thread_pool(10);
-  auto registry_ptr =
-      std::make_shared<ex_actor::ActorRegistry<ex_actor::WorkSharingThreadPool::Scheduler>>(thread_pool.GetScheduler());
+  auto registry_ptr = std::make_shared<ex_actor::ActorRegistry>(thread_pool.GetScheduler());
   registry_ptr->CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
   auto test_retriever_actor = registry_ptr->CreateActor<TestActorWithNamedLookup>(registry_ptr);
 

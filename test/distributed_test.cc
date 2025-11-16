@@ -92,6 +92,27 @@ struct ProxyEchoer {
 };
 EXA_REMOTE(&ProxyEchoer::Create, &ProxyEchoer::Echo);
 
+TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
+  auto node_main = [](uint32_t this_node_id) {
+    std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
+                                                         {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
+
+    ex_actor::ActorRegistry registry(/*thread_pool_size=*/4,
+                                     /*this_node_id=*/this_node_id, cluster_node_info);
+
+    // test remote creation
+    uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
+    auto ping_worker =
+        registry.CreateActor<PingWorker, &PingWorker::Create>(ex_actor::ActorConfig {.node_id = remote_node_id},
+                                                              /*name=*/"Alice");
+    auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
+    auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
+    ASSERT_EQ(ping_res, "ack from Alice, msg got: hello");
+  };
+  std::jthread node_0(node_main, 0);
+  std::jthread node_1(node_main, 1);
+}
+
 TEST(DistributedTest, ConstructionInDistributedMode) {
   auto node_main = [](uint32_t this_node_id) {
     ex_actor::WorkSharingThreadPool thread_pool(4);

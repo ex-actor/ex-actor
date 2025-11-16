@@ -15,9 +15,9 @@ The actor can be local or remote. When it's local, args in method are passed dir
 
 # Key Features
 
-1. **Easy to Use** - Non-intrusive API, turn your existing class into an actor. No arcane macros and inheritance.
-2. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work-sharing, work-stealing, custom priority and so on.
-3. **Standard-Compliant API** - Our actor returns a standard `std::execution::task`, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
+1. **Easy to Use** - Non-intrusive API, turn your existing class into an actor, no need to modify your class.
+2. **Standard-Compliant API** - Our actor returns a standard `std::execution::task`, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
+3. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work-sharing, work-stealing, custom priority and so on, see [docs](https://ex-actor.github.io/ex-actor/schedulers/).
 
 
 # API Glance
@@ -36,14 +36,12 @@ struct YourClass {
 };
 
 exec::task<int> Test() {
-  // 1. Choose a std::execution scheduler you like.
-  ex_actor::WorkSharingThreadPool thread_pool(10);
-  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
 
-  // 2. Create the actor.
+  // 1. Create the actor.
   ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
 
-  // 3. Call it! It returns a `std::execution::task`.
+  // 2. Call it! It returns a `std::execution::task`.
   int res = co_await actor.Send<&YourClass::Add>(1);
   co_return res + 1;
 }

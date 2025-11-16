@@ -30,7 +30,7 @@ class WorkSharingThreadPoolBase {
  public:
   explicit WorkSharingThreadPoolBase(size_t thread_count, bool start_workers_immediately = true)
       : thread_count_(thread_count) {
-    if (start_workers_immediately) {
+    if (thread_count > 0 && start_workers_immediately) {
       StartWorkers();
     }
   }

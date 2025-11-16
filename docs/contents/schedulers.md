@@ -1,6 +1,20 @@
 # Schedulers
 
-We provide some std::execution schedulers out-of-box:
+You can use any std::execution scheduler as ex_actor's underlying scheduler, just pass it to the `ActorRegistry` constructor. By default, we use `ex_actor::WorkSharingThreadPool`.
+
+```cpp
+#include "ex_actor/api.h"
+
+ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
+ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+
+// which is identical to:
+ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+```
+
+We provide some handy schedulers out-of-box, check them below.
+
+If you are interested in the details, you can read [understanding how actor is scheduled](#understanding-how-actor-is-scheduled) section to understand how ex_actor use a std::execution scheduler to schedule actors.
 
 ## Work-Sharing Thread Pool
 
@@ -113,3 +127,66 @@ When an actor is activated, it will be pushed to the specified scheduler.
 
 It's useful when you want to split actors by groups. E.g. some control-flow actors and some data-processing actors, and you want the control-flow
 actors run in a dedicated thread pool, so it won't be blocked by the data-processing actors.
+
+## Understanding how actor is scheduled
+
+Now you've learnt the basic usage of `ex_actor`. Next we'll dig a little deep, to understand how an actor is scheduled.
+
+This part is optional, if you don't want to know the details, you can skip it. But if you have time we
+recommend you to read it to have a better understanding of how actor works.
+
+```d2
+direction: right
+
+caller -> actor.mailbox: 1.Send message
+caller.shape: circle
+
+actor
+actor.mailbox -> actor.user class: 3.pull & execute
+actor.mailbox.shape: queue
+
+scheduler
+actor -> scheduler: 2.activate
+scheduler.task queue.shape: queue
+scheduler.worker thread
+
+```
+
+We wrap your class into an actor, the actor contains a mailbox(a queue),
+whenever a message is pushed to the mailbox, the actor will be activated - pushed to the scheduler.
+
+You can think of pushing the following pseudo lambda to the scheduler:
+
+```cpp
+// pseudo code of actor activation
+scheduler.push_task([actor = std::move(actor)] {
+  int message_executed = 0;
+  while (!actor.mailbox.empty()) {
+    auto message = actor.mailbox.pop();
+    message->Execute();
+    message_executed++;
+    /*
+    we limit the number of messages executed per activation
+    so that other actors won't starve.
+    */
+    if (message_executed >= actor.max_message_executed_per_activation) {
+      break;
+    }
+  }
+  if (still has messages in the mailbox) {
+    push again to the scheduler
+  }
+});
+```
+
+We'll handle the synchronization correctly, so that **at any time, there is at most one thread executing the actor**.
+So you don't need to worry about the synchronization when writing actor methods.
+
+The whole schedule process is like this:
+
+1. someone calls an actor's method - i.e. start a sender returned by `actor.Send<>`.
+2. we push this message(the target method & its callbacks) to the actor's mailbox.
+3. we check if the actor is activated, if not, we activate it, push an activation task(see the above pseudo code) to the scheduler.
+4. the scheduler get the task, execute it, in which the actor will pull messages from its mailbox and execute them.
+5. the actor runs out of messages, or max messages executed per activation is reached, the activation task finishes.
+6. if there are still messages in the mailbox, the activation task will be pushed again to the scheduler.

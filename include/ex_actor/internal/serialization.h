@@ -22,7 +22,7 @@
 #include <rfl/capnproto.hpp>
 #include <spdlog/spdlog.h>
 
-#include "ex_actor/internal/actor.h"
+#include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/reflect.h"
 
@@ -38,6 +38,7 @@ template <class T>
 std::vector<char> Serialize(const T& obj) {
   return rfl::capnproto::write(obj, GetCachedSchema<T>());
 }
+
 template <class T>
 T Deserialize(const uint8_t* data, size_t size) {
   return rfl::capnproto::read<T>(data, size, GetCachedSchema<T>()).value();

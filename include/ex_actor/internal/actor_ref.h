@@ -17,13 +17,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
-#include "rfl/internal/has_reflector.hpp"
 
 namespace ex_actor::internal {
 template <class UserClass>
@@ -45,6 +45,12 @@ class ActorRef {
       return true;
     }
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
+  }
+
+  void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor, network::MessageBroker* message_broker) {
+    this_node_id_ = this_node_id;
+    type_erased_actor_ = actor;
+    message_broker_ = message_broker;
   }
 
   friend rfl::Reflector<ActorRef<UserClass>>;
@@ -81,6 +87,7 @@ class ActorRef {
                                                                sizeof(handler_key.size()) + handler_key.size() +
                                                                sizeof(actor_id_) + serialized_args.size()});
     // protocol: [request_type][handler_key_len][handler_key][actor_id][ActorMethodCallArgs]
+
     buffer_writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallRequest);
     buffer_writer.WritePrimitive(handler_key.size());
     buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
@@ -134,49 +141,11 @@ class ActorRef {
   network::MessageBroker* message_broker_ = nullptr;
 };
 
-class ActorRefDeserializationContext {
- public:
-  static ActorRefDeserializationContext& GetThreadLocalInstance() {
-    static thread_local ActorRefDeserializationContext instance;
-    return instance;
-  }
-
-  uint32_t this_node_id = 0;
-  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
-  network::MessageBroker* message_broker = nullptr;
-};
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
 using internal::ActorRef;
 }  // namespace ex_actor
-
-namespace rfl {
-template <typename U>
-struct Reflector<ex_actor::internal::ActorRef<U>> {
-  struct ReflType {
-    bool is_valid {};
-    uint32_t node_id {};
-    uint64_t actor_id {};
-  };
-
-  static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
-    auto& info = ex_actor::internal::ActorRefDeserializationContext::GetThreadLocalInstance();
-
-    ex_actor::internal::ActorRef<U> actor(info.this_node_id, rfl_type.node_id, rfl_type.actor_id,
-                                          info.actor_look_up_fn(rfl_type.actor_id), info.message_broker);
-    return actor;
-  }
-
-  static ReflType from(const ex_actor::internal::ActorRef<U>& actor_ref) {
-    return {
-        .is_valid = actor_ref.is_empty_,
-        .node_id = actor_ref.node_id_,
-        .actor_id = actor_ref.actor_id_,
-    };
-  }
-};
-}  // namespace rfl
 
 namespace std {
 template <class UserClass>

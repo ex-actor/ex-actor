@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "ex_actor/internal/actor.h"
+#include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
@@ -23,10 +24,12 @@ class RemoteActorRequestHandlerRegistry {
   struct RemoteActorMethodCallHandlerContext {
     TypeErasedActor* actor;
     serde::BufferReader<network::ByteBufferType> request_buffer;
+    ActorRefDeserializationInfo info;
   };
   struct RemoteActorCreationHandlerContext {
     serde::BufferReader<network::ByteBufferType> request_buffer;
     std::unique_ptr<TypeErasedActorScheduler> scheduler;
+    ActorRefDeserializationInfo info;
   };
   struct CreateActorResult {
     std::unique_ptr<TypeErasedActor> actor;
@@ -43,6 +46,7 @@ class RemoteActorRequestHandlerRegistry {
         << ", maybe you have duplicated functions in EXA_REMOTE.";
     remote_actor_method_call_handler_[key] = std::move(func);
   }
+
   RemoteActorMethodCallHandler GetRemoteActorMethodCallHandler(const std::string& key) const {
     EXA_THROW_CHECK(remote_actor_method_call_handler_.contains(key))
         << "Remote actor method call handler not found: " << key
@@ -105,8 +109,8 @@ class RemoteFuncHandlerRegistrar {
   RemoteActorRequestHandlerRegistry::CreateActorResult DeserializeAndCreateActor(
       RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext context) {
     using ActorClass = reflect::Signature<decltype(kCreateFn)>::ReturnType;
-    serde::ActorCreationArgs creation_args =
-        serde::DeserializeFnArgs<kCreateFn>(context.request_buffer.Current(), context.request_buffer.RemainingSize());
+    serde::ActorCreationArgs creation_args = serde::DeserializeFnArgs<kCreateFn>(
+        context.request_buffer.Current(), context.request_buffer.RemainingSize(), context.info);
     std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, kCreateFn>::CreateUseArgTuple(
         std::move(context.scheduler), std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
     auto actor_name = actor->GetActorConfig().actor_name;
@@ -125,8 +129,8 @@ class RemoteFuncHandlerRegistrar {
     EXA_THROW_CHECK(context.actor != nullptr);
     using Sig = reflect::Signature<decltype(kMethod)>;
 
-    serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
-        serde::DeserializeFnArgs<kMethod>(context.request_buffer.Current(), context.request_buffer.RemainingSize());
+    serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args = serde::DeserializeFnArgs<kMethod>(
+        context.request_buffer.Current(), context.request_buffer.RemainingSize(), context.info);
 
     auto return_value =
         co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));

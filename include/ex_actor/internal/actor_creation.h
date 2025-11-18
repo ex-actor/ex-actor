@@ -310,20 +310,7 @@ class ActorRegistry {
     message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
   }
 
-  void SetupActorRefSerializationContext() {
-    auto& info = ActorRefDeserializationContext::GetThreadLocalInstance();
-    info.this_node_id = this_node_id_;
-    info.message_broker = message_broker_.get();
-    info.actor_look_up_fn = [this](uint64_t actor_id) -> TypeErasedActor* {
-      if (actor_id_to_actor_.Contains(actor_id)) {
-        return actor_id_to_actor_.At(actor_id).get();
-      }
-      return nullptr;
-    };
-  }
-
   void HandleNetworkRequest(uint64_t received_request_id, network::ByteBufferType request_buffer) {
-    SetupActorRefSerializationContext();
     serde::BufferReader<network::ByteBufferType> reader(std::move(request_buffer));
     auto message_type = reader.NextPrimitive<serde::NetworkRequestType>();
 
@@ -364,10 +351,16 @@ class ActorRegistry {
     auto handler_key = reader.PullString(handler_key_len);
     try {
       auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(handler_key);
+      ActorRefDeserializationInfo info {.this_node_id = this_node_id_,
+                                        .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
+                                          if (actor_id_to_actor_.Contains(actor_id)) {
+                                            return actor_id_to_actor_.At(actor_id).get();
+                                          }
+                                          return nullptr;
+                                        },
+                                        .message_broker = message_broker_.get()};
       auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
-          .request_buffer = std::move(reader),
-          .scheduler = scheduler_->Clone(),
-      });
+          .request_buffer = std::move(reader), .scheduler = scheduler_->Clone(), .info = info});
       uint64_t actor_id = GenerateRandomActorId();
       if (result.actor_name.has_value()) {
         EXA_THROW_CHECK(!actor_name_to_id_.Contains(result.actor_name.value()))
@@ -408,11 +401,17 @@ class ActorRegistry {
     }
 
     EXA_THROW_CHECK(handler != nullptr);
+    ActorRefDeserializationInfo info {.this_node_id = this_node_id_,
+                                      .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
+                                        if (actor_id_to_actor_.Contains(actor_id)) {
+                                          return actor_id_to_actor_.At(actor_id).get();
+                                        }
+                                        return nullptr;
+                                      },
+                                      .message_broker = message_broker_.get()};
     auto do_call =
         handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
-            .actor = actor_id_to_actor_.At(actor_id).get(),
-            .request_buffer = std::move(reader),
-        }) |
+            .actor = actor_id_to_actor_.At(actor_id).get(), .request_buffer = std::move(reader), .info = info}) |
         ex::then([this, received_request_id](network::ByteBufferType buffer) {
           message_broker_->ReplyRequest(received_request_id, std::move(buffer));
         }) |

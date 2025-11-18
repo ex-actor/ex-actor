@@ -87,16 +87,6 @@ struct ActorLookUpRequest {
   std::string actor_name;
 };
 
-template <auto kFn>
-auto DeserializeFnArgs(const uint8_t* data, size_t size) {
-  using Sig = reflect::Signature<decltype(kFn)>;
-  if constexpr (std::is_member_function_pointer_v<decltype(kFn)>) {
-    return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, size);
-  } else {
-    return Deserialize<ActorCreationArgs<typename Sig::DecayedArgsTupleType>>(data, size);
-  }
-}
-
 struct MemoryBuf : std::streambuf {
   MemoryBuf(char const* base, size_t size) {
     char* p(const_cast<char*>(base));

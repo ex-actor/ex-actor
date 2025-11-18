@@ -50,12 +50,12 @@ class ActorRef {
   friend rfl::Reflector<ActorRef<UserClass>>;
 
   /**
-   * @brief Send message to an actor. Returns a coroutine carrying the result. Dynamic memory allocation will happen due
-   * to the use of coroutine. If you can confirm it's a local actor, consider using SendLocal() instead, which has
-   * better performance.
-   * @note If your method argument can't be automatically serialized by reflect-cpp, refer
-   * https://rfl.getml.com/concepts/custom_classes/ to add serializer for it. Or if you can confirm it's a local actor,
-   * you can use SendLocal() to bypass the serialization code path.
+   * @brief Send message to an actor. Returns a coroutine carrying the result.
+   * @note This method requires your args and return value can be serialized by reflect-cpp, if you met compile errors
+   * like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/ to add a serializer for it. Or if you
+   * can confirm it's a local actor, use SendLocal() instead, which doesn't require your args to be serializable.
+   * @note Dynamic memory allocation will happen due to the use of coroutine. If you can confirm it's a local actor,
+   * consider using SendLocal() instead, which has better performance.
    * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>

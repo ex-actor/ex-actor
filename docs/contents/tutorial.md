@@ -2,12 +2,12 @@
 
 The best way to learn a new library is study from examples, let's go through some examples and you'll learn all you want :)
 
-This tutorial assume you have a basic knowledge of `std::execution`. If you are not familiar with it, we recommend the following resources:
+This framework is based on `std::execution`, but **it's fine if you are not familiar with it, the example is easy enough to understand**.
 
-1. [P2300](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html) proposal
-2. [stdexec's doc](https://github.com/NVIDIA/stdexec?tab=readme-ov-file#resources) 
+std::execution is essentially an unified interface for schedulers and async tasks. It standardizes the interfaces so that everyone
+conforming the standard can use others' work seamlessly. Check [P2300 proposal](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html) and [stdexec's doc](https://github.com/NVIDIA/stdexec?tab=readme-ov-file#resources) if you want to learn more.
 
-C++26 is not finalized now. Currently we're based on the early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), so you'll see `stdexec`, `exec` namespaces
+Note: C++26 is not finalized now. Currently we're based on the early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), so you'll see `stdexec`, `exec` namespaces
 instead of `std::execution` in the following examples.
 
 ## Basic case - turn your class into an actor
@@ -19,7 +19,7 @@ First let's go through a basic example - create your first actor and call it.
 #include "ex_actor/api.h"
 
 // 0. Assume you have a class, you want to turn it into an actor.
-struct YourClass {
+struct Counter {
   int Add(int x) { return count += x; }
   int count = 0;
 };
@@ -30,26 +30,21 @@ int main() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
 
   // 2. Use the registry to create an actor.
-  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
   
   /*
   2. Everything is setup, you can call the actor's method now using `actor_ref.Send`.
-  
-  This method returns a standard `std::execution::task`, compatible
-  with everything in the `std::execution` ecosystem.
+  This method returns a standard `std::execution::task`, compatible with everything
+  in the `std::execution` ecosystem.
 
-  This method requires your args can be serialized by reflect-cpp, if you met compile
-  errors like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/
-  to add a serializer for it.
-  
-  Or if you can confirm it's a local actor, use SendLocal() instead. See below.
+  Note about args serialization requirement: (1)
   */
-  auto task = actor.Send<&YourClass::Add>(1);
+  auto task = actor.Send<&Counter::Add>(1);
 
   /*
   2.1 For local actors, you can try `SendLocal`, which doesn't require the args to be serializable.
   */
-  auto sender = actor.SendLocal<&YourClass::Add>(1);
+  auto sender = actor.SendLocal<&Counter::Add>(1);
 
   /*
   3. To execute the task and blocking wait for the result, use `sync_wait`.
@@ -61,30 +56,89 @@ int main() {
 ```
 <!-- doc test end -->
 
+1.  This method requires your args can be serialized by reflect-cpp, because it can potentially be passed through the network in distributed mode.
+    
+    reflect-cpp can handle simple structs and common containers automatically, but if your type is non-trivial(e.g. has private fields),
+    you may meet compile errors like "Unsupported type", please refer <https://rfl.getml.com/concepts/custom_classes>
+    to add a serializer for it.
+  
+    **If you only run ex_actor in a single process, you can use `SendLocal()` instead, which doesn't require the args to be serializable, see below.**
+
 ## Wrap the result using coroutine
+
+The returned [`std::execution::task`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3552r3.html) is a coroutine, instead of [`sync_wait`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-consumer-sync_wait) to wait blocking wait it,
+you can also use `co_await` to wait for the result in a non-blocking way, which is more recommended,
+because it allows the thread to process other actors while waiting for the result.
 
 <!-- doc test start -->
 ```cpp
 #include <cassert>
 #include "ex_actor/api.h"
 
-struct YourClass {
+struct Counter {
   int Add(int x) { return count += x; }
   int count = 0;
 };
 
-exec::task<int> Coroutine() {
+exec::task<void> Coroutine() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
-  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
+
   // this is non-blocking, the thread will be able to process other actors while waiting for the result.
-  auto res = co_await actor.Send<&YourClass::Add>(1);
+  auto res = co_await actor.Send<&Counter::Add>(1);
+
   assert(res == 1);
-  co_return res + 2;
 }
 
 int main() {
-  auto [res2] = stdexec::sync_wait(Coroutine()).value();
+  stdexec::sync_wait(Coroutine());
+}
+```
+<!-- doc test end -->
+
+## Execute multiple tasks in parallel
+
+You can execute multiple tasks in parallel using [`when_all`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-adaptor-when_all) or [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.html) in std::execution.
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include "ex_actor/api.h"
+
+struct Counter {
+  int AddAndGet(int x) { return count += x; }
+  void Add(int x) { count += x; }
+  int GetValue() const { return count; }
+  int count = 0;
+};
+
+exec::task<void> Coroutine() {
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
+  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
+
+  // when_all example, which you can get the result of each task.
+  auto [res1, res2, res3] = co_await stdexec::when_all(
+    actor.Send<&Counter::AddAndGet>(1),
+    actor.Send<&Counter::AddAndGet>(2),
+    actor.Send<&Counter::AddAndGet>(3)
+  );
+  assert(res1 == 1);
   assert(res2 == 3);
+  assert(res3 == 6);
+
+
+  // async_scope.spawn example, which only accepts void tasks.
+  exec::async_scope scope;
+  for (int i = 0; i < 100; ++i) {
+    scope.spawn(actor.Send<&Counter::Add>(1));
+  }
+  co_await scope.on_empty();
+  int sum = co_await actor.Send<&Counter::GetValue>();
+  assert(sum == 106);
+}
+
+int main() {
+  stdexec::sync_wait(Coroutine());
 }
 ```
 <!-- doc test end -->
@@ -93,7 +147,7 @@ int main() {
 
 This examples shows how to call an actor's method from another actor.
 
-The main thread calls `Proxy`, then `Proxy` calls `Counter`.
+The main thread calls `Proxy`, then `Proxy` calls `PingWorker`.
 
 
 <!-- doc test start -->
@@ -102,44 +156,33 @@ The main thread calls `Proxy`, then `Proxy` calls `Counter`.
 #include <iostream>
 #include "ex_actor/api.h"
 
-class Counter {
+class PingWorker {
  public:
-  void Add(int x) { count_ += x; }
-  int GetValue() const { return count_; }
-
- private:
-  int count_ = 0;
+  std::string Ping() { return "Hi"; }
 };
 
 class Proxy {
  public:
-  explicit Proxy(ex_actor::ActorRef<Counter> actor_ref) : actor_ref_(actor_ref) {}
+  explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
   
-  exec::task<int> GetValue() {
-    co_return co_await actor_ref_.template Send<&Counter::GetValue>();
+  exec::task<std::string> ProxyPing() {
+    co_return co_await actor_ref_.template Send<&PingWorker::Ping>();
   }
 
  private:
-  ex_actor::ActorRef<Counter> actor_ref_;
+  ex_actor::ActorRef<PingWorker> actor_ref_;
 };
 
 int main() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
-  ex_actor::ActorRef counter = registry.CreateActor<Counter>();
+  ex_actor::ActorRef ping_worker = registry.CreateActor<PingWorker>();
 
-  // 1. increase the counter 100 times
-  exec::async_scope scope;
-  for (int i = 0; i < 100; ++i) {
-    scope.spawn(counter.Send<&Counter::Add>(1));
-  }
-  stdexec::sync_wait(scope.on_empty());
+  // 1. create a proxy actor, who has a reference to the ping_worker actor
+  ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(ping_worker);
 
-  // 2. create a proxy actor, who has a reference to the counter actor
-  ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(counter);
-
-  // 3. call through the proxy actor
-  auto [res2] = stdexec::sync_wait(proxy.Send<&Proxy::GetValue>()).value();
-  assert(res2 == 100);
+  // 2. call through the proxy actor
+  auto [res] = stdexec::sync_wait(proxy.Send<&Proxy::ProxyPing>()).value();
+  assert(res == "Hi");
 }
 ```
 <!-- doc test end -->
@@ -156,18 +199,18 @@ the `ex::then` callback will run on the actor's thread, **do not capture local v
 #include <cassert>
 #include "ex_actor/api.h"
 
-struct YourClass {
+struct Counter {
   int Add(int x) { return count += x; }
   int count = 0;
 };
 
 int main() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
-  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
 
   // Sender adapter style
   int local_var = 1;
-  auto task1 = actor.Send<&YourClass::Add>(1) | stdexec::then([&local_var](int value) {
+  auto task1 = actor.Send<&Counter::Add>(1) | stdexec::then([&local_var](int value) {
     // this line will be executed on the actor's thread.
     // local_var will have data race
     local_var++;

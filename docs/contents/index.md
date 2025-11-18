@@ -30,7 +30,7 @@ so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` i
 #include <cassert>
 #include "ex_actor/api.h"
 
-struct YourClass {
+struct Counter {
   int Add(int x) { return count += x; }
   int count = 0;
 };
@@ -39,10 +39,10 @@ exec::task<int> Test() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
 
   // 1. Create the actor.
-  ex_actor::ActorRef actor = registry.CreateActor<YourClass>();
+  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
 
   // 2. Call it! It returns a `std::execution::task`.
-  int res = co_await actor.Send<&YourClass::Add>(1);
+  int res = co_await actor.Send<&Counter::Add>(1);
   co_return res + 1;
 }
 

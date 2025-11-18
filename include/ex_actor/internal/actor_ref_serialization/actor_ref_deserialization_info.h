@@ -1,6 +1,8 @@
-#pragma  once
+#pragma once
+
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/network.h"
+
 namespace ex_actor::internal {
 struct ActorRefDeserializationInfo {
   uint32_t this_node_id = 0;

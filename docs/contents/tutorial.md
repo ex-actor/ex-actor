@@ -66,9 +66,9 @@ int main() {
 
 ## Wrap the result using coroutine
 
-The returned [`std::execution::task`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3552r3.html) is a coroutine, instead of [`sync_wait`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-consumer-sync_wait) to wait blocking wait it,
-you can also use `co_await` to wait for the result in a non-blocking way, which is more recommended,
-because it allows the thread to process other actors while waiting for the result.
+The returned [`std::execution::task`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3552r3.html) is a coroutine, instead of using [`sync_wait`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-consumer-sync_wait) to blocking wait it,
+it's more recommended to use `co_await` to wait for the result in a non-blocking way,
+because it will allow the thread to do other work while waiting for the result.
 
 <!-- doc test start -->
 ```cpp
@@ -84,7 +84,8 @@ exec::task<void> Coroutine() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
   ex_actor::ActorRef actor = registry.CreateActor<Counter>();
 
-  // this is non-blocking, the thread will be able to process other actors while waiting for the result.
+  // This is non-blocking.
+  // The thread will be able to process other actors while waiting for the result. (1)
   auto res = co_await actor.Send<&Counter::Add>(1);
 
   assert(res == 1);
@@ -95,6 +96,10 @@ int main() {
 }
 ```
 <!-- doc test end -->
+
+1.  In this example, the main thread has no other work to do and will still be blocked in `sync_wait`.
+    But if you schedule the coroutine in a scheduler,
+    the thread of the scheduler can do other work while waiting for the result.
 
 ## Execute multiple tasks in parallel
 
@@ -166,7 +171,7 @@ class Proxy {
   explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
   
   exec::task<std::string> ProxyPing() {
-    co_return co_await actor_ref_.template Send<&PingWorker::Ping>();
+    co_return co_await actor_ref_.template Send<&PingWorker::Ping>(); /* (1) */
   }
 
  private:
@@ -174,7 +179,7 @@ class Proxy {
 };
 
 int main() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
   ex_actor::ActorRef ping_worker = registry.CreateActor<PingWorker>();
 
   // 1. create a proxy actor, who has a reference to the ping_worker actor
@@ -186,6 +191,9 @@ int main() {
 }
 ```
 <!-- doc test end -->
+
+1.  Again, this is non-blocking, the thread will be able to process other actors while waiting for the result.
+    In this example, the thread pool has only one thread, but it still be able to finish the entire work thanks to the non-blocking wait.
 
 ## [Optional Read] Wrap the result using sender adapter
 

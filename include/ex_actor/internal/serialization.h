@@ -23,6 +23,8 @@
 #include <spdlog/spdlog.h>
 
 #include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/actor_ref_serialization/actor_ref_deserialization_info.h"
+#include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization_reader.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/reflect.h"
 
@@ -42,6 +44,11 @@ std::vector<char> Serialize(const T& obj) {
 template <class T>
 T Deserialize(const uint8_t* data, size_t size) {
   return rfl::capnproto::read<T>(data, size, GetCachedSchema<T>()).value();
+}
+
+template <class T>
+T Deserialize(const uint8_t* data, size_t size, const ActorRefDeserializationInfo& info) {
+  return rfl::capnproto::read<T>(data, size, GetCachedSchema<T>(), info).value();
 }
 
 enum class NetworkRequestType : uint8_t {
@@ -86,6 +93,16 @@ struct ActorMethodReturnValue<void> {};
 struct ActorLookUpRequest {
   std::string actor_name;
 };
+
+template <auto kFn>
+auto DeserializeFnArgs(const uint8_t* data, size_t size, const ActorRefDeserializationInfo& info) {
+  using Sig = reflect::Signature<decltype(kFn)>;
+  if constexpr (std::is_member_function_pointer_v<decltype(kFn)>) {
+    return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, size, info);
+  } else {
+    return Deserialize<ActorCreationArgs<typename Sig::DecayedArgsTupleType>>(data, size, info);
+  }
+}
 
 struct MemoryBuf : std::streambuf {
   MemoryBuf(char const* base, size_t size) {

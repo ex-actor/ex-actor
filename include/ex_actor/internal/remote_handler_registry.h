@@ -6,8 +6,8 @@
 #include <unordered_map>
 #include <utility>
 
-#include "actor_ref_deserialization.h"
 #include "ex_actor/internal/actor.h"
+#include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"

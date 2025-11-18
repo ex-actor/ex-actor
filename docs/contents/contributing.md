@@ -25,7 +25,7 @@ If you have your own ideas:
 cd ex-actor
 
 # If fail due to network issues, just retry it.
-# in these script I set cache dir for CPM, previous success download will be cached.
+# in this script I set cache dir for CPM, previous success download will be cached.
 ./scripts/regen_build_dir.sh
 
 cd build

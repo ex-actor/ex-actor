@@ -19,7 +19,7 @@ class YourClass  {
 };
 
 YourClass FactoryCreate() { return YourClass(); }
-EXA_REMOTE(&YourClass::FactoryCreate, &YourClass::Method1, &YourClass::Method2);
+EXA_REMOTE(&FactoryCreate, &YourClass::Method1, &YourClass::Method2);
 ```
 
 In the `EXA_REMOTE` macro, the first argument is a factory function to create your class, and the rest are the methods you want to call remotely.

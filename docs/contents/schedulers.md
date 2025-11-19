@@ -26,19 +26,10 @@ ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
 ex_actor::ActorRegistry registry(thread_pool.GetScheduler()); 
 ```
 
-This scheduler is suitable for most cases. It's a classic thread pool with a shared lock-free task queue.
+This scheduler is suitable for most cases. It's a classic thread pool with a globally shared lock-free task queue.
 
 It's also the default scheduler we use when you don't pass a scheduler to the `ActorRegistry` constructor.
 
-```d2
-direction: right
-caller -> scheduler.task queue: schedule task
-scheduler.task queue.shape: queue
-scheduler.task queue->scheduler.worker thread 1
-scheduler.task queue->scheduler.worker thread 2
-scheduler.task queue->scheduler.worker thread 3
-
-```
 
 ## Work-Stealing Thread Pool
 
@@ -49,24 +40,11 @@ ex_actor::WorkStealingThreadPool thread_pool(/*thread_count=*/10);
 ex_actor::ActorRegistry registry(thread_pool.GetScheduler()); 
 ```
 
-It's an alias of `stdexec`'s `exec::static_thread_pool`, which is a sophisticated work-stealing-style thread pool.
+It's an alias of `stdexec`'s `exec::static_thread_pool`, which is a sophisticated [work-stealing-style](https://en.wikipedia.org/wiki/Work_stealing) thread pool.
 Every thread has a LIFO local task queue, and when a thread is idle, it will steal tasks from other threads.
 
 It has better performance in some cases. But the task stealing overhead can be non-negligible in some low-latency scenarios.
 Use it when you know what you are doing.
-
-```d2
-direction: right
-caller -> scheduler.task queue 1
-caller -> scheduler.task queue 2
-caller -> scheduler.task queue 3
-scheduler.task queue 1.shape: queue
-scheduler.task queue 2.shape: queue
-scheduler.task queue 3.shape: queue
-scheduler.task queue 1->scheduler.worker thread 1
-scheduler.task queue 2->scheduler.worker thread 2
-scheduler.task queue 3->scheduler.worker thread 3
-```
 
 ## Priority Thread Pool
 
@@ -88,10 +66,14 @@ int main() {
 ```
 <!-- doc test end -->
 
-It's a thread pool with a priority queue. You can set the priority of an actor when creating it.
+It's a thread pool with a lock-guarded priority queue. You can set the priority of an actor when creating it.
 When an actor is activated, it will be pushed to the scheduler with its priority.
 The scheduler will execute the tasks with higher priority(smaller number) first.
 
+In practice it's used to prioritize downstream actors in some high-throughput systems, so that there won't be a lot of data pending in the middle of the pipeline, reducing the memory pressure.
+
+Event though this scheduler takes priority into account, the actor scheduling is still cooperative. Which means a thread can't be interrupted and switch to higher priority actors when executing an actor's message.
+If you do have some very high-priority actors, consider using the [`SchedulerUnion`](#scheduler-union) scheduler to put them in a dedicated thread pool.
 
 ## Scheduler Union
 
@@ -126,7 +108,7 @@ It's a scheduler that combines multiple schedulers. You can set the scheduler in
 When an actor is activated, it will be pushed to the specified scheduler.
 
 It's useful when you want to split actors by groups. E.g. some control-flow actors and some data-processing actors, and you want the control-flow
-actors run in a dedicated thread pool, so it won't be blocked by the data-processing actors.
+actors run in a dedicated thread pool, scheduled preemptively with the other group, so it won't be blocked by the data-processing actors.
 
 ## Understanding how actor is scheduled
 

@@ -27,7 +27,7 @@ struct Counter {
 
 int main() {
   // 1. First, create a ex_actor::ActorRegistry.
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
 
   // 2. Use the registry to create an actor.
   ex_actor::ActorRef actor = registry.CreateActor<Counter>();
@@ -81,7 +81,7 @@ struct Counter {
 };
 
 exec::task<void> Coroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
   ex_actor::ActorRef actor = registry.CreateActor<Counter>();
 
   // This is non-blocking.
@@ -118,7 +118,7 @@ struct Counter {
 };
 
 exec::task<void> Coroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
   ex_actor::ActorRef actor = registry.CreateActor<Counter>();
 
   // when_all example, which you can get the result of each task.
@@ -179,7 +179,7 @@ class Proxy {
     In this example, the thread pool has only one thread, but it still be able to finish the entire
     work thanks to the non-blocking wait. If you call sync_wait here, the program will hang forever.
     */
-    co_return co_await actor_ref_.template Send<&PingWorker::Ping>(); /* (1) */
+    co_return co_await actor_ref_.template Send<&PingWorker::Ping>();
   }
 
  private:
@@ -218,7 +218,7 @@ struct Counter {
 };
 
 int main() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
   ex_actor::ActorRef actor = registry.CreateActor<Counter>();
 
   // Sender adapter style
@@ -277,7 +277,7 @@ class Proxy {
 };
 
 int main() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/2);
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
   ex_actor::ActorRef dummy_actor = registry.CreateActor<DummyActor>();
 
   // 2. create a proxy actor, who has a reference to the dummy actor

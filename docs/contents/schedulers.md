@@ -1,15 +1,16 @@
 # Schedulers
 
-You can use any std::execution scheduler as ex_actor's underlying scheduler, just pass it to the `ActorRegistry` constructor. By default, we use `ex_actor::WorkSharingThreadPool`.
+You can use any std::execution scheduler as ex_actor's underlying scheduler, just pass it to the `ActorRegistry` constructor.
+When you pass a scheduler to the `ActorRegistry` constructor, we'll use it as the underlying scheduler, instead of using our
+default scheduler.
 
 ```cpp
 #include "ex_actor/api.h"
 
 ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
-ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
 
-// which is identical to:
-ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+// pass the scheduler to the registry
+ex_actor::ActorRegistry registry(thread_pool.GetScheduler()); 
 ```
 
 We provide some handy schedulers out-of-box, check them below.
@@ -22,12 +23,12 @@ If you are interested in the details, you can read [understanding how actor is s
 #include "ex_actor/api.h"
 
 ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
-auto scheduler = thread_pool.GetScheduler();
+ex_actor::ActorRegistry registry(thread_pool.GetScheduler()); 
 ```
 
-This scheduler is suitable for most cases.
+This scheduler is suitable for most cases. It's a classic thread pool with a shared lock-free task queue.
 
-It's a classic thread pool with a shared lock-free task queue.
+It's also the default scheduler we use when you don't pass a scheduler to the `ActorRegistry` constructor.
 
 ```d2
 direction: right
@@ -45,7 +46,7 @@ scheduler.task queue->scheduler.worker thread 3
 #include "ex_actor/api.h"
 
 ex_actor::WorkStealingThreadPool thread_pool(/*thread_count=*/10);
-auto scheduler = thread_pool.GetScheduler();
+ex_actor::ActorRegistry registry(thread_pool.GetScheduler()); 
 ```
 
 It's an alias of `stdexec`'s `exec::static_thread_pool`, which is a sophisticated work-stealing-style thread pool.
@@ -79,8 +80,7 @@ struct TestActor {
 
 int main() {
   ex_actor::PriorityThreadPool thread_pool(1);
-  auto scheduler = thread_pool.GetScheduler();
-  ex_actor::ActorRegistry registry(scheduler);
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
   auto actor = registry.CreateActor<TestActor>(ex_actor::ActorConfig {
     .priority = 1 // smaller number means higher priority
   });

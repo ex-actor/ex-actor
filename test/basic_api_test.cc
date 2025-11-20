@@ -72,6 +72,16 @@ TEST(BasicApiTest, ActorRegistryCreationWithDefaultScheduler) {
   ASSERT_EQ(value, 0);
 }
 
+TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+  auto counter = registry.CreateActor<Counter>();
+  exec::async_scope scope;
+  scope.spawn(counter.Send<&Counter::Add>(1));
+  auto future = scope.spawn_future(counter.Send<&Counter::GetValue>());
+  auto [res] = stdexec::sync_wait(std::move(future)).value();
+  ASSERT_EQ(res, 1);
+}
+
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
   auto coroutine = []() -> exec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(10);

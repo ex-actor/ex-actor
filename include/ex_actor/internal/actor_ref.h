@@ -65,7 +65,41 @@ class ActorRef {
    * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>
-  [[nodiscard]] auto Send(Args&&... args) const
+  [[nodiscard]] auto Send(Args&&... args) const {
+    // Add a fallback inline_scheduler for it.
+    return SendInternal<kMethod>(std::forward<Args>(args)...) |
+           stdexec::write_env(stdexec::prop {stdexec::get_scheduler, stdexec::inline_scheduler {}});
+  }
+
+  /**
+   * @brief Send message to a local actor. Has better performance than the generic Send(). No heap allocation.
+   */
+  template <auto kMethod, class... Args>
+  [[nodiscard]] ex::sender auto SendLocal(Args&&... args) const {
+    static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
+                  "method is not invocable with the provided arguments");
+    if (IsEmpty()) [[unlikely]] {
+      throw std::runtime_error("Empty ActorRef, cannot call method on it.");
+    }
+    EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
+    return type_erased_actor_->template CallActorMethod<kMethod>(std::forward<Args>(args)...);
+  }
+
+  bool IsEmpty() const { return is_empty_; }
+
+  uint32_t GetNodeId() const { return node_id_; }
+  uint64_t GetActorId() const { return actor_id_; }
+
+ private:
+  bool is_empty_;
+  uint32_t this_node_id_ = 0;
+  uint32_t node_id_ = 0;
+  uint64_t actor_id_ = 0;
+  TypeErasedActor* type_erased_actor_ = nullptr;
+  network::MessageBroker* message_broker_ = nullptr;
+
+  template <auto kMethod, class... Args>
+  [[nodiscard]] auto SendInternal(Args&&... args) const
       -> exec::task<typename decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
@@ -112,33 +146,6 @@ class ActorRef {
       co_return res.return_value;
     }
   }
-
-  /**
-   * @brief Send message to a local actor. Has better performance than the generic Send(). No heap allocation.
-   */
-  template <auto kMethod, class... Args>
-  [[nodiscard]] ex::sender auto SendLocal(Args&&... args) const {
-    static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
-                  "method is not invocable with the provided arguments");
-    if (IsEmpty()) [[unlikely]] {
-      throw std::runtime_error("Empty ActorRef, cannot call method on it.");
-    }
-    EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
-    return type_erased_actor_->template CallActorMethod<kMethod>(std::forward<Args>(args)...);
-  }
-
-  bool IsEmpty() const { return is_empty_; }
-
-  uint32_t GetNodeId() const { return node_id_; }
-  uint64_t GetActorId() const { return actor_id_; }
-
- private:
-  bool is_empty_;
-  uint32_t this_node_id_ = 0;
-  uint32_t node_id_ = 0;
-  uint64_t actor_id_ = 0;
-  TypeErasedActor* type_erased_actor_ = nullptr;
-  network::MessageBroker* message_broker_ = nullptr;
 };
 
 }  // namespace ex_actor::internal

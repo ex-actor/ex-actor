@@ -131,15 +131,29 @@ exec::task<void> Coroutine() {
   assert(res2 == 3);
   assert(res3 == 6);
 
+  exec::async_scope scope;
+
+  // async_scope.spawn_future example, which returns a future.
+  using FutureType = decltype(scope.spawn_future(actor.Send<&Counter::AddAndGet>(1)));
+  std::vector<FutureType> futures;
+  for (int i = 0; i < 100; ++i) {
+    auto future = scope.spawn_future(actor.Send<&Counter::AddAndGet>(1));
+    futures.push_back(std::move(future));
+  }
+  for (int i = 0; i < 100; ++i) {
+    int value = co_await std::move(futures[i]);
+    assert(value == 6 + i + 1);
+  }
 
   // async_scope.spawn example, which only accepts void tasks.
-  exec::async_scope scope;
   for (int i = 0; i < 100; ++i) {
     scope.spawn(actor.Send<&Counter::Add>(1));
   }
   co_await scope.on_empty();
+
+
   int sum = co_await actor.Send<&Counter::GetValue>();
-  assert(sum == 106);
+  assert(sum == 206);
 }
 
 int main() {

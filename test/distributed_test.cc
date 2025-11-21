@@ -35,7 +35,10 @@ class PingWorker {
   explicit PingWorker(std::string name) : name_(std::move(name)) {}
   static PingWorker Create(std::string name) { return PingWorker(std::move(name)); }
 
-  std::string Ping(const std::string& message) { return "ack from " + name_ + ", msg got: " + message; }
+  std::string Ping(const std::string& message) {
+    EXA_THROW << "error from " << name_;
+    return "ack from " + name_ + ", msg got: " + message;
+  }
 
   std::string Error() { throw std::runtime_error("error from " + name_); }
 

@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -136,7 +137,9 @@ class ActorRef {
     if (type == serde::NetworkReplyType::kActorMethodCallError) {
       auto res =
           serde::Deserialize<serde::ActorMethodReturnValue<std::string>>(reader.Current(), reader.RemainingSize());
-      EXA_THROW << res.return_value;
+      std::string remote_error_message = res.return_value;
+      throw logging::NestableException("Got error from remote actor",
+                                       /*specified_caused_by_message=*/remote_error_message);
     }
     if constexpr (std::is_void_v<UnwrappedType>) {
       co_return;

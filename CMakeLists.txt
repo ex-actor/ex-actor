@@ -74,6 +74,12 @@ CPMAddPackage(
   OPTIONS "SPDLOG_INSTALL ON"
 )
 
+CPMAddPackage(
+  NAME cpptrace
+  GITHUB_REPOSITORY jeremy-rifkin/cpptrace
+  GIT_TAG v1.0.3
+)
+
 # ------------------- targets -------------------
 add_library(ex_actor STATIC src/ex_actor/internal/network.cc)
 target_include_directories(ex_actor PUBLIC
@@ -87,6 +93,7 @@ target_link_libraries(
   reflectcpp::reflectcpp
   cppzmq-static
   spdlog::spdlog
+  cpptrace::cpptrace
 )
 # to suppress subobject linkage warnings in stdexec
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")

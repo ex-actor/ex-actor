@@ -18,6 +18,7 @@ ex_actor_test(shuffle_merge_test TIMEOUT 10)
 ex_actor_test(complex_api_test)
 ex_actor_test(distributed_test)
 ex_actor_test(network_test)
+ex_actor_test(logging_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # multi-process test

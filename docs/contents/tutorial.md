@@ -13,6 +13,10 @@ instead of `std::execution` in the following examples.
 ## Basic case - turn your class into an actor
 
 First let's go through a basic example - create your first actor and call it.
+
+Nearly all of our APIs are async, so let's put everything in a coroutine, then we can easily use `co_await` to wait for the result non-blockingly.
+Here we use [`std::execution::task`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3552r3.html), which is the standard coroutine type in `std::execution`.
+
 <!-- doc test start -->
 ```cpp
 #include <cassert>
@@ -24,13 +28,12 @@ struct Counter {
   int count = 0;
 };
 
-
-int main() {
+exec::task<void> MainCoroutine() {
   // 1. First, create a ex_actor::ActorRegistry.
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
 
   // 2. Use the registry to create an actor.
-  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
+  ex_actor::ActorRef actor = co_await registry.CreateActor<Counter>();
   
   /*
   2. Everything is setup, you can call the actor's method now using `actor_ref.Send`.
@@ -47,12 +50,19 @@ int main() {
   auto sender = actor.SendLocal<&Counter::Add>(1);
 
   /*
-  3. To execute the task and blocking wait for the result, use `sync_wait`.
-  Note that the task is not copyable, so you need to use `std::move`.
+  3. The task is lazy executed. To execute the task and wait for the result non-blockingly,
+  use `co_await`. Note that the task is not copyable, so you need to use `std::move`.
   */
-  auto [res] = stdexec::sync_wait(std::move(task)).value();
+  auto res = co_await std::move(task); // (2)
   assert(res == 1);
+
+  // A shorter way
+  res = co_await actor.Send<&Counter::Add>(1);
+  assert(res == 2);
 }
+
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -64,40 +74,9 @@ int main() {
   
     **If you only run ex_actor in a single process, you can use `SendLocal()` instead, which doesn't require the args to be serializable, see below.**
 
-## Wrap the result using coroutine
+2.  `co_await` is non-blocking, the thread will be able to do other work while waiting for the result.
 
-The returned [`std::execution::task`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3552r3.html) is a coroutine, instead of using [`sync_wait`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-consumer-sync_wait) to blocking wait it,
-it's more recommended to use `co_await` to wait for the result in a non-blocking way,
-because it will allow the thread to do other work while waiting for the result.
-
-<!-- doc test start -->
-```cpp
-#include <cassert>
-#include "ex_actor/api.h"
-
-struct Counter {
-  int Add(int x) { return count += x; }
-  int count = 0;
-};
-
-exec::task<void> Coroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
-
-  // This is non-blocking.
-  // The thread will be able to do other work while waiting for the result. (1)
-  auto res = co_await actor.Send<&Counter::Add>(1);
-
-  assert(res == 1);
-}
-
-int main() {
-  stdexec::sync_wait(Coroutine());
-}
-```
-<!-- doc test end -->
-
-1.  In this example, the main thread has no other work to do and will still be blocked in `sync_wait`.
+    In this example, the main thread has no other work to do and will still be blocked in `sync_wait`.
     But if you schedule the coroutine in a scheduler,
     the thread of the scheduler can do other work while waiting for the result.
 
@@ -117,9 +96,9 @@ struct Counter {
   int count = 0;
 };
 
-exec::task<void> Coroutine() {
+exec::task<void> MainCoroutine() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
+  ex_actor::ActorRef actor = co_await registry.CreateActor<Counter>();
 
   // when_all example, which you can get the result of each task.
   auto [res1, res2, res3] = co_await stdexec::when_all(
@@ -133,13 +112,14 @@ exec::task<void> Coroutine() {
 
   exec::async_scope scope;
 
-  // async_scope.spawn_future example, which returns a future.
+  // async_scope.spawn_future example, which returns a future-like object which you can wait for later.
   using FutureType = decltype(scope.spawn_future(actor.Send<&Counter::AddAndGet>(1)));
   std::vector<FutureType> futures;
   for (int i = 0; i < 100; ++i) {
     auto future = scope.spawn_future(actor.Send<&Counter::AddAndGet>(1));
     futures.push_back(std::move(future));
   }
+  co_await scope.on_empty();
   for (int i = 0; i < 100; ++i) {
     int value = co_await std::move(futures[i]);
     assert(value == 6 + i + 1);
@@ -151,14 +131,11 @@ exec::task<void> Coroutine() {
   }
   co_await scope.on_empty();
 
-
   int sum = co_await actor.Send<&Counter::GetValue>();
   assert(sum == 206);
 }
 
-int main() {
-  stdexec::sync_wait(Coroutine());
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -200,17 +177,20 @@ class Proxy {
   ex_actor::ActorRef<PingWorker> actor_ref_;
 };
 
-int main() {
+
+exec::task<void> MainCoroutine() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  ex_actor::ActorRef ping_worker = registry.CreateActor<PingWorker>();
+  ex_actor::ActorRef ping_worker = co_await registry.CreateActor<PingWorker>();
 
   // 1. create a proxy actor, who has a reference to the ping_worker actor
-  ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(ping_worker);
+  ex_actor::ActorRef proxy = co_await registry.CreateActor<Proxy>(ping_worker);
 
   // 2. call through the proxy actor
-  auto [res] = stdexec::sync_wait(proxy.Send<&Proxy::ProxyPing>()).value();
+  std::string res = co_await proxy.Send<&Proxy::ProxyPing>();
   assert(res == "Hi");
 }
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -233,7 +213,7 @@ struct Counter {
 
 int main() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
+  auto [actor] = stdexec::sync_wait(registry.CreateActor<Counter>()).value();
 
   // Sender adapter style
   int local_var = 1;
@@ -290,19 +270,21 @@ class Proxy {
   ex_actor::ActorRef<DummyActor> actor_ref_;
 };
 
-int main() {
+exec::task<void> MainCoroutine() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  ex_actor::ActorRef dummy_actor = registry.CreateActor<DummyActor>();
+  ex_actor::ActorRef dummy_actor = co_await registry.CreateActor<DummyActor>();
 
   // 2. create a proxy actor, who has a reference to the dummy actor
-  ex_actor::ActorRef proxy = registry.CreateActor<Proxy>(dummy_actor);
+  ex_actor::ActorRef proxy = co_await registry.CreateActor<Proxy>(dummy_actor);
 
   // 3. call through the proxy actor
   exec::async_scope scope;
   scope.spawn(proxy.Send<&Proxy::SomeMethod>());
   scope.spawn(proxy.Send<&Proxy::AnotherMethod>());
-  stdexec::sync_wait(scope.on_empty());
+  co_await scope.on_empty();
 }
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 

@@ -31,7 +31,7 @@ struct TestActor {
 TEST(SchedulerTest, ActorTaskShouldBeStoppable) {
   ex_actor::WorkSharingThreadPool thread_pool(1);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-  auto actor = registry.CreateActor<TestActor>();
+  auto [actor] = stdexec::sync_wait(registry.CreateActor<TestActor>()).value();
   exec::async_scope scope;
   for (int i = 0; i < 100000; ++i) {
     scope.spawn(actor.Send<&TestActor::Foo>());

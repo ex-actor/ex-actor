@@ -2,7 +2,7 @@
 
 !!! experimental
 
-    This feature is still in early stage. Bugs and API changes should be expected. Welcome to have a try and build together with us!
+    This feature is still experimental. While the functionality is complete and we have some tests in CI, it's not massively tested in production yet, bugs and API changes should be expected. Welcome to have a try and build together with us!
 
 
 Distributed mode enables you to create actors at remote nodes. When calling a remote actor, all arguments will be
@@ -53,9 +53,7 @@ class PingWorker {
 // 1. Register the class & methods using EXA_REMOTE
 EXA_REMOTE(&PingWorker::FactoryCreate, &PingWorker::Ping);
 
-int main(int argc, char** argv) {
-  uint32_t this_node_id = std::atoi(argv[1]);
-
+exec::task<void> MainCoroutine(uint32_t this_node_id) {
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/4,
@@ -64,12 +62,16 @@ int main(int argc, char** argv) {
   uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
 
   // 2. Specify the factory function in registry.CreateActor
-  auto ping_worker = registry.CreateActor<PingWorker, &PingWorker::FactoryCreate>(
+  auto ping_worker = co_await registry.CreateActor<PingWorker, &PingWorker::FactoryCreate>(
       ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice"
   );
-  auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
-  auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
+  std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
+}
+
+int main(int argc, char** argv) {
+  uint32_t this_node_id = std::atoi(argv[1]);
+  stdexec::sync_wait(MainCoroutine(this_node_id));
 }
 ```
 <!-- doc test end -->

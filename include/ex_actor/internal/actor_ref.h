@@ -65,24 +65,23 @@ class ActorRef {
    * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>
-  [[nodiscard]] auto Send(Args&&... args) const {
+  [[nodiscard]] auto Send(Args... args) const {
     // Add a fallback inline_scheduler for it.
-    return SendInternal<kMethod>(std::forward<Args>(args)...) |
-           stdexec::write_env(stdexec::prop {stdexec::get_scheduler, stdexec::inline_scheduler {}});
+    return util::WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...));
   }
 
   /**
    * @brief Send message to a local actor. Has better performance than the generic Send(). No heap allocation.
    */
   template <auto kMethod, class... Args>
-  [[nodiscard]] ex::sender auto SendLocal(Args&&... args) const {
+  [[nodiscard]] ex::sender auto SendLocal(Args... args) const {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
     if (IsEmpty()) [[unlikely]] {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
     EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
-    return type_erased_actor_->template CallActorMethod<kMethod>(std::forward<Args>(args)...);
+    return type_erased_actor_->template CallActorMethod<kMethod>(std::move(args)...);
   }
 
   bool IsEmpty() const { return is_empty_; }
@@ -99,7 +98,7 @@ class ActorRef {
   network::MessageBroker* message_broker_ = nullptr;
 
   template <auto kMethod, class... Args>
-  [[nodiscard]] auto SendInternal(Args&&... args) const
+  [[nodiscard]] auto SendInternal(Args... args) const
       -> exec::task<typename decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
@@ -107,14 +106,14 @@ class ActorRef {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
     if (node_id_ == this_node_id_) {
-      co_return co_await SendLocal<kMethod>(std::forward<Args>(args)...);
+      co_return co_await SendLocal<kMethod>(std::move(args)...);
     }
 
     // remote call
     EXA_THROW_CHECK(message_broker_ != nullptr) << "Message broker not set";
     using Sig = reflect::Signature<decltype(kMethod)>;
     serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
-        .args_tuple = typename Sig::DecayedArgsTupleType(std::forward<Args>(args)...)};
+        .args_tuple = typename Sig::DecayedArgsTupleType(std::move(args)...)};
     auto serialized_args = serde::Serialize(method_call_args);
     std::string handler_key = reflect::GetUniqueNameForFunction<kMethod>();
     serde::BufferWriter buffer_writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) + sizeof(uint64_t) +

@@ -84,7 +84,8 @@
         "scheduler_test",
         "stress_test",
         "distributed_test",
-        "network_test"
+        "network_test",
+        "skynet_test",
       ]
     }
   ]

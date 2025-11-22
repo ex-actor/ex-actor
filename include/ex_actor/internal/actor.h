@@ -54,9 +54,10 @@ class TypeErasedActor {
   virtual ~TypeErasedActor() = default;
   virtual void PushMessage(ActorMessage* task) = 0;
   virtual void* GetUserClassAddress() = 0;
+  virtual exec::task<void> AsyncDestroy() = 0;
 
   template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethod(Args&&... args);
+  ex::sender auto CallActorMethod(Args... args);
 
   template <auto kMethod, class... Args>
   ex::sender auto CallActorMethodUseTuple(std::tuple<Args...> args_tuple);
@@ -165,12 +166,12 @@ template <class UserClass, auto kCreateFn = nullptr>
 class Actor : public TypeErasedActor {
  public:
   template <typename... Args>
-  explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args&&... args)
+  explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args... args)
       : TypeErasedActor(std::move(actor_config)), scheduler_(std::move(scheduler)) {
     if constexpr (kCreateFn != nullptr) {
-      user_class_instance_ = std::make_unique<UserClass>(kCreateFn(std::forward<Args>(args)...));
+      user_class_instance_ = std::make_unique<UserClass>(kCreateFn(std::move(args)...));
     } else {
-      user_class_instance_ = std::make_unique<UserClass>(std::forward<Args>(args)...);
+      user_class_instance_ = std::make_unique<UserClass>(std::move(args)...);
     }
   }
 
@@ -185,14 +186,15 @@ class Actor : public TypeErasedActor {
         std::move(arg_tuple));
   }
 
-  ~Actor() override {
+  ~Actor() override = default;
+
+  exec::task<void> AsyncDestroy() override {
     if (destroy_message_pushed_.load(std::memory_order_acquire)) {
-      ex::sync_wait(async_scope_.on_empty());
-      return;
+      co_return co_await async_scope_.on_empty();
     }
     auto destroy_msg = std::make_unique<DestroyMessage>();
     PushMessage(destroy_msg.get());
-    ex::sync_wait(async_scope_.on_empty());
+    co_await async_scope_.on_empty();
   }
 
   void PushMessage(ActorMessage* task) override {
@@ -259,8 +261,8 @@ class Actor : public TypeErasedActor {
 };  // class Actor
 
 template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethod(Args&&... args) {
-  return CallActorMethodUseTuple<kMethod>(std::make_tuple(std::forward<Args>(args)...));
+ex::sender auto TypeErasedActor::CallActorMethod(Args... args) {
+  return CallActorMethodUseTuple<kMethod>(std::make_tuple(std::move(args)...));
 }
 
 template <auto kMethod, class... Args>

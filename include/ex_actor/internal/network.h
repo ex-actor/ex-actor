@@ -50,16 +50,15 @@ struct Identifier {
 };
 
 struct HeartbeatConfig {
-  std::chrono::milliseconds heartbeat_timeout;
-  std::chrono::milliseconds heartbeat_interval;
+  std::chrono::milliseconds heartbeat_timeout = kDefaultHeartbeatTimeout;
+  std::chrono::milliseconds heartbeat_interval = kDefaultHeartbeatInterval;
 };
 
 class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                          std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
-                         HeartbeatConfig heartbeat_config = {.heartbeat_timeout = kDefaultHeartbeatTimeout,
-                                                             .heartbeat_interval = kDefaultHeartbeatInterval});
+                         HeartbeatConfig heartbeat_config = {});
   ~MessageBroker();
 
   void ClusterAlignedStop();

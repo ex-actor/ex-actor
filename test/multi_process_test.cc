@@ -18,17 +18,22 @@ EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping);
 
 int main(int /*argc*/, char** argv) {
   uint32_t this_node_id = std::atoi(argv[1]);
-  ex_actor::WorkSharingThreadPool thread_pool(4);
+  auto coroutine = [](uint32_t this_node_id) -> exec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(4);
 
-  std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
-                                                       {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
-  ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
-                                   /*this_node_id=*/this_node_id, cluster_node_info);
+    std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
+                                                         {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
+                                     /*this_node_id=*/this_node_id, cluster_node_info);
 
-  uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
-  auto ping_worker = registry.CreateActor<PingWorker, &PingWorker::Create>(
-      ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
-  auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
-  auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
-  assert(ping_res == "ack from Alice, msg got: hello");
+    uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
+    auto ping_worker = co_await registry.CreateActor<PingWorker, &PingWorker::Create>(
+        ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
+    auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
+    auto ping_res = co_await std::move(ping);
+    if (ping_res != "ack from Alice, msg got: hello") {
+      EXA_THROW << "ping_res is not 'ack from Alice, msg got: hello'";
+    }
+  };
+  stdexec::sync_wait(coroutine(this_node_id));
 }

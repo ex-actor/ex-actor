@@ -25,6 +25,7 @@ namespace ex_actor {
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
   uint32_t node_id = 0;
+  // The name should be unique within one node.
   std::optional<std::string> actor_name;
 
   /*

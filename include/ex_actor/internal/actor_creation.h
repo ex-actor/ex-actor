@@ -18,7 +18,6 @@
 #include <cstdint>
 #include <exception>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <random>
 #include <type_traits>
@@ -37,112 +36,45 @@
 
 namespace ex_actor::internal {
 
-class ActorRegistry {
+class ActorRegistryRequestProcessor {
  public:
-  /**
-   * @brief Construct in single-node mode, use the default work-sharing thread pool as the scheduler.
-   */
-  explicit ActorRegistry(uint32_t thread_pool_size)
-      : default_work_sharing_thread_pool_(thread_pool_size),
-        scheduler_(std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
-            default_work_sharing_thread_pool_.GetScheduler())) {
-    logging::SetupProcessWideLoggingConfig();
-    InitRandomNumGenerator();
-  }
-  /**
-   * @brief Construct in single-node mode, use specified scheduler.
-   */
-  template <ex::scheduler Scheduler>
-  explicit ActorRegistry(Scheduler scheduler)
-      : scheduler_(std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler)) {
-    logging::SetupProcessWideLoggingConfig();
-    InitRandomNumGenerator();
-  }
-
-  /**
-   * @brief Construct in distributed mode, use the default work-sharing thread pool as the scheduler.
-   */
-  explicit ActorRegistry(uint32_t thread_pool_size, uint32_t this_node_id,
-                         const std::vector<NodeInfo>& cluster_node_info,
-                         network::HeartbeatConfig heartbeat_config =
-                             {
-                                 .heartbeat_timeout = kDefaultHeartbeatTimeout,
-                                 .heartbeat_interval = kDefaultHeartbeatInterval,
-                             })
-      : is_distributed_mode_(true),
-        default_work_sharing_thread_pool_(thread_pool_size),
-        scheduler_(std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
-            default_work_sharing_thread_pool_.GetScheduler())),
+  explicit ActorRegistryRequestProcessor(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint32_t this_node_id,
+                                         const std::vector<NodeInfo>& cluster_node_info,
+                                         network::MessageBroker* message_broker)
+      : is_distributed_mode_(!cluster_node_info.empty()),
+        scheduler_(std::move(scheduler)),
         this_node_id_(this_node_id),
-        message_broker_(std::make_unique<network::MessageBroker>(
-            cluster_node_info, this_node_id,
-            [this](uint64_t received_request_id, network::ByteBufferType data) {
-              HandleNetworkRequest(received_request_id, std::move(data));
-            },
-            heartbeat_config)) {
+        message_broker_(message_broker) {
     logging::SetupProcessWideLoggingConfig();
     InitRandomNumGenerator();
     ValidateNodeInfo(cluster_node_info);
   }
 
-  /**
-   * @brief Construct in distributed mode, use specified scheduler.
-   */
-  template <ex::scheduler Scheduler>
-  explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         network::HeartbeatConfig heartbeat_config =
-                             {
-                                 .heartbeat_timeout = kDefaultHeartbeatTimeout,
-                                 .heartbeat_interval = kDefaultHeartbeatInterval,
-                             })
-      : is_distributed_mode_(true),
-        scheduler_(std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler)),
-        this_node_id_(this_node_id),
-        message_broker_(std::make_unique<network::MessageBroker>(
-            cluster_node_info, this_node_id,
-            [this](uint64_t received_request_id, network::ByteBufferType data) {
-              HandleNetworkRequest(received_request_id, std::move(data));
-            },
-            heartbeat_config)) {
-    logging::SetupProcessWideLoggingConfig();
-    InitRandomNumGenerator();
-    ValidateNodeInfo(cluster_node_info);
-  }
-
-  ~ActorRegistry() {
-    // stop receiving network requests first
-    if (is_distributed_mode_) {
-      message_broker_->ClusterAlignedStop();
-    }
-
+  exec::task<void> AsyncDestroyAllActors() {
+    exec::async_scope async_scope;
     // bulk destroy actors
-    auto destroy_msg = std::make_unique<DestroyMessage>();
-    {
-      auto& mutex = actor_id_to_actor_.GetMutex();
-      std::lock_guard guard(mutex);
-      auto& actor_id_to_actor = actor_id_to_actor_.GetMap();
-      for (auto& [_, actor] : actor_id_to_actor) {
-        actor->PushMessage(destroy_msg.get());
-      }
+    spdlog::info("Sending destroy messages to actors");
+    for (auto& [_, actor] : actor_id_to_actor_) {
+      async_scope.spawn(actor->AsyncDestroy());
     }
-
-    ex::sync_wait(async_scope_.on_empty());
-    actor_id_to_actor_.Clear();
+    spdlog::info("Waiting for actors to be destroyed");
+    co_await async_scope.on_empty();
+    spdlog::info("All actors destroyed");
   }
 
   /**
    * @brief Create actor at current node using default config.
    */
-  template <class UserClass, class... Args>
-  ActorRef<UserClass> CreateActor(Args&&... args) {
-    return CreateActor<UserClass>(ActorConfig {.node_id = this_node_id_}, std::forward<Args>(args)...);
+  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  exec::task<ActorRef<UserClass>> CreateActor(Args... args) {
+    return CreateActor<UserClass, kCreateFn>(ActorConfig {.node_id = this_node_id_}, std::move(args)...);
   }
 
   /**
    * @brief Create an actor with a manually specified config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  ActorRef<UserClass> CreateActor(ActorConfig config, Args&&... args) {
+  exec::task<ActorRef<UserClass>> CreateActor(ActorConfig config, Args... args) {
     if constexpr (kCreateFn != nullptr) {
       static_assert(std::is_invocable_v<decltype(kCreateFn), Args...>,
                     "Class can't be created by given args and create function");
@@ -154,17 +86,16 @@ class ActorRegistry {
     // local actor, create directly
     if (config.node_id == this_node_id_) {
       auto actor_id = GenerateRandomActorId();
-      auto actor =
-          std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::forward<Args>(args)...);
-      auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, actor.get(), message_broker_.get());
+      auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::move(args)...);
+      auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, actor.get(), message_broker_);
       if (config.actor_name.has_value()) {
         std::string& name = *config.actor_name;
-        EXA_THROW_CHECK(!actor_name_to_id_.Contains(name))
+        EXA_THROW_CHECK(!actor_name_to_id_.contains(name))
             << "An actor with the same name already exists, name=" << name;
-        actor_name_to_id_.Insert(name, actor_id);
+        actor_name_to_id_[name] = actor_id;
       }
-      actor_id_to_actor_.Insert(actor_id, std::move(actor));
-      return handle;
+      actor_id_to_actor_[actor_id] = std::move(actor);
+      co_return handle;
     }
 
     if constexpr (kCreateFn == nullptr) {
@@ -177,7 +108,7 @@ class ActorRegistry {
       using CreateFnSig = reflect::Signature<decltype(kCreateFn)>;
 
       // protocol: [message_type][handler_key_len][handler_key][ActorCreationArgs]
-      typename CreateFnSig::DecayedArgsTupleType args_tuple {std::forward<Args>(args)...};
+      typename CreateFnSig::DecayedArgsTupleType args_tuple {std::move(args)...};
       serde::ActorCreationArgs<typename CreateFnSig::DecayedArgsTupleType> actor_creation_args {config,
                                                                                                 std::move(args_tuple)};
       std::vector<char> serialized = serde::Serialize(actor_creation_args);
@@ -192,52 +123,48 @@ class ActorRegistry {
       EXA_THROW_CHECK(buffer_writer.EndReached()) << "Buffer writer not ended";
 
       // send to remote
-      auto sender =
-          message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut()) |
-          ex::then([](network::ByteBufferType response_buffer) {
-            serde::BufferReader reader(std::move(response_buffer));
-            auto type = reader.template NextPrimitive<serde::NetworkReplyType>();
-            if (type == serde::NetworkReplyType::kActorCreationError) {
-              EXA_THROW
-                  << "Got actor creation error from remote node:"
+      auto response_buffer =
+          co_await message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut());
+      serde::BufferReader reader(std::move(response_buffer));
+      auto type = reader.template NextPrimitive<serde::NetworkReplyType>();
+      if (type == serde::NetworkReplyType::kActorCreationError) {
+        EXA_THROW << "Got actor creation error from remote node:"
                   << serde::Deserialize<serde::ActorCreationError>(reader.Current(), reader.RemainingSize()).error;
-            }
-            auto actor_id = reader.template NextPrimitive<uint64_t>();
-            return actor_id;
-          });
-      // sync wait and create handle
-      auto [actor_id] = stdexec::sync_wait(std::move(sender)).value();
-      return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, nullptr, message_broker_.get());
+      }
+      auto actor_id = reader.template NextPrimitive<uint64_t>();
+      co_return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, nullptr, message_broker_);
     }
   }
 
   template <class UserClass>
-  void DestroyActor(const ActorRef<UserClass>& actor_ref) {
+  exec::task<void> DestroyActor(const ActorRef<UserClass>& actor_ref) {
     auto actor_id = actor_ref.GetActorId();
-    EXA_THROW_CHECK(actor_id_to_actor_.Contains(actor_id)) << "Actor with id " << actor_id << " not found";
-    auto& actor = actor_id_to_actor_.At(actor_id);
+    EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
+    auto actor = std::move(actor_id_to_actor_.at(actor_id));
+    actor_id_to_actor_.erase(actor_id);
+
     auto actor_name = actor->GetActorConfig().actor_name;
-    actor_id_to_actor_.Erase(actor_id);
     if (actor_name.has_value()) {
-      actor_name_to_id_.Erase(actor_name.value());
+      actor_name_to_id_.erase(actor_name.value());
     }
+    co_await actor->AsyncDestroy();
   }
 
   template <class UserClass>
   std::optional<ActorRef<UserClass>> GetActorRefByName(const std::string& name) const {
-    if (actor_name_to_id_.Contains(name)) {
-      const auto actor_id = actor_name_to_id_.At(name);
-      const auto& actor = actor_id_to_actor_.At(actor_id);
-      return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id, actor.get(), message_broker_.get());
+    if (actor_name_to_id_.contains(name)) {
+      const auto actor_id = actor_name_to_id_.at(name);
+      const auto& actor = actor_id_to_actor_.at(actor_id);
+      return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id, actor.get(), message_broker_);
     }
-
     return std::nullopt;
   }
 
   template <class UserClass>
-  std::optional<ActorRef<UserClass>> GetActorRefByName(const uint32_t& node_id, const std::string& name) const {
+  exec::task<std::optional<ActorRef<UserClass>>> GetActorRefByName(const uint32_t& node_id,
+                                                                   const std::string& name) const {
     if (node_id == this_node_id_) {
-      return GetActorRefByName<UserClass>(name);
+      co_return GetActorRefByName<UserClass>(name);
     }
 
     std::vector<char> serialized = serde::Serialize(serde::ActorLookUpRequest {name});
@@ -246,35 +173,67 @@ class ActorRegistry {
     writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpRequest);
     writer.CopyFrom(serialized.data(), serialized.size());
 
-    auto sender = message_broker_->SendRequest(node_id, network::ByteBufferType {std::move(writer).MoveBufferOut()}) |
-                  ex::then([](network::ByteBufferType buffer) -> std::optional<uint64_t> {
-                    serde::BufferReader<network::ByteBufferType> reader(std::move(buffer));
-                    auto type = reader.NextPrimitive<serde::NetworkReplyType>();
-                    if (type == serde::NetworkReplyType::kActorLookUpReturn) {
-                      return reader.NextPrimitive<uint64_t>();
-                    }
-                    return std::nullopt;
-                  });
+    auto response_buffer =
+        co_await message_broker_->SendRequest(node_id, network::ByteBufferType {std::move(writer).MoveBufferOut()});
 
-    auto [actor_id] = ex::sync_wait(std::move(sender)).value();
-    if (actor_id.has_value()) {
-      return ActorRef<UserClass>(this_node_id_, node_id, actor_id.value(), nullptr, message_broker_.get());
+    std::optional<uint64_t> actor_id = std::nullopt;
+    serde::BufferReader<network::ByteBufferType> reader(std::move(response_buffer));
+    auto type = reader.NextPrimitive<serde::NetworkReplyType>();
+    if (type == serde::NetworkReplyType::kActorLookUpReturn) {
+      actor_id = reader.NextPrimitive<uint64_t>();
     }
 
-    return std::nullopt;
+    if (actor_id.has_value()) {
+      co_return ActorRef<UserClass>(this_node_id_, node_id, actor_id.value(), nullptr, message_broker_);
+    }
+
+    co_return std::nullopt;
+  }
+
+  exec::task<void> HandleNetworkRequest(uint64_t received_request_id, network::ByteBufferType request_buffer) {
+    serde::BufferReader<network::ByteBufferType> reader(std::move(request_buffer));
+    auto message_type = reader.NextPrimitive<serde::NetworkRequestType>();
+
+    if (message_type == serde::NetworkRequestType::kActorCreationRequest) {
+      HandleActorCreationRequest(received_request_id, std::move(reader));
+      co_return;
+    }
+
+    if (message_type == serde::NetworkRequestType::kActorMethodCallRequest) {
+      co_await HandleActorMethodCallRequest(received_request_id, std::move(reader));
+      co_return;
+    }
+
+    if (message_type == serde::NetworkRequestType::kActorLookUpRequest) {
+      auto actor_name =
+          serde::Deserialize<serde::ActorLookUpRequest>(reader.Current(), reader.RemainingSize()).actor_name;
+
+      if (actor_name_to_id_.contains(actor_name)) {
+        serde::BufferWriter<network::ByteBufferType> writer(
+            network::ByteBufferType(sizeof(serde::NetworkRequestType) + sizeof(uint64_t)));
+        auto actor_id = actor_name_to_id_.at(actor_name);
+        writer.WritePrimitive(serde::NetworkReplyType::kActorLookUpReturn);
+        writer.WritePrimitive(actor_id);
+        message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
+      } else {
+        serde::BufferWriter writer(network::ByteBufferType(sizeof(serde::NetworkRequestType)));
+        writer.WritePrimitive(serde::NetworkReplyType::kActorLookUpError);
+        message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
+      }
+      co_return;
+    }
+    EXA_THROW << "Invalid message type: " << static_cast<int>(message_type);
   }
 
  private:
   bool is_distributed_mode_ = false;
-  WorkSharingThreadPool default_work_sharing_thread_pool_ {0};
-  std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   std::mt19937 random_num_generator_;
+  std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   uint32_t this_node_id_ = 0;
   std::unordered_map<uint32_t, std::string> node_id_to_address_;
-  util::LockGuardedMap<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
-  std::unique_ptr<network::MessageBroker> message_broker_;
-  exec::async_scope async_scope_;
-  util::LockGuardedMap<std::string, std::uint64_t> actor_name_to_id_;
+  network::MessageBroker* message_broker_ = nullptr;
+  std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
+  std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
 
   void InitRandomNumGenerator() {
     std::random_device rd;
@@ -284,7 +243,7 @@ class ActorRegistry {
   uint64_t GenerateRandomActorId() {
     while (true) {
       auto id = random_num_generator_();
-      if (!actor_id_to_actor_.Contains(id)) {
+      if (!actor_id_to_actor_.contains(id)) {
         return id;
       }
     }
@@ -310,42 +269,6 @@ class ActorRegistry {
     message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
   }
 
-  void HandleNetworkRequest(uint64_t received_request_id, network::ByteBufferType request_buffer) {
-    serde::BufferReader<network::ByteBufferType> reader(std::move(request_buffer));
-    auto message_type = reader.NextPrimitive<serde::NetworkRequestType>();
-
-    if (message_type == serde::NetworkRequestType::kActorCreationRequest) {
-      HandleActorCreationRequest(received_request_id, std::move(reader));
-      return;
-    }
-
-    if (message_type == serde::NetworkRequestType::kActorMethodCallRequest) {
-      HandleActorMethodCallRequest(received_request_id, std::move(reader));
-      return;
-    }
-
-    if (message_type == serde::NetworkRequestType::kActorLookUpRequest) {
-      auto actor_name =
-          serde::Deserialize<serde::ActorLookUpRequest>(reader.Current(), reader.RemainingSize()).actor_name;
-
-      if (actor_name_to_id_.Contains(actor_name)) {
-        serde::BufferWriter<network::ByteBufferType> writer(
-            network::ByteBufferType(sizeof(serde::NetworkRequestType) + sizeof(uint64_t)));
-        auto actor_id = actor_name_to_id_.At(actor_name);
-        writer.WritePrimitive(serde::NetworkReplyType::kActorLookUpReturn);
-        writer.WritePrimitive(actor_id);
-        message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
-      } else {
-        serde::BufferWriter writer(network::ByteBufferType(sizeof(serde::NetworkRequestType)));
-        writer.WritePrimitive(serde::NetworkReplyType::kActorLookUpError);
-        message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
-      }
-
-      return;
-    }
-    EXA_THROW << "Invalid message type: " << static_cast<int>(message_type);
-  }
-
   void HandleActorCreationRequest(uint64_t received_request_id, serde::BufferReader<network::ByteBufferType> reader) {
     auto handler_key_len = reader.NextPrimitive<uint64_t>();
     auto handler_key = reader.PullString(handler_key_len);
@@ -353,21 +276,21 @@ class ActorRegistry {
       auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(handler_key);
       ActorRefDeserializationInfo info {.this_node_id = this_node_id_,
                                         .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
-                                          if (actor_id_to_actor_.Contains(actor_id)) {
-                                            return actor_id_to_actor_.At(actor_id).get();
+                                          if (actor_id_to_actor_.contains(actor_id)) {
+                                            return actor_id_to_actor_.at(actor_id).get();
                                           }
                                           return nullptr;
                                         },
-                                        .message_broker = message_broker_.get()};
+                                        .message_broker = message_broker_};
       auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
           .request_buffer = std::move(reader), .scheduler = scheduler_->Clone(), .info = info});
       uint64_t actor_id = GenerateRandomActorId();
       if (result.actor_name.has_value()) {
-        EXA_THROW_CHECK(!actor_name_to_id_.Contains(result.actor_name.value()))
+        EXA_THROW_CHECK(!actor_name_to_id_.contains(result.actor_name.value()))
             << "An actor with the same name already exists, name=" << result.actor_name.value();
-        actor_name_to_id_.Insert(result.actor_name.value(), actor_id);
+        actor_name_to_id_[result.actor_name.value()] = actor_id;
       }
-      actor_id_to_actor_.Insert(actor_id, std::move(result.actor));
+      actor_id_to_actor_[actor_id] = std::move(result.actor);
       serde::BufferWriter<network::ByteBufferType> writer(
           network::ByteBufferType(sizeof(serde::NetworkReplyType) + sizeof(actor_id)));
       writer.WritePrimitive(serde::NetworkReplyType::kActorCreationReturn);
@@ -379,16 +302,17 @@ class ActorRegistry {
     }
   }
 
-  void HandleActorMethodCallRequest(uint64_t received_request_id, serde::BufferReader<network::ByteBufferType> reader) {
+  exec::task<void> HandleActorMethodCallRequest(uint64_t received_request_id,
+                                                serde::BufferReader<network::ByteBufferType> reader) {
     auto handler_key_len = reader.NextPrimitive<uint64_t>();
     auto handler_key = reader.PullString(handler_key_len);
     auto actor_id = reader.NextPrimitive<uint64_t>();
-    if (!actor_id_to_actor_.Contains(actor_id)) {
+    if (!actor_id_to_actor_.contains(actor_id)) {
       ReplyError(
           received_request_id, serde::NetworkReplyType::kActorMethodCallError,
           fmt_lib::format("Can't find actor at remote node, actor_id={}, node_id={}, maybe it's already destroyed.",
                           actor_id, this_node_id_));
-      return;
+      co_return;
     }
 
     RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandler handler = nullptr;
@@ -397,35 +321,167 @@ class ActorRegistry {
     } catch (std::exception& error) {
       auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
       ReplyError(received_request_id, serde::NetworkReplyType::kActorMethodCallError, std::move(error_msg));
-      return;
+      co_return;
     }
 
     EXA_THROW_CHECK(handler != nullptr);
     ActorRefDeserializationInfo info {.this_node_id = this_node_id_,
                                       .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
-                                        if (actor_id_to_actor_.Contains(actor_id)) {
-                                          return actor_id_to_actor_.At(actor_id).get();
+                                        if (actor_id_to_actor_.contains(actor_id)) {
+                                          return actor_id_to_actor_.at(actor_id).get();
                                         }
                                         return nullptr;
                                       },
-                                      .message_broker = message_broker_.get()};
-    auto do_call =
-        handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
-            .actor = actor_id_to_actor_.At(actor_id).get(), .request_buffer = std::move(reader), .info = info}) |
-        ex::then([this, received_request_id](network::ByteBufferType buffer) {
-          message_broker_->ReplyRequest(received_request_id, std::move(buffer));
-        }) |
-        ex::upon_error([this, received_request_id](auto error) {
-          try {
-            EXA_THROW_CHECK(error) << "Error should not be null";
-            std::rethrow_exception(error);
-          } catch (std::exception& error) {
-            auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-            ReplyError(received_request_id, serde::NetworkReplyType::kActorMethodCallError, std::move(error_msg));
-          }
-        });
-    async_scope_.spawn(std::move(do_call));
+                                      .message_broker = message_broker_};
+    try {
+      auto task = handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
+          .actor = actor_id_to_actor_.at(actor_id).get(), .request_buffer = std::move(reader), .info = info});
+      auto buffer = co_await std::move(task);
+      message_broker_->ReplyRequest(received_request_id, std::move(buffer));
+    } catch (std::exception& error) {
+      auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
+      ReplyError(received_request_id, serde::NetworkReplyType::kActorMethodCallError, std::move(error_msg));
+    }
   }
+};
+
+class ActorRegistry {
+ public:
+  /**
+   * @brief Construct in single-node mode, use the default work-sharing thread pool as the scheduler.
+   */
+  explicit ActorRegistry(uint32_t thread_pool_size)
+      : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, /*this_node_id=*/0, /*cluster_node_info=*/ {},
+                      /*heartbeat_config=*/ {}) {}
+
+  /**
+   * @brief Construct in single-node mode, use specified scheduler.
+   */
+  template <ex::scheduler Scheduler>
+  explicit ActorRegistry(Scheduler scheduler)
+      : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler),
+                      /*this_node_id=*/0, /*cluster_node_info=*/ {}, /*heartbeat_config=*/ {}) {}
+
+  /**
+   * @brief Construct in distributed mode, use the default work-sharing thread pool as the scheduler.
+   */
+  explicit ActorRegistry(uint32_t thread_pool_size, uint32_t this_node_id,
+                         const std::vector<NodeInfo>& cluster_node_info, network::HeartbeatConfig heartbeat_config = {})
+      : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, this_node_id, cluster_node_info, heartbeat_config) {}
+
+  /**
+   * @brief Construct in distributed mode, use specified scheduler.
+   */
+  template <ex::scheduler Scheduler>
+  explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
+                         network::HeartbeatConfig heartbeat_config = {})
+      : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler), this_node_id,
+                      cluster_node_info, heartbeat_config) {}
+
+  ~ActorRegistry() {
+    spdlog::info("Start to shutdown actor registry");
+    if (is_distributed_mode_) {
+      message_broker_->ClusterAlignedStop();
+    }
+    ex::sync_wait(processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::AsyncDestroyAllActors>());
+    spdlog::info("Actor registry shutdown completed");
+  }
+
+  /**
+   * @brief Create actor at current node using default config.
+   */
+  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  reflect::AwaitableOf<ActorRef<UserClass>> auto CreateActor(Args... args) {
+    // resolve overload ambiguity
+    constexpr exec::task<ActorRef<UserClass>> (ActorRegistryRequestProcessor::*kProcessFn)(Args...) =
+        &ActorRegistryRequestProcessor::CreateActor<UserClass, kCreateFn, Args...>;
+
+    return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(std::move(args)...));
+  }
+
+  /**
+   * @brief Create an actor with a manually specified config.
+   */
+  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  reflect::AwaitableOf<ActorRef<UserClass>> auto CreateActor(ActorConfig config, Args... args) {
+    // resolve overload ambiguity
+    constexpr exec::task<ActorRef<UserClass>> (ActorRegistryRequestProcessor::*kProcessFn)(ActorConfig, Args...) =
+        &ActorRegistryRequestProcessor::CreateActor<UserClass, kCreateFn, Args...>;
+
+    return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(config, std::move(args)...));
+  }
+
+  template <class UserClass>
+  reflect::AwaitableOf<void> auto DestroyActor(const ActorRef<UserClass>& actor_ref) {
+    return util::WrapSenderWithInlineScheduler(
+        processor_actor_ref_.SendLocal<&ActorRegistryRequestProcessor::DestroyActor<UserClass>>(actor_ref));
+  }
+
+  /**
+   * @brief Find the actor by name at current node.
+   */
+  template <class UserClass>
+  reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const std::string& name) const {
+    // resolve overload ambiguity
+    constexpr std::optional<ActorRef<UserClass>> (ActorRegistryRequestProcessor::*kProcessFn)(const std::string& name)
+        const = &ActorRegistryRequestProcessor::GetActorRefByName<UserClass>;
+
+    return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(name));
+  }
+
+  /**
+   * @brief Find the actor by name at remote node.
+   */
+  template <class UserClass>
+  reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32_t& node_id,
+                                                                                  const std::string& name) const {
+    // resolve overload ambiguity
+    constexpr exec::task<std::optional<ActorRef<UserClass>>> (ActorRegistryRequestProcessor::*kProcessFn)(
+        const uint32_t& node_id, const std::string& name) const =
+        &ActorRegistryRequestProcessor::GetActorRefByName<UserClass>;
+
+    return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(node_id, name));
+  }
+
+ private:
+  bool is_distributed_mode_;
+  uint32_t this_node_id_;
+  WorkSharingThreadPool default_work_sharing_thread_pool_;
+  std::unique_ptr<TypeErasedActorScheduler> scheduler_;
+  std::unique_ptr<network::MessageBroker> message_broker_;
+  Actor<ActorRegistryRequestProcessor> processor_actor_;
+  ActorRef<ActorRegistryRequestProcessor> processor_actor_ref_;
+  exec::async_scope async_scope_;
+
+  explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
+                         uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
+                         network::HeartbeatConfig heartbeat_config = {})
+      : is_distributed_mode_(!cluster_node_info.empty()),
+        this_node_id_(this_node_id),
+        default_work_sharing_thread_pool_(thread_pool_size),
+        scheduler_([&scheduler, this]() -> std::unique_ptr<TypeErasedActorScheduler> {
+          return scheduler == nullptr ? std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
+                                            default_work_sharing_thread_pool_.GetScheduler())
+                                      : std::move(scheduler);
+        }()),
+        message_broker_([&cluster_node_info, &heartbeat_config, this]() -> std::unique_ptr<network::MessageBroker> {
+          if (cluster_node_info.empty()) {
+            return nullptr;
+          }
+          return std::make_unique<network::MessageBroker>(
+              cluster_node_info, this_node_id_,
+              /*request_handler=*/
+              [this](uint64_t received_request_id, network::ByteBufferType data) {
+                auto task = processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::HandleNetworkRequest>(
+                    received_request_id, std::move(data));
+                async_scope_.spawn(std::move(task));
+              },
+              heartbeat_config);
+        }()),
+        processor_actor_(scheduler_->Clone(), ActorConfig {.node_id = this_node_id_}, scheduler_->Clone(), this_node_id,
+                         cluster_node_info, message_broker_.get()),
+        processor_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &processor_actor_,
+                             message_broker_.get()) {}
 };
 }  // namespace ex_actor::internal
 

@@ -301,4 +301,8 @@ inline void SetThreadName(const std::string& name) { pthread_setname_np(pthread_
 #else
 inline void SetThreadName(const std::string&) {}
 #endif
+
+inline auto WrapSenderWithInlineScheduler(auto task) {
+  return std::move(task) | stdexec::write_env(ex::prop {stdexec::get_scheduler, stdexec::inline_scheduler {}});
+}
 }  // namespace ex_actor::internal::util

@@ -147,41 +147,39 @@ class Coordinator {
 // ===========================
 
 TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
-  // Create thread pool with multiple threads
-  ex_actor::WorkSharingThreadPool thread_pool(8);
-  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  auto coroutine = []() -> exec::task<void> {
+    // Create thread pool with multiple threads
+    ex_actor::WorkSharingThreadPool thread_pool(8);
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
 
-  constexpr int kNumReducers = 4;
-  constexpr int kNumWorkers = 16;
-  constexpr int kNumSources = 8;
-  constexpr int kDataSizePerSource = 1000;
+    constexpr int kNumReducers = 4;
+    constexpr int kNumWorkers = 16;
+    constexpr int kNumSources = 8;
+    constexpr int kDataSizePerSource = 1000;
 
-  // Create reducers
-  std::vector<ex_actor::ActorRef<Reducer>> reducers;
-  reducers.reserve(kNumReducers);
-  for (int i = 0; i < kNumReducers; ++i) {
-    reducers.push_back(registry.CreateActor<Reducer>());
-  }
+    // Create reducers
+    std::vector<ex_actor::ActorRef<Reducer>> reducers;
+    reducers.reserve(kNumReducers);
+    for (int i = 0; i < kNumReducers; ++i) {
+      reducers.push_back(co_await registry.CreateActor<Reducer>());
+    }
 
-  // Create workers, each connected to a reducer (round-robin)
-  std::vector<ex_actor::ActorRef<Worker>> workers;
-  workers.reserve(kNumWorkers);
-  for (int i = 0; i < kNumWorkers; ++i) {
-    workers.push_back(registry.CreateActor<Worker>(reducers[i % kNumReducers]));
-  }
+    // Create workers, each connected to a reducer (round-robin)
+    std::vector<ex_actor::ActorRef<Worker>> workers;
+    workers.reserve(kNumWorkers);
+    for (int i = 0; i < kNumWorkers; ++i) {
+      workers.push_back(co_await registry.CreateActor<Worker>(reducers[i % kNumReducers]));
+    }
 
-  // Create data sources, each with reference to all workers
-  std::vector<ex_actor::ActorRef<DataSource>> sources;
-  sources.reserve(kNumSources);
-  for (int i = 0; i < kNumSources; ++i) {
-    sources.push_back(registry.CreateActor<DataSource>(workers));
-  }
+    // Create data sources, each with reference to all workers
+    std::vector<ex_actor::ActorRef<DataSource>> sources;
+    sources.reserve(kNumSources);
+    for (int i = 0; i < kNumSources; ++i) {
+      sources.push_back(co_await registry.CreateActor<DataSource>(workers));
+    }
 
-  // Create coordinator
-  auto coordinator = registry.CreateActor<Coordinator>(sources, reducers);
-
-  // Execute workflow
-  auto workflow = [&]() -> exec::task<void> {
+    // Create coordinator
+    auto coordinator = co_await registry.CreateActor<Coordinator>(sources, reducers);
     co_await coordinator.template Send<&Coordinator::ExecuteWorkflow>(kDataSizePerSource);
 
     // Collect and verify results
@@ -204,43 +202,41 @@ TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
     EXPECT_EQ(total_sum, expected_sum) << "Total sum should match formula for sum of squares from 1 to " << total_items;
   };
 
-  ex::sync_wait(workflow());
+  ex::sync_wait(coroutine());
 }
 
 TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
-  ex_actor::WorkSharingThreadPool thread_pool(16);
-  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  auto coroutine = []() -> exec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(16);
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
 
-  constexpr int kNumReducers = 8;
-  constexpr int kNumWorkers = 64;
-  constexpr int kNumSources = 32;
-  constexpr int kDataSizePerSource = 500;
+    constexpr int kNumReducers = 8;
+    constexpr int kNumWorkers = 64;
+    constexpr int kNumSources = 32;
+    constexpr int kDataSizePerSource = 500;
 
-  auto start_time = std::chrono::steady_clock::now();
+    auto start_time = std::chrono::steady_clock::now();
 
-  // Create actor hierarchy
-  std::vector<ex_actor::ActorRef<Reducer>> reducers;
-  reducers.reserve(kNumReducers);
-  for (int i = 0; i < kNumReducers; ++i) {
-    reducers.push_back(registry.CreateActor<Reducer>());
-  }
+    // Create actor hierarchy
+    std::vector<ex_actor::ActorRef<Reducer>> reducers;
+    reducers.reserve(kNumReducers);
+    for (int i = 0; i < kNumReducers; ++i) {
+      reducers.push_back(co_await registry.CreateActor<Reducer>());
+    }
 
-  std::vector<ex_actor::ActorRef<Worker>> workers;
-  workers.reserve(kNumWorkers);
-  for (int i = 0; i < kNumWorkers; ++i) {
-    workers.push_back(registry.CreateActor<Worker>(reducers[i % kNumReducers]));
-  }
+    std::vector<ex_actor::ActorRef<Worker>> workers;
+    workers.reserve(kNumWorkers);
+    for (int i = 0; i < kNumWorkers; ++i) {
+      workers.push_back(co_await registry.CreateActor<Worker>(reducers[i % kNumReducers]));
+    }
 
-  std::vector<ex_actor::ActorRef<DataSource>> sources;
-  sources.reserve(kNumSources);
-  for (int i = 0; i < kNumSources; ++i) {
-    sources.push_back(registry.CreateActor<DataSource>(workers));
-  }
+    std::vector<ex_actor::ActorRef<DataSource>> sources;
+    sources.reserve(kNumSources);
+    for (int i = 0; i < kNumSources; ++i) {
+      sources.push_back(co_await registry.CreateActor<DataSource>(workers));
+    }
 
-  auto coordinator = registry.CreateActor<Coordinator>(sources, reducers);
-
-  // Execute workflow
-  auto workflow = [&]() -> exec::task<void> {
+    auto coordinator = co_await registry.CreateActor<Coordinator>(sources, reducers);
     co_await coordinator.template Send<&Coordinator::ExecuteWorkflow>(kDataSizePerSource);
 
     auto results = co_await coordinator.template Send<&Coordinator::CollectResults>();
@@ -276,43 +272,43 @@ TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
     EXPECT_LT(load_balance_ratio, 2.0) << "Load imbalance too high: " << load_balance_ratio;
   };
 
-  ex::sync_wait(workflow());
+  ex::sync_wait(coroutine());
 }
 
 TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
-  // Test with multiple stages of shuffle-merge (like multi-level MapReduce)
-  ex_actor::WorkSharingThreadPool thread_pool(12);
-  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  auto coroutine = []() -> exec::task<void> {
+    // Test with multiple stages of shuffle-merge (like multi-level MapReduce)
+    ex_actor::WorkSharingThreadPool thread_pool(12);
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
 
-  constexpr int kNumStage1Reducers = 16;
-  constexpr int kNumStage2Reducers = 4;
-  constexpr int kNumWorkers = 64;
-  constexpr int kNumSources = 16;
-  constexpr int kDataSizePerSource = 200;
+    constexpr int kNumStage1Reducers = 16;
+    constexpr int kNumStage2Reducers = 4;
+    constexpr int kNumWorkers = 64;
+    constexpr int kNumSources = 16;
+    constexpr int kDataSizePerSource = 200;
 
-  // Stage 1: Create first level reducers
-  std::vector<ex_actor::ActorRef<Reducer>> stage1_reducers;
-  stage1_reducers.reserve(kNumStage1Reducers);
-  for (int i = 0; i < kNumStage1Reducers; ++i) {
-    stage1_reducers.push_back(registry.CreateActor<Reducer>());
-  }
+    // Stage 1: Create first level reducers
+    std::vector<ex_actor::ActorRef<Reducer>> stage1_reducers;
+    stage1_reducers.reserve(kNumStage1Reducers);
+    for (int i = 0; i < kNumStage1Reducers; ++i) {
+      stage1_reducers.push_back(co_await registry.CreateActor<Reducer>());
+    }
 
-  // Create workers for stage 1
-  std::vector<ex_actor::ActorRef<Worker>> workers;
-  workers.reserve(kNumWorkers);
-  for (int i = 0; i < kNumWorkers; ++i) {
-    workers.push_back(registry.CreateActor<Worker>(stage1_reducers[i % kNumStage1Reducers]));
-  }
+    // Create workers for stage 1
+    std::vector<ex_actor::ActorRef<Worker>> workers;
+    workers.reserve(kNumWorkers);
+    for (int i = 0; i < kNumWorkers; ++i) {
+      workers.push_back(co_await registry.CreateActor<Worker>(stage1_reducers[i % kNumStage1Reducers]));
+    }
 
-  // Create sources
-  std::vector<ex_actor::ActorRef<DataSource>> sources;
-  sources.reserve(kNumSources);
-  for (int i = 0; i < kNumSources; ++i) {
-    sources.push_back(registry.CreateActor<DataSource>(workers));
-  }
+    // Create sources
+    std::vector<ex_actor::ActorRef<DataSource>> sources;
+    sources.reserve(kNumSources);
+    for (int i = 0; i < kNumSources; ++i) {
+      sources.push_back(co_await registry.CreateActor<DataSource>(workers));
+    }
 
-  // Execute stage 1
-  auto stage1_workflow = [&]() -> exec::task<std::vector<int64_t>> {
+    // Execute stage 1
     exec::async_scope scope;
 
     // Launch all sources with deterministic sequential data
@@ -338,27 +334,21 @@ TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
     // Verify we got results from all stage 1 reducers
     EXPECT_EQ(stage1_results.size(), kNumStage1Reducers);
 
-    co_return stage1_results;
-  };
+    // Stage 2: Create second level reducers
+    std::vector<ex_actor::ActorRef<Reducer>> stage2_reducers;
+    stage2_reducers.reserve(kNumStage2Reducers);
+    for (int i = 0; i < kNumStage2Reducers; ++i) {
+      stage2_reducers.push_back(co_await registry.CreateActor<Reducer>());
+    }
 
-  auto [stage1_results] = ex::sync_wait(stage1_workflow()).value();
+    // Create workers for stage 2 to aggregate stage 1 results
+    std::vector<ex_actor::ActorRef<Worker>> stage2_workers;
+    stage2_workers.reserve(kNumStage2Reducers);
+    for (int i = 0; i < kNumStage2Reducers; ++i) {
+      stage2_workers.push_back(co_await registry.CreateActor<Worker>(stage2_reducers[i]));
+    }
 
-  // Stage 2: Create second level reducers
-  std::vector<ex_actor::ActorRef<Reducer>> stage2_reducers;
-  stage2_reducers.reserve(kNumStage2Reducers);
-  for (int i = 0; i < kNumStage2Reducers; ++i) {
-    stage2_reducers.push_back(registry.CreateActor<Reducer>());
-  }
-
-  // Create workers for stage 2 to aggregate stage 1 results
-  std::vector<ex_actor::ActorRef<Worker>> stage2_workers;
-  stage2_workers.reserve(kNumStage2Reducers);
-  for (int i = 0; i < kNumStage2Reducers; ++i) {
-    stage2_workers.push_back(registry.CreateActor<Worker>(stage2_reducers[i]));
-  }
-
-  // Distribute stage 1 results to stage 2
-  auto stage2_workflow = [&]() -> exec::task<void> {
+    // Distribute stage 1 results to stage 2
     for (size_t i = 0; i < stage1_results.size(); ++i) {
       size_t worker_idx = i % stage2_workers.size();
       co_await stage2_workers[worker_idx].template Send<&Worker::ProcessValue>(stage1_results[i]);
@@ -389,36 +379,34 @@ TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
     EXPECT_EQ(final_sum, expected_final_sum) << "Stage 2 final sum should be sum of squares of stage 1 results";
   };
 
-  ex::sync_wait(stage2_workflow());
+  ex::sync_wait(coroutine());
 }
 
 TEST(ShuffleMergeTest, ComplexDependencyGraph) {
-  // Test with complex dependency graph where workers communicate with multiple reducers
-  ex_actor::WorkSharingThreadPool thread_pool(8);
-  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  auto coroutine = []() -> exec::task<void> {
+    // Test with complex dependency graph where workers communicate with multiple reducers
+    ex_actor::WorkSharingThreadPool thread_pool(8);
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
 
-  constexpr int kNumReducers = 8;
-  constexpr int kNumValues = 10000;
+    constexpr int kNumReducers = 8;
+    constexpr int kNumValues = 10000;
 
-  // Create reducers
-  std::vector<ex_actor::ActorRef<Reducer>> reducers;
-  reducers.reserve(kNumReducers);
-  for (int i = 0; i < kNumReducers; ++i) {
-    reducers.push_back(registry.CreateActor<Reducer>());
-  }
+    // Create reducers
+    std::vector<ex_actor::ActorRef<Reducer>> reducers;
+    reducers.reserve(kNumReducers);
+    for (int i = 0; i < kNumReducers; ++i) {
+      reducers.push_back(co_await registry.CreateActor<Reducer>());
+    }
 
-  // Create workers, each connected to a different reducer
-  std::vector<ex_actor::ActorRef<Worker>> workers;
-  workers.reserve(kNumReducers);
-  for (int i = 0; i < kNumReducers; ++i) {
-    workers.push_back(registry.CreateActor<Worker>(reducers[i]));
-  }
+    // Create workers, each connected to a different reducer
+    std::vector<ex_actor::ActorRef<Worker>> workers;
+    workers.reserve(kNumReducers);
+    for (int i = 0; i < kNumReducers; ++i) {
+      workers.push_back(co_await registry.CreateActor<Worker>(reducers[i]));
+    }
 
-  // Create a single source that will distribute to all workers
-  auto source = registry.CreateActor<DataSource>(workers);
-
-  // Execute workflow
-  auto workflow = [&]() -> exec::task<void> {
+    // Create a single source that will distribute to all workers
+    auto source = co_await registry.CreateActor<DataSource>(workers);
     // Generate values 1 to kNumValues
     std::vector<int> values;
     values.reserve(kNumValues);
@@ -452,5 +440,5 @@ TEST(ShuffleMergeTest, ComplexDependencyGraph) {
     EXPECT_EQ(total_sum, expected_sum) << "Total sum should match mathematical formula for sum of squares";
   };
 
-  ex::sync_wait(workflow());
+  ex::sync_wait(coroutine());
 }

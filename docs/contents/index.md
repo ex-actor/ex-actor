@@ -35,21 +35,18 @@ struct Counter {
   int count = 0;
 };
 
-exec::task<int> Test() {
+exec::task<void> MainCoroutine() {
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
 
   // 1. Create the actor.
-  ex_actor::ActorRef actor = registry.CreateActor<Counter>();
+  ex_actor::ActorRef actor = co_await registry.CreateActor<Counter>();
 
   // 2. Call it! It returns a `std::execution::task`.
   int res = co_await actor.Send<&Counter::Add>(1);
-  co_return res + 1;
+  assert(res == 1);
 }
 
-int main() {
-  auto [res] = stdexec::sync_wait(Test()).value();
-  assert(res == 2);
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 

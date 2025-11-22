@@ -56,13 +56,15 @@ struct TestActor {
   void Foo() {}
 };
 
-int main() {
+exec::task<void> MainCoroutine() {
   ex_actor::PriorityThreadPool thread_pool(1);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-  auto actor = registry.CreateActor<TestActor>(ex_actor::ActorConfig {
+  auto actor = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {
     .priority = 1 // smaller number means higher priority
   });
 }
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -85,7 +87,8 @@ If you do have some very high-priority actors, consider using the [`SchedulerUni
 struct TestActor {
   uint64_t GetThreadId() { return std::hash<std::thread::id>{}(std::this_thread::get_id()); }
 };
-int main() {
+
+exec::task<void> MainCoroutine() {
   ex_actor::WorkSharingThreadPool thread_pool1(1);
   ex_actor::WorkSharingThreadPool thread_pool2(1);
   ex_actor::SchedulerUnion scheduler_union(std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {
@@ -94,13 +97,15 @@ int main() {
   auto scheduler = scheduler_union.GetScheduler();
   ex_actor::ActorRegistry registry(scheduler);
 
-  auto actor1 = registry.CreateActor<TestActor>(ex_actor::ActorConfig {.scheduler_index = 0});
-  auto actor2 = registry.CreateActor<TestActor>(ex_actor::ActorConfig {.scheduler_index = 1});
+  auto actor1 = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {.scheduler_index = 0});
+  auto actor2 = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {.scheduler_index = 1});
 
-  auto [thread_id1] = stdexec::sync_wait(actor1.Send<&TestActor::GetThreadId>()).value();
-  auto [thread_id2] = stdexec::sync_wait(actor2.Send<&TestActor::GetThreadId>()).value();
+  uint64_t thread_id1 = co_await actor1.Send<&TestActor::GetThreadId>();
+  uint64_t thread_id2 = co_await actor2.Send<&TestActor::GetThreadId>();
   assert(thread_id1 != thread_id2);
 }
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 

@@ -140,15 +140,12 @@ consteval std::optional<uint64_t> GetActorMethodIndex() {
   return std::optional<uint64_t> {};
 };
 
-template <class UserClass, size_t kMethodIndex, class... Args>
-auto InvokeActorMethod(UserClass& user_class_instance, Args&&... args) {
-  CheckHasActorMethods<UserClass>();
-  constexpr auto kMethodPtr = std::get<kMethodIndex>(GetActorMethodsTuple<UserClass>());
-  return (user_class_instance.*kMethodPtr)(std::forward<Args>(args)...);
-}
 template <stdexec::sender Sender>
 using CoAwaitType =
     decltype(std::declval<exec::task<void>::promise_type>().await_transform(std::declval<Sender>()).await_resume());
+
+template <class Awaitable, class T>
+concept AwaitableOf = std::is_same_v<CoAwaitType<Awaitable>, T>;
 
 template <auto kMethod>
 constexpr auto UnwrapReturnSenderIfNested() {

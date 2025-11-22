@@ -30,6 +30,12 @@ class C {
   static C Create() { return C(); }
 };
 
+class D {
+ public:
+  static D Create() { return D(); }
+};
+EXA_REMOTE(&D::Create);
+
 class PingWorker {
  public:
   explicit PingWorker(std::string name) : name_(std::move(name)) {}
@@ -100,7 +106,6 @@ TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
     ex_actor::ActorRegistry registry(/*thread_pool_size=*/4,
                                      /*this_node_id=*/this_node_id, cluster_node_info);
 
-    // test remote creation
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
     auto ping_worker =
         registry.CreateActor<PingWorker, &PingWorker::Create>(ex_actor::ActorConfig {.node_id = remote_node_id},
@@ -137,15 +142,15 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto remote_b = registry.CreateActor<B, &B::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "B"}, 1, "asd", std::make_unique<int>());
 
-    spdlog::info("creating remote actor C without static create function");
-    ASSERT_THAT(
-        [&]() { registry.CreateActor<C>(ex_actor::ActorConfig {.node_id = remote_node_id}); },
-        Throws<std::exception>(Property(&std::exception::what, HasSubstr("can only be used to create local actor"))));
-
     spdlog::info("creating remote actor C without registering with EXA_REMOTE");
     auto do_create = [&]() { registry.CreateActor<C, &C::Create>(ex_actor::ActorConfig {.node_id = remote_node_id}); };
     ASSERT_THAT(do_create, Throws<std::exception>(
                                Property(&std::exception::what, HasSubstr("forgot to register it with EXA_REMOTE"))));
+
+    spdlog::info("creating remote actor D without static create function");
+    ASSERT_THAT(
+        [&]() { registry.CreateActor<D>(ex_actor::ActorConfig {.node_id = remote_node_id}); },
+        Throws<std::exception>(Property(&std::exception::what, HasSubstr("can only be used to create local actor"))));
 
     // test remote creation error propagation
     auto do_create_error = [&]() {
@@ -158,17 +163,16 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto ping_worker =
         registry.CreateActor<PingWorker, &PingWorker::Create>(ex_actor::ActorConfig {.node_id = remote_node_id},
                                                               /*name=*/"Alice");
+    spdlog::info("calling PingWorker::Ping");
+    auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
+    auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
+    ASSERT_EQ(ping_res, "ack from Alice, msg got: hello");
 
     // test call a not registered function
     spdlog::info("calling PingWorker::NotRegisteredFunc");
     ASSERT_THAT(
         [&]() { stdexec::sync_wait(ping_worker.Send<&PingWorker::NotRegisteredFunc>()); },
         Throws<std::exception>(Property(&std::exception::what, HasSubstr("forgot to register it with EXA_REMOTE"))));
-
-    spdlog::info("calling PingWorker::Ping");
-    auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
-    auto [ping_res] = stdexec::sync_wait(std::move(ping)).value();
-    ASSERT_EQ(ping_res, "ack from Alice, msg got: hello");
 
     // test remote call error propagation
     spdlog::info("calling PingWorker::Error");

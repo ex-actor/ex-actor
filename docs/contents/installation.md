@@ -37,13 +37,13 @@ It's useful when you fail the download due to network issues, and want to retry 
 
 ### Use legacy install and find_package
 
-first, install ex_actor to your system:
+First, install ex_actor to your system:
 
 ```bash
 git clone https://github.com/ex-actor/ex-actor.git --depth 1 && cd ex-actor
 
-# Set a cache directory for CPM.cmake, It's useful when you fail the download due
-# to network issues, and want to retry again. Avoid re-downloading.
+# Set a cache directory for CPM.cmake. This is useful when you fail the download due
+# to network issues and want to retry again. Avoids re-downloading.
 export CPM_SOURCE_CACHE=$HOME/.cache/CPM
 
 cmake -S . -B build -G "Ninja Multi-Config"
@@ -51,13 +51,13 @@ cmake --build build --config Release
 cmake --install build --prefix <your_install_prefix>
 ```
 
-then, you can use `find_package` to add ex_actor as your dependencies.
+Then, you can use `find_package` to add ex_actor to your dependencies.
 
 ```cmake
 find_package(ex_actor REQUIRED)
 ```
 
-don't forget to set `CMAKE_PREFIX_PATH` to your install prefix.
+Don't forget to set `CMAKE_PREFIX_PATH` to your install prefix.
 ```bash
 cmake -S . -B build -G "Ninja Multi-Config" -DCMAKE_PREFIX_PATH=<your_install_prefix>
 cmake --build build --config Release
@@ -67,7 +67,7 @@ cmake --build build --config Release
 
 ### Bzlmod style
 
-ex_actor does adapt bzlmod, but is not in the bzlmod registry now. So you need to explicitly provide a `archive_override`
+ex_actor does support bzlmod, but is not in the bzlmod registry now. So you need to explicitly provide an `archive_override`
 
 MODULE.bazel:
 
@@ -91,7 +91,7 @@ You should find the latest commit ID from [ex-actor commit list page](https://gi
 The zip url should be: `https://github.com/ex-actor/ex-actor/archive/<latest_commit_id>.zip`,
 note the commit ID should be a full commit ID like `acd385cd467253385b44b382a166b4a24ce8cbaa`, not a short ID like `acd385c`.
 
-Finally, use can `@ex_actor//:ex_actor` as your dependencies.
+Finally, you can use `@ex_actor//:ex_actor` as your dependency.
 
 ```bazel
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
@@ -104,7 +104,7 @@ cc_binary(
 
 ### Legacy WORKSPACE style
 
-Since Legacy WORKSPACE style bazel project doesn't have package manager(bzlmod). We add a [rules_foreign_cc](https://github.com/bazel-contrib/rules_foreign_cc) target `@ex_actor//:ex_actor_cmake` for you, which delegates everything to cmake.
+Since legacy WORKSPACE style bazel projects don't have a package manager (bzlmod), we add a [rules_foreign_cc](https://github.com/bazel-contrib/rules_foreign_cc) target `@ex_actor//:ex_actor_cmake` for you, which delegates everything to cmake.
 
 But if you are able to setup all the dependencies manually. You can still use `@ex_actor//:ex_actor`.
 Which is less likely to cause dependency conflicts, and can build faster.
@@ -156,7 +156,7 @@ http_archive(
 )
 ```
 
-Finally, use `@ex_actor//:ex_actor_cmake` as your dependencies.
+Finally, use `@ex_actor//:ex_actor_cmake` as your dependency.
 
 ```bazel
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
@@ -174,4 +174,4 @@ All of them will be automatically downloaded and built from source, you don't ne
 
 We know it's a headache to resolve dependency conflicts, so we carefully choose minimal dependencies.
 If you meet any dependency conflict, either try to modify our version in CMakeLists.txt to match your project, or modify your version to match ours.
-Welcome to open a issue to let us know if have any problem.
+Welcome to open an issue to let us know if you have any problem.

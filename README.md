@@ -9,9 +9,9 @@
 
 **ex_actor** is a modern C++ actor framework based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework **turns you C++ class into a stateful async service**(so-called actor). All method calls to it will be pushed into the mailbox(a FIFO queue) of the actor and executed sequentially.
+This framework **turns your C++ class into a stateful async service**(so-called actor). All method calls to it will be pushed into the mailbox(a FIFO queue) of the actor and executed sequentially.
 
-The actor can be local or remote. When it's local, args in method are passed directly in memory. When it's a remote actor, we'll help you to serialize them, send through network, and get the return value back.
+The actor can be local or remote. When it's local, args in method are passed directly in memory. When it's a remote actor, we'll help you serialize them, send through the network, and get the return value back.
 
 **It offers a simple way to build highly concurrent programs — no locks, no race conditions — just write plain classes.**
 
@@ -60,11 +60,11 @@ See ⚙️[Installation](https://ex-actor.github.io/ex-actor/installation/) page
 
 # FAQs
 
-## `std::execution` is in C++26, why you only requires C++20?
+## `std::execution` is in C++26, why does it only require C++20?
 
-C++26 is not finalized, now we depends on an early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), which only requires C++20. (it's like `fmtlib` vs `std::format` and `ranges-v3` vs `std::ranges`)
+C++26 is not finalized, now we depend on an early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), which only requires C++20. (it's like `fmtlib` vs `std::format` and `ranges-v3` vs `std::ranges`)
 
-Once C++26 is ready, we'll add a build option to switch to the real `std::execution` in C++26, allow you to remove the dependency on `stdexec`. And it'll only be an option, you can still use `stdexec` because all senders based on `stdexec` will work well with `std::execution`.
+Once C++26 is ready, we'll add a build option to switch to the real `std::execution` in C++26, allowing you to remove the dependency on `stdexec`. And it'll only be an option, you can still use `stdexec` because all senders based on `stdexec` will work well with `std::execution`.
 
 **From our side, we'll keep our code compatible with both `stdexec` and `std::execution`**. So don't worry about the dependency.
 
@@ -72,7 +72,7 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 ## Is it production-ready?
 
-The single-process mode is heavily tested in our company's production environment. While minor bugs can occur due to version divergence btw open source & internal codes, the overall quality is good, feel free to use it in production.
+The single-process mode is heavily tested in our company's production environment. While minor bugs can occur due to version divergence between open source & internal codes, the overall quality is good, feel free to use it in production.
 
 The distributed mode is still in early stage. Welcome to have a try and build together with us!
 
@@ -89,4 +89,4 @@ We are [Beijing Qianxiang Private Fund Management Co., Ltd (乾象投资)](https
 
 In the process of engineering our trading system, we discovered that no existing actor framework on the market could meet our specific requirements. Consequently, we built one from the ground up.
 
-While this framework has some successful applications internally, we believe there are more valuable use case in the community which can make it more mature. So we open-source ex_actor, look forward to building it together with you!
+While this framework has some successful applications internally, we believe there are more valuable use cases in the community which can make it more mature. So we open-source ex_actor, look forward to building it together with you!

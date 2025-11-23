@@ -14,8 +14,8 @@ Have a look at existing issues and pick what you're interested in, especially th
 
 If you have your own ideas:
 
-* For small changes, you can directly open a pull request without an issue, we'll review and merge it in short time.
-* ⚠️ For non-trivial changes which will cost you a lot time to implement, in order to save both our time, please open an issue to discuss with us first. By this way we can refine the design in advance and avoid potential duplicate work.
+* For small changes, you can directly open a pull request without an issue, we'll review and merge it in a short time.
+* ⚠️ For non-trivial changes which will cost you a lot of time to implement, in order to save both our time, please open an issue to discuss with us first. This way we can refine the design in advance and avoid potential duplicate work.
 
 ## How to build from source
 
@@ -24,19 +24,19 @@ If you have your own ideas:
 ```bash
 cd ex-actor
 
-# If fail due to network issues, just retry it.
-# in this script I set cache dir for CPM, previous success download will be cached.
+# If it fails due to network issues, just retry it.
+# In this script I set the cache dir for CPM; previously successful downloads will be cached.
 ./scripts/regen_build_dir.sh
 
 cd build
-# build
+# Build
 cmake --build . --config Debug
-# run all test
+# Run all tests
 ctest -C Debug --output-on-failure
-# run specific test
+# Run specific test
 ./test/Debug/basic_api_test
 
-# format code
+# Format code
 ./scripts/format.sh
 ```
 
@@ -47,7 +47,7 @@ cd ex-actor
 cmake -S . -B build -G "Visual Studio 17 2022"
 cmake --build build --config Debug
 
-# run all test
+# Run all tests
 ctest -C Debug --output-on-failure
 ```
 

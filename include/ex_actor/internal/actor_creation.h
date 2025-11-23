@@ -384,6 +384,8 @@ class ActorRegistry {
       message_broker_->ClusterAlignedStop();
     }
     ex::sync_wait(processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::AsyncDestroyAllActors>());
+    ex::sync_wait(processor_actor_.AsyncDestroy());
+    ex::sync_wait(async_scope_.on_empty());
     spdlog::info("Actor registry shutdown completed");
   }
 

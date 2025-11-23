@@ -70,11 +70,11 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 It's a thread pool with a lock-guarded priority queue. You can set the priority of an actor when creating it.
 When an actor is activated, it will be pushed to the scheduler with its priority.
-The scheduler will execute the tasks with higher priority(smaller number) first.
+The scheduler will execute the tasks with higher priority (smaller number) first.
 
 In practice it's used to prioritize downstream actors in some high-throughput systems, so that there won't be a lot of data pending in the middle of the pipeline, reducing the memory pressure.
 
-Event though this scheduler takes priority into account, the actor scheduling is still cooperative. Which means a thread can't be interrupted and switch to higher priority actors when executing an actor's message.
+Even though this scheduler takes priority into account, the actor scheduling is still cooperative. Which means a thread can't be interrupted and switch to higher priority actors when executing an actor's message.
 If you do have some very high-priority actors, consider using the [`SchedulerUnion`](#scheduler-union) scheduler to put them in a dedicated thread pool.
 
 ## Scheduler Union
@@ -113,7 +113,7 @@ It's a scheduler that combines multiple schedulers. You can set the scheduler in
 When an actor is activated, it will be pushed to the specified scheduler.
 
 It's useful when you want to split actors by groups. E.g. some control-flow actors and some data-processing actors, and you want the control-flow
-actors run in a dedicated thread pool, scheduled preemptively with the other group, so it won't be blocked by the data-processing actors.
+actors to run in a dedicated thread pool, scheduled preemptively with the other group, so they won't be blocked by the data-processing actors.
 
 ## Understanding how actor is scheduled
 
@@ -145,7 +145,7 @@ whenever a message is pushed to the mailbox, the actor will be activated - pushe
 You can think of pushing the following pseudo lambda to the scheduler:
 
 ```cpp
-// pseudo code of actor activation
+// Pseudo code of actor activation
 scheduler.push_task([actor = std::move(actor)] {
   int message_executed = 0;
   while (!actor.mailbox.empty()) {
@@ -153,7 +153,7 @@ scheduler.push_task([actor = std::move(actor)] {
     message->Execute();
     message_executed++;
     /*
-    we limit the number of messages executed per activation
+    We limit the number of messages executed per activation
     so that other actors won't starve.
     */
     if (message_executed >= actor.max_message_executed_per_activation) {
@@ -161,7 +161,7 @@ scheduler.push_task([actor = std::move(actor)] {
     }
   }
   if (still has messages in the mailbox) {
-    push again to the scheduler
+    Push again to the scheduler
   }
 });
 ```
@@ -171,9 +171,9 @@ So you don't need to worry about the synchronization when writing actor methods.
 
 The whole schedule process is like this:
 
-1. someone calls an actor's method - i.e. start a sender returned by `actor.Send<>`.
-2. we push this message(the target method & its callbacks) to the actor's mailbox.
-3. we check if the actor is activated, if not, we activate it, push an activation task(see the above pseudo code) to the scheduler.
-4. the scheduler get the task, execute it, in which the actor will pull messages from its mailbox and execute them.
-5. the actor runs out of messages, or max messages executed per activation is reached, the activation task finishes.
-6. if there are still messages in the mailbox, the activation task will be pushed again to the scheduler.
+1. Someone calls an actor's method - i.e. starts a sender returned by `actor.Send<>`.
+2. We push this message (the target method & its callbacks) to the actor's mailbox.
+3. We check if the actor is activated. if not, we activate it and push an activation task (see the above pseudo code) to the scheduler.
+4. The scheduler gets the task and executes it, in which the actor will pull messages from its mailbox and execute them.
+5. The actor runs out of messages, or max messages executed per activation is reached, and the activation task finishes.
+6. If there are still messages in the mailbox, the activation task will be pushed again to the scheduler.

@@ -1,6 +1,6 @@
 # Tutorial
 
-The best way to learn a new library is study from examples, let's go through some examples and you'll learn all you want :)
+The best way to learn a new library is to learn from examples, let's go through some examples and you'll learn all you want :)
 
 This framework is based on `std::execution`, but **it's fine if you are not familiar with it, the example is easy enough to understand**.
 
@@ -141,7 +141,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Chain actors - send message from one actor to another
 
-This examples shows how to call an actor's method from another actor.
+This example shows how to call an actor's method from another actor.
 
 The main thread calls `Proxy`, then `Proxy` calls `PingWorker`.
 
@@ -163,11 +163,11 @@ class Proxy {
   
   exec::task<std::string> ProxyPing() {
     /*
-    IMPORTANT: DO NOT `sync_wait` the result in actor methods, which will block the scheduler thread.
-    Instead, use `co_await`, which is non-blocking, allows the thread to process other actors while
+    IMPORTANT: DO NOT call `sync_wait` on the result in actor methods, which will block the scheduler thread.
+    Instead, use `co_await`, which is non-blocking and allows the thread to process other actors while
     waiting for the result.
     
-    In this example, the thread pool has only one thread, but it still be able to finish the entire
+    In this example, the thread pool has only one thread, but it will still be able to finish the entire
     work thanks to the non-blocking wait. If you call sync_wait here, the program will hang forever.
     */
     co_return co_await actor_ref_.template Send<&PingWorker::Ping>();
@@ -233,7 +233,7 @@ int main() {
 ```
 <!-- doc test end -->
 
-In the above example, the ex::then callback runs on the actor's thread. If you capture local variables in the ex::then callback, it will cause data race.
+In the above example, the `ex::then` callback runs on the actor's thread. If you capture local variables in the `ex::then` callback, it will cause a data race.
 
 A more dangerous example is capturing `this` in actor's method.
 

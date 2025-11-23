@@ -93,9 +93,9 @@ we can take advantage of a schemafull protocol. From this reason, we choose [Cap
 
 We choose [ZeroMQ](https://zeromq.org/), it's a well-known and sophisticated message passing library.
 
-The topology is a full mesh. Each node holds one receive DEALER socket bound to local. And several send DEALER sockets connected to other nodes.
+The topology is a full mesh. Each node holds one receive DEALER socket bound to local and several send DEALER sockets connected to other nodes.
 
-While full mesh is simple and efficient in small cluster, it has a potential scalability issue, because the number of connections is O(n^2).
+While full mesh is simple and efficient in small clusters, it has a potential scalability issue, because the number of connections is O(n^2).
 It fits my current use case, so I have no plan yet to optimize further.
-If you met scalability issue, you can try to use a different topology, e.g. star topology.
+If you encounter scalability issues, you can try to use a different topology, e.g. star topology.
 With ZeroMQ you can easily implement it by adding a central broker. Welcome to contribute!

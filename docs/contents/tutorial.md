@@ -97,42 +97,49 @@ struct Counter {
 };
 
 exec::task<void> MainCoroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  ex_actor::ActorRef actor = co_await registry.CreateActor<Counter>();
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/3);
 
-  // when_all example, which you can get the result of each task.
+  // create multiple counters, you want to increase them in parallel
+  std::vector<ex_actor::ActorRef<Counter>> counters;
+  for (int i = 0; i < 3; ++i) {
+    counters.push_back(co_await registry.CreateActor<Counter>());
+  }
+
+  // `when_all` example, handy for small number of tasks.
   auto [res1, res2, res3] = co_await stdexec::when_all(
-    actor.Send<&Counter::AddAndGet>(1),
-    actor.Send<&Counter::AddAndGet>(2),
-    actor.Send<&Counter::AddAndGet>(3)
+    counters[0].Send<&Counter::AddAndGet>(1),
+    counters[1].Send<&Counter::AddAndGet>(2),
+    counters[2].Send<&Counter::AddAndGet>(3)
   );
   assert(res1 == 1);
-  assert(res2 == 3);
-  assert(res3 == 6);
+  assert(res2 == 1);
+  assert(res3 == 1);
 
+  // for large number of tasks where you need a loop, use `async_scope`.
   exec::async_scope scope;
 
-  // async_scope.spawn_future example, which returns a future-like object which you can wait for later.
-  using FutureType = decltype(scope.spawn_future(actor.Send<&Counter::AddAndGet>(1)));
+  // `async_scope.spawn_future` example, which returns a future-like object which you can wait for later.
+  using FutureType = decltype(scope.spawn_future(counters[0].Send<&Counter::AddAndGet>(1)));
   std::vector<FutureType> futures;
-  for (int i = 0; i < 100; ++i) {
-    auto future = scope.spawn_future(actor.Send<&Counter::AddAndGet>(1));
+  for (int i = 0; i < counters.size(); ++i) {
+    auto future = scope.spawn_future(counters[i].Send<&Counter::AddAndGet>(1));
     futures.push_back(std::move(future));
   }
   co_await scope.on_empty();
-  for (int i = 0; i < 100; ++i) {
+  for (int i = 0; i < futures.size(); ++i) {
     int value = co_await std::move(futures[i]);
-    assert(value == 6 + i + 1);
+    assert(value == 2);
   }
 
   // async_scope.spawn example, which only accepts void tasks.
-  for (int i = 0; i < 100; ++i) {
-    scope.spawn(actor.Send<&Counter::Add>(1));
+  for (int i = 0; i < counters.size(); ++i) {
+    scope.spawn(counters[i].Send<&Counter::Add>(1));
   }
   co_await scope.on_empty();
-
-  int sum = co_await actor.Send<&Counter::GetValue>();
-  assert(sum == 206);
+  for (int i = 0; i < counters.size(); ++i) {
+    int value = co_await counters[i].Send<&Counter::GetValue>();
+    assert(value == 3);
+  }
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }

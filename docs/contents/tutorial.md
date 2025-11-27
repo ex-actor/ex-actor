@@ -38,9 +38,7 @@ exec::task<void> MainCoroutine() {
   /*
   2. Everything is setup, you can call the actor's method now using `actor_ref.Send`.
   This method returns a standard `std::execution::task`, compatible with everything
-  in the `std::execution` ecosystem.
-
-  Note about args serialization requirement: (1)
+  in the `std::execution` ecosystem. If you met "unsupported type" compile error: (1)
   */
   auto task = actor.Send<&Counter::Add>(1);
 
@@ -51,9 +49,9 @@ exec::task<void> MainCoroutine() {
 
   /*
   3. The task is lazy executed. To execute the task and wait for the result non-blockingly,
-  use `co_await`. Note that the task is not copyable, so you need to use `std::move`.
+  use `co_await` (2). Note that the task is not copyable, so you need to use `std::move`.
   */
-  auto res = co_await std::move(task); // (2)
+  auto res = co_await std::move(task);
   assert(res == 1);
 
   // A shorter way
@@ -79,6 +77,64 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
     In this example, the main thread has no other work to do and will still be blocked in `sync_wait`.
     But if you schedule the coroutine in a scheduler,
     the thread of the scheduler can do other work while waiting for the result.
+
+
+## Chain actors - send message from one actor to another
+
+This example shows how to call an actor's method from another actor.
+
+The main thread calls `Proxy`, then `Proxy` calls `PingWorker`.
+
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include <iostream>
+#include "ex_actor/api.h"
+
+class PingWorker {
+ public:
+  std::string Ping() { return "Hi"; }
+};
+
+class Proxy {
+ public:
+  explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
+  
+  exec::task<std::string> ProxyPing() {
+    /*
+    IMPORTANT: DO NOT do blocking things like `sync_wait` in actor methods, which will block
+    the scheduler thread. Instead, use `co_await`, which is non-blocking and allows the thread
+    to process other actors while waiting for the result.
+    
+    In this example, the thread pool has only one thread, but it will still be able to finish the entire
+    work thanks to the non-blocking wait. If you call sync_wait here, the program will hang forever.
+    */
+    std::string ping_res = co_await actor_ref_.template Send<&PingWorker::Ping>();
+    co_return ping_res + " from Proxy";
+  }
+
+ private:
+  ex_actor::ActorRef<PingWorker> actor_ref_;
+};
+
+
+exec::task<void> MainCoroutine() {
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+  ex_actor::ActorRef ping_worker = co_await registry.CreateActor<PingWorker>();
+
+  // 1. create a proxy actor, who has a reference to the ping_worker actor
+  ex_actor::ActorRef proxy = co_await registry.CreateActor<Proxy>(ping_worker);
+
+  // 2. call through the proxy actor
+  std::string res = co_await proxy.Send<&Proxy::ProxyPing>();
+  assert(res == "Hi from Proxy");
+}
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
+```
+<!-- doc test end -->
+
 
 ## Execute multiple tasks in parallel
 
@@ -140,61 +196,6 @@ exec::task<void> MainCoroutine() {
     int value = co_await counters[i].Send<&Counter::GetValue>();
     assert(value == 3);
   }
-}
-
-int main() { stdexec::sync_wait(MainCoroutine()); }
-```
-<!-- doc test end -->
-
-## Chain actors - send message from one actor to another
-
-This example shows how to call an actor's method from another actor.
-
-The main thread calls `Proxy`, then `Proxy` calls `PingWorker`.
-
-
-<!-- doc test start -->
-```cpp
-#include <cassert>
-#include <iostream>
-#include "ex_actor/api.h"
-
-class PingWorker {
- public:
-  std::string Ping() { return "Hi"; }
-};
-
-class Proxy {
- public:
-  explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
-  
-  exec::task<std::string> ProxyPing() {
-    /*
-    IMPORTANT: DO NOT call `sync_wait` on the result in actor methods, which will block the scheduler thread.
-    Instead, use `co_await`, which is non-blocking and allows the thread to process other actors while
-    waiting for the result.
-    
-    In this example, the thread pool has only one thread, but it will still be able to finish the entire
-    work thanks to the non-blocking wait. If you call sync_wait here, the program will hang forever.
-    */
-    co_return co_await actor_ref_.template Send<&PingWorker::Ping>();
-  }
-
- private:
-  ex_actor::ActorRef<PingWorker> actor_ref_;
-};
-
-
-exec::task<void> MainCoroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  ex_actor::ActorRef ping_worker = co_await registry.CreateActor<PingWorker>();
-
-  // 1. create a proxy actor, who has a reference to the ping_worker actor
-  ex_actor::ActorRef proxy = co_await registry.CreateActor<Proxy>(ping_worker);
-
-  // 2. call through the proxy actor
-  std::string res = co_await proxy.Send<&Proxy::ProxyPing>();
-  assert(res == "Hi");
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }

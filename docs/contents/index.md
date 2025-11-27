@@ -7,15 +7,13 @@
 
 **ex_actor** is a modern C++ [actor framework](https://www.youtube.com/watch?v=ELwEdb_pD0k) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework **turns your C++ class into a stateful async service** - called an actor. All method calls to it will be queued and executed sequentially, which means you don't need any locks in your class.
-
-It offers a simple way to build highly concurrent programs — no bothering about locks and networking, **just write plain classes**.
+This framework **turns your C++ class into a stateful async service by one line of code**. All method calls to it will be queued and executed sequentially, you don't need any locks in your class. It offers a simple way to build highly concurrent programs - just write plain classes.
 
 # Key Features
 
 1. **Easy to Use** - Non-intrusive API, turn your existing class into an actor, no need to modify your class.
-2. **Standard-Compliant API** - Our actor returns a standard `std::execution::task`, compatible with everything in the std::execution ecosystem. You can `co_await` it, use `ex::then` to wrap etc.
-3. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also provide many out-of-box: work-sharing, work-stealing, custom priority and so on, see [docs](https://ex-actor.github.io/ex-actor/schedulers/).
+2. **Standard-Compliant** - Composible with everything in std::execution ecosystem.
+3. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also [provide many out-of-box](https://ex-actor.github.io/ex-actor/schedulers/): work-sharing, work-stealing, custom priority and so on.
 
 
 # API Glance

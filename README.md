@@ -23,6 +23,8 @@ This framework **turns your C++ class into a stateful async service by one line 
 Note: currently we're based on std::execution's early implementation - [stdexec](https://github.com/NVIDIA/stdexec),
 so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` in the following example.
 
+## Basic Example: Turn Your Class into an Actor
+
 <!-- doc test start -->
 ```cpp
 #include <cassert>
@@ -42,6 +44,48 @@ exec::task<void> MainCoroutine() {
   // 2. Call it! It returns a `std::execution::task`.
   int res = co_await actor.Send<&Counter::Add>(1);
   assert(res == 1);
+}
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
+```
+<!-- doc test end -->
+
+## Actor Chaining Example
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include "ex_actor/api.h"
+
+ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+
+class Father;
+class Child;
+
+class Child {
+public:
+  std::string Ping() {
+    return "Dad, I'm here!";
+  }
+};
+
+class Father {
+public:
+  exec::task<std::string> SpawnChildAndPing() {
+    if (child_.IsEmpty()) {
+      child_ = co_await registry.CreateActor<Child>();
+    }
+    std::string child_res = co_await child_.Send<&Child::Ping>();
+    co_return "Where is my child? " + child_res;
+  }
+private:
+  ex_actor::ActorRef<Child> child_;
+};
+
+exec::task<void> MainCoroutine() {
+  ex_actor::ActorRef<Father> father = co_await registry.CreateActor<Father>();
+  std::string res = co_await father.Send<&Father::SpawnChildAndPing>();
+  assert(res == "Where is my child? Dad, I'm here!");
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }

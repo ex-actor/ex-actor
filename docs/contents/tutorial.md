@@ -79,7 +79,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
     the thread of the scheduler can do other work while waiting for the result.
 
 
-## Chain actors - send message from one actor to another
+## Send message from one actor to another
 
 This example shows how to call an actor's method from another actor.
 
@@ -135,6 +135,51 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
+
+## Create actors inside an actor
+
+If you want to create an actor inside an actor, it will be handy to make ActorRegistry a global variable.
+All APIs of ActorRegistry are thread-safe.
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include "ex_actor/api.h"
+
+ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+
+class Father;
+class Child;
+
+class Child {
+public:
+  std::string Ping() {
+    return "Dad, I'm here!";
+  }
+};
+
+class Father {
+public:
+  exec::task<std::string> SpawnChildAndPing() {
+    if (child_.IsEmpty()) {
+      child_ = co_await registry.CreateActor<Child>();
+    }
+    std::string child_res = co_await child_.Send<&Child::Ping>();
+    co_return "Where is my child? " + child_res;
+  }
+private:
+  ex_actor::ActorRef<Child> child_;
+};
+
+exec::task<void> MainCoroutine() {
+  ex_actor::ActorRef<Father> father = co_await registry.CreateActor<Father>();
+  std::string res = co_await father.Send<&Father::SpawnChildAndPing>();
+  assert(res == "Where is my child? Dad, I'm here!");
+}
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
+```
+<!-- doc test end -->
 
 ## Execute multiple tasks in parallel
 

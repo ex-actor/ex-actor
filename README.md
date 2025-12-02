@@ -59,9 +59,6 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
 
-class Father;
-class Child;
-
 class Child {
 public:
   std::string Ping() {

@@ -3,9 +3,9 @@
 [![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-blue.svg)](https://opensource.org/licenses/apache-2.0)
 [![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
 
-![image](docs/contents/assets/ex_actor_banner.jpg)
+**📖 Documentation: <https://ex-actor.github.io/ex-actor/>**
 
-**📖 [Documentation](https://ex-actor.github.io/ex-actor/)**
+![image](docs/contents/assets/ex_actor_banner.jpg)
 
 **ex_actor** is a modern C++ [actor framework](https://www.youtube.com/watch?v=ELwEdb_pD0k) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
@@ -19,6 +19,8 @@ This framework **turns your C++ class into a stateful async service by one line 
 
 
 # API Glance
+
+**📘 Full Tutorial : <https://ex-actor.github.io/ex-actor/tutorial/>**
 
 Note: currently we're based on std::execution's early implementation - [stdexec](https://github.com/NVIDIA/stdexec),
 so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` in the following example.
@@ -88,8 +90,6 @@ exec::task<void> MainCoroutine() {
 int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
-
-**Check 📘[Tutorials](https://ex-actor.github.io/ex-actor/tutorial/) page for more examples!**
 
 ## Installation
 

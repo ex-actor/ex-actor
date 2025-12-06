@@ -19,7 +19,7 @@ If you have your own ideas:
 
 ## How to build from source
 
-## Linux
+### Linux
 
 ```bash
 cd ex-actor
@@ -40,7 +40,7 @@ ctest -C Debug --output-on-failure
 ./scripts/format.sh
 ```
 
-## Windows
+### Windows
 
 ```powershell
 cd ex-actor

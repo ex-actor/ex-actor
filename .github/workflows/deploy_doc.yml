@@ -38,7 +38,7 @@ jobs:
       - name: Build documentation
         run: |
           curl -fsSL https://d2lang.com/install.sh | sh -s --
-          ./docs/build.sh
+          ./docs/doc_cli.sh build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

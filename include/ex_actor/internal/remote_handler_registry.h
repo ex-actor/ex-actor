@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "ex_actor/internal/actor.h"
-#include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization.h"
+#include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization.h"  // IWYU pragma: keep
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"

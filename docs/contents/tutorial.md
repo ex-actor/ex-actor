@@ -84,9 +84,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 When calling an actor's method from another actor, you should make the method a coroutine.
 
-This example shows how to call an actor's method from another actor.
-
-The main thread calls `Proxy`, then `Proxy` calls `PingWorker`.
+This example shows how to call an actor's method from another actor without blocking the scheduler thread.
 
 
 <!-- doc test start -->
@@ -104,15 +102,9 @@ class Proxy {
  public:
   explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
   
+  // Actor's method can be a coroutine.
   exec::task<std::string> ProxyPing() {
-    /*
-    IMPORTANT: DO NOT do blocking things like `sync_wait` in actor methods, which will block
-    the scheduler thread. Instead, use `co_await`, which is non-blocking and allows the thread
-    to process other actors while waiting for the result.
-    
-    In this example, the thread pool has only one thread, but it will still be able to finish the entire
-    work thanks to the non-blocking wait. If you call sync_wait here, the program will hang forever.
-    */
+    // This line won't block the scheduler thread.
     std::string ping_res = co_await actor_ref_.template Send<&PingWorker::Ping>();
     co_return ping_res + " from Proxy";
   }
@@ -123,7 +115,10 @@ class Proxy {
 
 
 exec::task<void> MainCoroutine() {
+  // here we have only one thread in scheduler, but it still can finish the entire work,
+  // because we use coroutine, there is no blocking wait in actor's method.
   ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+
   ex_actor::ActorRef ping_worker = co_await registry.CreateActor<PingWorker>();
 
   // 1. create a proxy actor, who has a reference to the ping_worker actor
@@ -167,8 +162,10 @@ public:
   // Actor's method can be a coroutine.
   exec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
+      // this line won't block the scheduler thread
       child_ = co_await registry.CreateActor<Child>();
     }
+    // this line won't either
     std::string child_res = co_await child_.Send<&Child::Ping>();
     co_return "Where is my child? " + child_res;
   }

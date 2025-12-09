@@ -62,11 +62,15 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Actor Chaining Example
 
+Actor's method can be a coroutine. The following example shows how to create a actor inside an actor and call it without blocking the scheduler thread.
+
 <!-- doc test start -->
 ```cpp
 #include <cassert>
 #include "ex_actor/api.h"
 
+// Here we have only one thread in scheduler, but it still can finish the entire work,
+// because we use coroutine, there is no blocking wait in actor's method.
 ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
 
 class Child {
@@ -78,10 +82,13 @@ public:
 
 class Father {
 public:
+  // actor's method can be a coroutine.
   exec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
+      // this line won't block the scheduler thread
       child_ = co_await registry.CreateActor<Child>();
     }
+    // this line won't either
     std::string child_res = co_await child_.Send<&Child::Ping>();
     co_return "Where is my child? " + child_res;
   }
@@ -91,6 +98,8 @@ private:
 
 exec::task<void> MainCoroutine() {
   ex_actor::ActorRef<Father> father = co_await registry.CreateActor<Father>();
+  // When the return type of your method is a std::execution sender, we'll automatically
+  // unwrap the result for you, so you don't need to `co_await` twice.
   std::string res = co_await father.Send<&Father::SpawnChildAndPing>();
   assert(res == "Where is my child? Dad, I'm here!");
 }

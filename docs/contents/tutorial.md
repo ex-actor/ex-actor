@@ -81,6 +81,9 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Send message from one actor to another
 
+
+When calling an actor's method from another actor, you should make the method a coroutine.
+
 This example shows how to call an actor's method from another actor.
 
 The main thread calls `Proxy`, then `Proxy` calls `PingWorker`.
@@ -126,7 +129,9 @@ exec::task<void> MainCoroutine() {
   // 1. create a proxy actor, who has a reference to the ping_worker actor
   ex_actor::ActorRef proxy = co_await registry.CreateActor<Proxy>(ping_worker);
 
-  // 2. call through the proxy actor
+  // 2. call through the proxy actor.
+  // When the return type of your method is a std::execution sender, we'll automatically
+  // unwrap the result for you, so you don't need to `co_await` twice.
   std::string res = co_await proxy.Send<&Proxy::ProxyPing>();
   assert(res == "Hi from Proxy");
 }
@@ -146,6 +151,8 @@ All APIs of ActorRegistry are thread-safe.
 #include <cassert>
 #include "ex_actor/api.h"
 
+// Again, here we have only one thread in scheduler, but it still can finish the entire work,
+// because we use coroutine, there is no blocking wait in actor's method.
 ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
 
 class Child {
@@ -157,6 +164,7 @@ public:
 
 class Father {
 public:
+  // Actor's method can be a coroutine.
   exec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
       child_ = co_await registry.CreateActor<Child>();
@@ -170,6 +178,8 @@ private:
 
 exec::task<void> MainCoroutine() {
   ex_actor::ActorRef<Father> father = co_await registry.CreateActor<Father>();
+  // When the return type of your method is a std::execution sender, we'll automatically
+  // unwrap the result for you, so you don't need to `co_await` twice.
   std::string res = co_await father.Send<&Father::SpawnChildAndPing>();
   assert(res == "Where is my child? Dad, I'm here!");
 }

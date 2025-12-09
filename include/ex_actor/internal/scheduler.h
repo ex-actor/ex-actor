@@ -18,7 +18,6 @@
 
 #include <exec/static_thread_pool.hpp>
 
-#include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/util.h"

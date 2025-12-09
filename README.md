@@ -9,7 +9,11 @@
 
 **ex_actor** is a modern C++ [actor framework](https://www.youtube.com/watch?v=ELwEdb_pD0k) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework **turns your C++ class into a stateful async service by one line of code**. All method calls to it will be queued and executed sequentially, you don't need any locks in your class. It offers a simple way to build highly concurrent programs - just write plain classes.
+This framework **turns your C++ class into a stateful async service** (so called actor) by one line of code. All method calls to it will be queued and executed in serial, so in your class you don't need any lock, just focus on your logic.
+
+When the actor is local, args in method will be passed directly in memory. When it's a remote actor, it'll help you to serialize them, send through network, and get the return value back.
+
+This programming paradigm is called "Actor Model". It's a very easy way to write distributed & highly concurrent programs, because you don't need any locks in your code. Just write plain classes.
 
 # Key Features
 
@@ -111,7 +115,7 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 The single-process mode is heavily tested in our company's production environment. While minor bugs can occur due to version divergence between open source & internal codes, the overall quality is good, feel free to use it in production.
 
-The distributed mode is still in early stage. Welcome to have a try and build together with us!
+The distributed mode's feature is complete and ready to be used, but isn't massively tested in production yet. Welcome to have a try and build together with us!
 
 ## Learning Resources
 

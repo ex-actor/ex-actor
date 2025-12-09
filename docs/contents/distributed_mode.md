@@ -1,8 +1,8 @@
 # Distributed Mode
 
-!!! experimental
+!!! Note
 
-    This feature is still experimental. While the functionality is complete and we have some tests in CI, it's not massively tested in production yet, bugs and API changes should be expected. Welcome to have a try and build together with us!
+    This feature is still at alpha stage. While the functionality is complete and is ready to be used, it's not massively tested in production yet, bugs and API changes should be expected. Welcome to have a try and build together with us!
 
 
 Distributed mode enables you to create actors at remote nodes. When calling a remote actor, all arguments will be

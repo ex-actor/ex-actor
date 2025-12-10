@@ -40,14 +40,14 @@ so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` i
 #include <cassert>
 #include "ex_actor/api.h"
 
+ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+
 struct Counter {
   int Add(int x) { return count += x; }
   int count = 0;
 };
 
 exec::task<void> MainCoroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
-
   // 1. Create the actor.
   ex_actor::ActorRef actor = co_await registry.CreateActor<Counter>();
 
@@ -56,13 +56,17 @@ exec::task<void> MainCoroutine() {
   assert(res == 1);
 }
 
-int main() { stdexec::sync_wait(MainCoroutine()); }
+int main() {
+  // use the thread pool inside ActorRegistry to execute the main coroutine.
+  // main thread blocks in `sync_wait` until the coroutine finishes.
+  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
+}
 ```
 <!-- doc test end -->
 
 ## Actor Chaining Example
 
-Actor's method can be a coroutine. The following example shows how to create a actor inside an actor and call it without blocking the scheduler thread.
+Actor's method can be a coroutine. The following example shows how to create an actor inside an actor and call it without blocking the scheduler thread.
 
 <!-- doc test start -->
 ```cpp
@@ -104,7 +108,11 @@ exec::task<void> MainCoroutine() {
   assert(res == "Where is my child? Dad, I'm here!");
 }
 
-int main() { stdexec::sync_wait(MainCoroutine()); }
+int main() {
+  // use the thread pool inside ActorRegistry to execute the main coroutine.
+  // main thread blocks in `sync_wait` until the coroutine finishes.
+  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
+}
 ```
 <!-- doc test end -->
 

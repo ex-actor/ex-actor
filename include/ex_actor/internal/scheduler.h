@@ -170,10 +170,10 @@ class SchedulerUnion {
       SchedulerUnion* scheduler_union;
       template <class CPO>
       auto query(ex::get_completion_scheduler_t<CPO>) const noexcept -> Scheduler {
-        return {.thread_pool = scheduler_union};
+        return {.scheduler_union = scheduler_union};
       }
     };
-    auto get_env() const noexcept -> Env { return Env {.thread_pool = scheduler_union}; }
+    auto get_env() const noexcept -> Env { return Env {.scheduler_union = scheduler_union}; }
 
     auto connect(ex::receiver auto receiver) {
       auto env = stdexec::get_env(receiver);

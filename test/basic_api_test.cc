@@ -1,6 +1,5 @@
 #include <cassert>
 #include <iostream>
-#include <memory>
 #include <stdexcept>
 
 #include <gmock/gmock-matchers.h>
@@ -62,8 +61,8 @@ TEST(BasicApiTest, ActorRegistryCreationWithDefaultScheduler) {
 }
 
 TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
-  auto coroutine = []() -> exec::task<void> {
-    ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+  auto coroutine = [&registry]() -> exec::task<void> {
     auto counter = co_await registry.CreateActor<Counter>();
     exec::async_scope scope;
     scope.spawn(counter.SendLocal<&Counter::Add>(1));
@@ -72,24 +71,22 @@ TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
     EXPECT_EQ(res, 1);
     co_return;
   };
-  ex::sync_wait(coroutine());
+  ex::sync_wait(stdexec::starts_on(registry.GetScheduler(), coroutine()));
 }
 
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
-  auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(10);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+  auto coroutine = [&registry]() -> exec::task<void> {
     auto counter = co_await registry.CreateActor<Counter>();
     co_await counter.Send<&Counter::Error>();
   };
-  ASSERT_THAT([&coroutine] { ex::sync_wait(coroutine()); },
+  ASSERT_THAT([&]() { ex::sync_wait(stdexec::starts_on(registry.GetScheduler(), coroutine())); },
               Throws<std::exception>(Property(&std::exception::what, HasSubstr("error0"))));
 }
 
 TEST(BasicApiTest, NestActorRefCase) {
-  auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(10);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+  auto coroutine = [&registry]() -> exec::task<void> {
     ex_actor::ActorRef counter = co_await registry.CreateActor<Counter>();
     exec::async_scope scope;
     for (int i = 0; i < 100; ++i) {
@@ -105,13 +102,12 @@ TEST(BasicApiTest, NestActorRefCase) {
     EXPECT_EQ(res3, 100);
     co_return;
   };
-  ex::sync_wait(coroutine());
+  ex::sync_wait(stdexec::starts_on(registry.GetScheduler(), coroutine()));
 }
 
 TEST(BasicApiTest, CreateActorWithFullConfig) {
-  auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(10);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+  auto coroutine = [&registry]() -> exec::task<void> {
     auto counter = co_await registry.CreateActor<Counter>(
         ex_actor::ActorConfig {.max_message_executed_per_activation = 10, .actor_name = "counter1"});
     co_await registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter2"});
@@ -124,7 +120,7 @@ TEST(BasicApiTest, CreateActorWithFullConfig) {
     co_await registry.CreateActor<Proxy>(config, counter);
     co_await registry.DestroyActor(counter);
   };
-  ex::sync_wait(coroutine());
+  ex::sync_wait(stdexec::starts_on(registry.GetScheduler(), coroutine()));
 }
 
 static ex_actor::ActorRegistry g_registry(/*thread_pool_size=*/1);
@@ -149,5 +145,5 @@ TEST(BasicApiTest, LookUpNamedActor) {
     auto getvalue_reply = co_await std::move(getvalue_sender);
     EXPECT_EQ(getvalue_reply, 0);
   };
-  ex::sync_wait(coroutine());
+  ex::sync_wait(stdexec::starts_on(g_registry.GetScheduler(), coroutine()));
 }

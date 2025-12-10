@@ -74,6 +74,8 @@ class TypeErasedActorScheduler {
   virtual ~TypeErasedActorScheduler() = default;
   virtual void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope) = 0;
   virtual std::unique_ptr<TypeErasedActorScheduler> Clone() const = 0;
+
+  virtual const void* GetUnderlyingSchedulerPtr() const = 0;
 };
 
 template <ex::scheduler Scheduler>
@@ -91,6 +93,8 @@ class AnyStdExecScheduler : public TypeErasedActorScheduler {
   std::unique_ptr<TypeErasedActorScheduler> Clone() const override {
     return std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler_);
   }
+
+  const void* GetUnderlyingSchedulerPtr() const override { return &scheduler_; }
 
  private:
   Scheduler scheduler_;

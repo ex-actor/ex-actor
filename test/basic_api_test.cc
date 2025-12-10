@@ -49,29 +49,16 @@ class Proxy {
   ex_actor::ActorRef<Counter> actor_ref_;
 };
 
-class TestActorWithNamedLookup {
- public:
-  explicit TestActorWithNamedLookup(std::weak_ptr<ex_actor::ActorRegistry> reg) : registry_(std::move(reg)) {}
-  exec::task<ex_actor::ActorRef<Counter>> LookUpActor() {
-    if (registry_.expired()) throw std::runtime_error("Registry pointer expired before we could look up the actor!");
-    auto ptr = registry_.lock();
-    co_return (co_await ptr->GetActorRefByName<Counter>("counter")).value();
-  }
-
- private:
-  std::weak_ptr<ex_actor::ActorRegistry> registry_;
-};
-
 TEST(BasicApiTest, ActorRegistryCreationWithDefaultScheduler) {
-  auto coroutine = []() -> exec::task<void> {
-    ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+  auto coroutine = [&registry]() -> exec::task<void> {
     auto counter = co_await registry.CreateActor<Counter>();
     auto getvalue_sender = counter.Send<&Counter::GetValue>();
     auto getvalue_reply = co_await std::move(getvalue_sender);
     EXPECT_EQ(getvalue_reply, 0);
     co_return;
   };
-  ex::sync_wait(coroutine());
+  ex::sync_wait(stdexec::starts_on(registry.GetScheduler(), coroutine()));
 }
 
 TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
@@ -140,12 +127,19 @@ TEST(BasicApiTest, CreateActorWithFullConfig) {
   ex::sync_wait(coroutine());
 }
 
+static ex_actor::ActorRegistry g_registry(/*thread_pool_size=*/1);
+
+class TestActorWithNamedLookup {
+ public:
+  exec::task<ex_actor::ActorRef<Counter>> LookUpActor() {
+    co_return (co_await g_registry.GetActorRefByName<Counter>("counter")).value();
+  }
+};
+
 TEST(BasicApiTest, LookUpNamedActor) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(10);
-    auto registry_ptr = std::make_shared<ex_actor::ActorRegistry>(thread_pool.GetScheduler());
-    co_await registry_ptr->CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
-    auto test_retriever_actor = co_await registry_ptr->CreateActor<TestActorWithNamedLookup>(registry_ptr);
+    co_await g_registry.CreateActor<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
+    auto test_retriever_actor = co_await g_registry.CreateActor<TestActorWithNamedLookup>();
 
     auto lookup_sender = test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();
     auto lookup_reply = co_await std::move(lookup_sender);

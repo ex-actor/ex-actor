@@ -13,9 +13,7 @@ namespace ex = stdexec;
 
 struct SkynetActor;
 
-using RegistryType = ex_actor::ActorRegistry;
-
-static RegistryType* g_registry = nullptr;
+static ex_actor::ActorRegistry g_registry(/*thread_pool_size=*/2);
 
 struct SkynetActor {
   exec::task<uint64_t> Process(int level, bool verbose);
@@ -33,13 +31,13 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
 
   exec::async_scope async_scope;
 
-  using FutureType = decltype(async_scope.spawn_future(g_registry->CreateActor<SkynetActor>()));
+  using FutureType = decltype(async_scope.spawn_future(g_registry.CreateActor<SkynetActor>()));
   std::vector<FutureType> futures;
   futures.reserve(10);
 
   if (verbose) spdlog::info("DEBUG: Creating children for level {}", level);
   for (int i = 0; i < 10; ++i) {
-    futures.push_back(async_scope.spawn_future(g_registry->CreateActor<SkynetActor>()));
+    futures.push_back(async_scope.spawn_future(g_registry.CreateActor<SkynetActor>()));
   }
   co_await async_scope.on_empty();
   for (auto& future : futures) {
@@ -67,7 +65,7 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
   uint64_t sum = co_await std::move(sum_sender);
 
   for (auto& child : children) {
-    co_await g_registry->DestroyActor(child);
+    co_await g_registry.DestroyActor(child);
   }
 
   if (verbose) std::cout << "DEBUG: Finished level " << level << ", sum=" << sum << std::endl;
@@ -75,13 +73,7 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
 }
 
 TEST(SkynetTest, ActorRegistryCanBeInvokeInsideActorMethods) {
-  int threads = 2;
-  ex_actor::WorkSharingThreadPool thread_pool(threads);
-
-  RegistryType registry(thread_pool.GetScheduler());
-  g_registry = &registry;
-
-  auto [root] = stdexec::sync_wait(registry.CreateActor<SkynetActor>()).value();
+  auto [root] = stdexec::sync_wait(g_registry.CreateActor<SkynetActor>()).value();
 
   int depth = 4;
 

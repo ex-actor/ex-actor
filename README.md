@@ -40,7 +40,7 @@ so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` i
 #include <cassert>
 #include "ex_actor/api.h"
 
-ex_actor::ActorRegistry registry(/*thread_pool_size=*/10);
+ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
 
 struct Counter {
   int Add(int x) { return count += x; }

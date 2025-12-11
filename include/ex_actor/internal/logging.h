@@ -15,6 +15,7 @@
 #pragma once
 
 #include <iostream>
+#include <memory>
 #include <sstream>
 
 #include <rfl/to_view.hpp>
@@ -32,13 +33,13 @@
 
 namespace ex_actor::internal::logging {
 
-inline std::shared_ptr<spdlog::logger> CreateLogger(const std::string& name) {
+inline std::unique_ptr<spdlog::logger> CreateLogger(const std::string& name) {
 #ifdef _WIN32
-  auto color_sink = std::make_shared<spdlog::sinks::wincolor_stdout_sink_mt>();
+  auto color_sink = std::make_unique<spdlog::sinks::wincolor_stdout_sink_mt>();
 #else
-  auto color_sink = std::make_shared<spdlog::sinks::ansicolor_stdout_sink_mt>();
+  auto color_sink = std::make_unique<spdlog::sinks::ansicolor_stdout_sink_mt>();
 #endif
-  auto logger = std::make_shared<spdlog::logger>(name, std::move(color_sink));
+  auto logger = std::make_unique<spdlog::logger>(name, std::move(color_sink));
   logger->set_pattern("[%Y-%m-%d %T.%e%z] [%^%L%$] [%t] %v");
   return logger;
 }

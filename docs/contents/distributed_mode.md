@@ -70,7 +70,9 @@ int main(int argc, char** argv) {
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
   registry = std::make_unique<ex_actor::ActorRegistry<>>(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
-  stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
+  auto main_coroutine =
+      stdexec::starts_on(registry->GetScheduler(), MainCoroutine(this_node_id, cluster_node_info.size()));
+  stdexec::sync_wait(std::move(main_coroutine));
 }
 ```
 <!-- doc test end -->

@@ -128,7 +128,7 @@ class MessageBroker {
     ByteBufferType data;
   };
 
-  std::shared_ptr<spdlog::logger> logger_ = logging::CreateLogger("MessageBroker");
+  std::unique_ptr<spdlog::logger> logger_ = logging::CreateLogger("MessageBroker");
 
   std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;

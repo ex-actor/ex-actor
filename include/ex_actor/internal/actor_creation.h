@@ -228,7 +228,7 @@ class ActorRegistryRequestProcessor {
   }
 
  private:
-  std::shared_ptr<spdlog::logger> logger_ = logging::CreateLogger("ActorRegistryRequestProcessor");
+  std::unique_ptr<spdlog::logger> logger_ = logging::CreateLogger("ActorRegistryRequestProcessor");
   bool is_distributed_mode_ = false;
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
@@ -452,7 +452,7 @@ class ActorRegistry {
   }
 
  private:
-  std::shared_ptr<spdlog::logger> logger_ = logging::CreateLogger("ActorRegistry");
+  std::unique_ptr<spdlog::logger> logger_ = logging::CreateLogger("ActorRegistry");
   bool is_distributed_mode_;
   uint32_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;

@@ -18,7 +18,7 @@ env:
 
 jobs:
   spelling:
-    name: Spell Check with Typos
+    name: Spell check with typos
     runs-on: ubuntu-latest
     steps:
     - name: Checkout Actions Repository

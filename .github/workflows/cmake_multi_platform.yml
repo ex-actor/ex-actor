@@ -1,6 +1,6 @@
 # This starter workflow is for a CMake project running on multiple platforms. There is a different starter workflow if you just want a single platform.
 # See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-single-platform.yml
-name: CMake on multiple platforms
+name: Build and test
 
 on:
   push:
@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build_and_test:
+    name: Build and test on ${{ toJson(matrix) }}
     runs-on: ${{ matrix.toolchain.os }}
 
     strategy:

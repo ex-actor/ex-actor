@@ -49,11 +49,11 @@ exec::task<void> MainCoroutine() {
   /*
   3.1 For local actors, you can try `SendLocal`, which doesn't require the args to be serializable.
   */
-  auto sender = actor.SendLocal<&Counter::Add>(1);
+  auto task2 = actor.SendLocal<&Counter::Add>(1);
 
   /*
   4. The task is lazy executed. To execute the task and wait for the result non-blockingly,
-  use `co_await` (2). Note that the task is not copyable, so you need to use `std::move`.
+  use `co_await`. Note that the task is not copyable, so you need to use `std::move`.
   */
   auto res = co_await std::move(task);
   assert(res == 1);
@@ -78,12 +78,6 @@ int main() {
     to add a serializer for it.
   
     **If you only run ex_actor in a single process, you can use `SendLocal()` instead, which doesn't require the args to be serializable, see below.**
-
-2.  `co_await` is non-blocking, the thread will be able to do other work while waiting for the result.
-
-    In this example, the main thread has no other work to do and will still be blocked in `sync_wait`.
-    But if you schedule the coroutine in a scheduler,
-    the thread of the scheduler can do other work while waiting for the result.
 
 
 ## Send message from one actor to another

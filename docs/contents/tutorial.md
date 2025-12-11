@@ -29,7 +29,7 @@ struct Counter {
 };
 
 /*
-1. First, create a ex_actor::ActorRegistry, usually as a global variable.
+1. First, create an ex_actor::ActorRegistry, usually as a global variable.
    All methods of ActorRegistry are thread-safe.
 */
 ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);

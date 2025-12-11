@@ -29,6 +29,8 @@
 
 #include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/util.h"
+#include "spdlog/sinks/stdout_sinks.h"
+#include "spdlog/spdlog.h"
 
 namespace ex_actor {
 struct NodeInfo {
@@ -125,6 +127,8 @@ class MessageBroker {
     Identifier identifier;
     ByteBufferType data;
   };
+
+  std::shared_ptr<spdlog::logger> logger_ = logging::CreateLogger("MessageBroker");
 
   std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;

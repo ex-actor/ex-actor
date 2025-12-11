@@ -30,7 +30,7 @@ jobs:
             dir: bazel_workspace
             setup_bazel: true
 
-    name: Test ${{ matrix.name }}
+    name: Import test - ${{ matrix.name }}
 
     steps:
       - uses: actions/checkout@v4

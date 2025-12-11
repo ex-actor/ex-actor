@@ -6,7 +6,8 @@ class PingWorker {
  public:
   explicit PingWorker(std::string name) : name_(std::move(name)) {}
 
-  static PingWorker Create(std::string name) { return PingWorker(std::move(name)); }
+  // You can also put this outside the class if you don't want to modify your class
+  static PingWorker FactoryCreate(std::string name) { return PingWorker(std::move(name)); }
 
   std::string Ping(const std::string& message) { return "ack from " + name_ + ", msg got: " + message; }
 
@@ -14,26 +15,29 @@ class PingWorker {
   std::string name_;
 };
 
-EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping);
+// 1. Register the class & methods using EXA_REMOTE
+EXA_REMOTE(&PingWorker::FactoryCreate, &PingWorker::Ping);
+
+namespace {
+std::unique_ptr<ex_actor::ActorRegistry<>> registry;
+
+exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
+  uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
+
+  // 2. Specify the factory function in registry.CreateActor
+  auto ping_worker = co_await registry->CreateActor<PingWorker, &PingWorker::FactoryCreate>(
+      ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
+  std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
+  assert(ping_res == "ack from Alice, msg got: hello");
+  (void)ping_res;  // clang-tidy false positive
+}
+}  // namespace
 
 int main(int /*argc*/, char** argv) {
   uint32_t this_node_id = std::atoi(argv[1]);
-  auto coroutine = [](uint32_t this_node_id) -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-
-    std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
-                                                         {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler(),
-                                     /*this_node_id=*/this_node_id, cluster_node_info);
-
-    uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
-    auto ping_worker = co_await registry.CreateActor<PingWorker, &PingWorker::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
-    auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
-    auto ping_res = co_await std::move(ping);
-    if (ping_res != "ack from Alice, msg got: hello") {
-      EXA_THROW << "ping_res is not 'ack from Alice, msg got: hello'";
-    }
-  };
-  stdexec::sync_wait(coroutine(this_node_id));
+  std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
+                                                       {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
+  registry = std::make_unique<ex_actor::ActorRegistry<>>(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
+  stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
+  spdlog::info("main exit, node id: {}", this_node_id);
 }

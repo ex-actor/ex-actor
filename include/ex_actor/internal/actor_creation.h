@@ -33,6 +33,8 @@
 #include "ex_actor/internal/scheduler.h"
 #include "ex_actor/internal/serialization.h"
 #include "ex_actor/internal/util.h"
+#include "spdlog/sinks/stdout_sinks.h"
+#include "spdlog/spdlog.h"
 
 namespace ex_actor::internal {
 
@@ -53,13 +55,13 @@ class ActorRegistryRequestProcessor {
   exec::task<void> AsyncDestroyAllActors() {
     exec::async_scope async_scope;
     // bulk destroy actors
-    spdlog::info("Sending destroy messages to actors");
+    logger_->info("Sending destroy messages to actors");
     for (auto& [_, actor] : actor_id_to_actor_) {
       async_scope.spawn(actor->AsyncDestroy());
     }
-    spdlog::info("Waiting for actors to be destroyed");
+    logger_->info("Waiting for actors to be destroyed");
     co_await async_scope.on_empty();
-    spdlog::info("All actors destroyed");
+    logger_->info("All actors destroyed");
   }
 
   /**
@@ -226,6 +228,7 @@ class ActorRegistryRequestProcessor {
   }
 
  private:
+  std::shared_ptr<spdlog::logger> logger_ = logging::CreateLogger("ActorRegistryRequestProcessor");
   bool is_distributed_mode_ = false;
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
@@ -378,14 +381,14 @@ class ActorRegistry {
                       cluster_node_info, heartbeat_config) {}
 
   ~ActorRegistry() {
-    spdlog::info("Start to shutdown actor registry");
+    logger_->info("Start to shutdown actor registry");
     if (is_distributed_mode_) {
       message_broker_->ClusterAlignedStop();
     }
     ex::sync_wait(processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::AsyncDestroyAllActors>());
     ex::sync_wait(processor_actor_.AsyncDestroy());
     ex::sync_wait(async_scope_.on_empty());
-    spdlog::info("Actor registry shutdown completed");
+    logger_->info("Actor registry shutdown completed");
   }
 
   /**
@@ -449,6 +452,7 @@ class ActorRegistry {
   }
 
  private:
+  std::shared_ptr<spdlog::logger> logger_ = logging::CreateLogger("ActorRegistry");
   bool is_distributed_mode_;
   uint32_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;

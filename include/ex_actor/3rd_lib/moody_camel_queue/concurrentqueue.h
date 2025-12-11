@@ -133,7 +133,7 @@ static_assert(sizeof(std::thread::id) == 4 || sizeof(std::thread::id) == 8,
 typedef std::thread::id thread_id_t;
 static const thread_id_t invalid_thread_id;  // Default ctor creates invalid ID
 
-// Note we don't define a invalid_thread_id2 since std::thread::id doesn't have one; it's
+// Note we don't define an invalid_thread_id2 since std::thread::id doesn't have one; it's
 // only used if MOODYCAMEL_CPP11_THREAD_LOCAL_SUPPORTED is defined anyway, which it won't
 // be.
 static inline thread_id_t thread_id() { return std::this_thread::get_id(); }
@@ -3595,7 +3595,7 @@ class ConcurrentQueue {
           auto reusable = details::invalid_thread_id2;
           if (mainHash->entries[index].key.compare_exchange_strong(reusable, id, std::memory_order_seq_cst,
                                                                    std::memory_order_relaxed)) {
-            implicitProducerHashCount.fetch_sub(1, std::memory_order_relaxed);  // already counted as a used slot
+            implicitProducerHashCount.fetch_sub(1, std::memory_order_relaxed);  // already counted as an used slot
             mainHash->entries[index].value = producer;
             break;
           }

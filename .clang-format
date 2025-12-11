@@ -4,7 +4,7 @@ Language: Cpp
 BasedOnStyle: Google
 DerivePointerAlignment: false
 # "Regroup" automatically regroups includes. This assumes that all test files
-# end with `_test.cc`. Otherwise, the main header file for a unit test may not
+# end with `_test.cc`. Otherwise, the main header file for an unit test may not
 # be recognized correctly.
 IncludeBlocks: Regroup
 IncludeCategories:

@@ -115,7 +115,7 @@ class Coordinator {
     exec::async_scope scope;
 
     // Launch all data sources in parallel with deterministic sequential data
-    // Each source gets a unique range of sequential numbers
+    // Each source gets an unique range of sequential numbers
     for (size_t i = 0; i < sources_.size(); ++i) {
       int start_value = static_cast<int>((i * data_size_per_source) + 1);
       scope.spawn(

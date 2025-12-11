@@ -20,11 +20,28 @@
 #include <rfl/to_view.hpp>
 #include <spdlog/spdlog.h>
 
+#ifdef _WIN32
+#include <spdlog/sinks/wincolor_sink.h>
+#else
+#include <spdlog/sinks/ansicolor_sink.h>
+#endif
+
 #if __cpp_lib_stacktrace >= 202011L
 #include <stacktrace>
 #endif
 
 namespace ex_actor::internal::logging {
+
+inline std::shared_ptr<spdlog::logger> CreateLogger(const std::string& name) {
+#ifdef _WIN32
+  auto color_sink = std::make_shared<spdlog::sinks::wincolor_stdout_sink_mt>();
+#else
+  auto color_sink = std::make_shared<spdlog::sinks::ansicolor_stdout_sink_mt>();
+#endif
+  auto logger = std::make_shared<spdlog::logger>(name, std::move(color_sink));
+  logger->set_pattern("[%Y-%m-%d %T.%e%z] [%^%L%$] [%t] %v");
+  return logger;
+}
 
 inline void InstallFallbackExceptionHandler() {
   std::set_terminate([] {

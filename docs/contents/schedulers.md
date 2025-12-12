@@ -52,22 +52,19 @@ Use it when you know what you are doing.
 ```cpp
 #include "ex_actor/api.h"
 
-ex_actor::PriorityThreadPool thread_pool(1);
-ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
 struct TestActor {
   void Foo() {}
 };
 
 exec::task<void> MainCoroutine() {
+  ex_actor::PriorityThreadPool thread_pool(1);
+  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
   auto actor = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {
     .priority = 1 // smaller number means higher priority
   });
 }
 
-int main() {
-  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -87,22 +84,21 @@ If you do have some very high-priority actors, consider using the [`SchedulerUni
 #include "ex_actor/api.h"
 #include <cassert>
 
-// 1. create two thread pools
-ex_actor::WorkSharingThreadPool thread_pool1(1);
-ex_actor::WorkSharingThreadPool thread_pool2(1);
-// 2. create a scheduler union, union two schedulers into one.
-ex_actor::SchedulerUnion scheduler_union(std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {
-  thread_pool1.GetScheduler(), thread_pool2.GetScheduler()
-});
-auto scheduler = scheduler_union.GetScheduler();
-// 3. create a registry with the scheduler union
-ex_actor::ActorRegistry registry(scheduler);
-
 struct TestActor {
   uint64_t GetThreadId() { return std::hash<std::thread::id>{}(std::this_thread::get_id()); }
 };
 
 exec::task<void> MainCoroutine() {
+  // 1. create two thread pools
+  ex_actor::WorkSharingThreadPool thread_pool1(1);
+  ex_actor::WorkSharingThreadPool thread_pool2(1);
+  // 2. create a scheduler union, union two schedulers into one.
+  ex_actor::SchedulerUnion scheduler_union(std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {
+    thread_pool1.GetScheduler(), thread_pool2.GetScheduler()
+  });
+  auto scheduler = scheduler_union.GetScheduler();
+  // 3. create a registry with the scheduler union
+  ex_actor::ActorRegistry registry(scheduler);
   // 4. create two actors, specify the scheduler index in ActorConfig.
   auto actor1 = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {.scheduler_index = 0});
   auto actor2 = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {.scheduler_index = 1});
@@ -113,9 +109,7 @@ exec::task<void> MainCoroutine() {
   assert(thread_id1 != thread_id2);
 }
 
-int main() {
-  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 

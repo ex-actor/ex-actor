@@ -28,13 +28,9 @@ struct Counter {
   int count = 0;
 };
 
-/*
-1. First, create an ex_actor::ActorRegistry, usually as a global variable.
-   All methods of ActorRegistry are thread-safe.
-*/
-ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-
 exec::task<void> MainCoroutine() {
+  // 1. First, create a ex_actor::ActorRegistry.
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
 
   // 2. Use the registry to create an actor.
   ex_actor::ActorRef actor = co_await registry.CreateActor<Counter>();
@@ -64,10 +60,7 @@ exec::task<void> MainCoroutine() {
 }
 
 
-int main() {
-  // use the thread pool inside ActorRegistry to execute the coroutine.
-  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -114,11 +107,12 @@ class Proxy {
   ex_actor::ActorRef<PingWorker> actor_ref_;
 };
 
-// here we have only one thread in scheduler, but it still can finish the entire work,
-// because we use coroutine, there is no blocking wait in actor's method.
-ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
 
 exec::task<void> MainCoroutine() {
+  // here we have only one thread in scheduler, but it still can finish the entire work,
+  // because we use coroutine, there is no blocking wait in actor's method.
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+
   ex_actor::ActorRef ping_worker = co_await registry.CreateActor<PingWorker>();
 
   // 1. create a proxy actor, who has a reference to the ping_worker actor
@@ -131,9 +125,7 @@ exec::task<void> MainCoroutine() {
   assert(res == "Hi from Proxy");
 }
 
-int main() {
-  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -183,9 +175,7 @@ exec::task<void> MainCoroutine() {
   assert(res == "Where is my child? Dad, I'm here!");
 }
 
-int main() {
-  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -198,8 +188,6 @@ You can execute multiple tasks in parallel using [`when_all`](https://www.open-s
 #include <cassert>
 #include "ex_actor/api.h"
 
-ex_actor::ActorRegistry registry(/*thread_pool_size=*/3);
-
 struct Counter {
   int AddAndGet(int x) { return count += x; }
   void Add(int x) { count += x; }
@@ -208,6 +196,8 @@ struct Counter {
 };
 
 exec::task<void> MainCoroutine() {
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/3);
+
   // create multiple counters, you want to increase them in parallel
   std::vector<ex_actor::ActorRef<Counter>> counters;
   for (int i = 0; i < 3; ++i) {
@@ -251,9 +241,7 @@ exec::task<void> MainCoroutine() {
   }
 }
 
-int main() {
-  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -306,8 +294,6 @@ A more dangerous example is capturing `this` in actor's method.
 #include <iostream>
 #include "ex_actor/api.h"
 
-ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-
 struct DummyActor {
   void Ping() {}
 };
@@ -336,6 +322,7 @@ class Proxy {
 };
 
 exec::task<void> MainCoroutine() {
+  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
   ex_actor::ActorRef dummy_actor = co_await registry.CreateActor<DummyActor>();
 
   // 2. create a proxy actor, who has a reference to the dummy actor
@@ -348,9 +335,7 @@ exec::task<void> MainCoroutine() {
   co_await scope.on_empty();
 }
 
-int main() {
-  stdexec::sync_wait(stdexec::starts_on(registry.GetScheduler(), MainCoroutine()));
-}
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 

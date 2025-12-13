@@ -46,16 +46,18 @@ struct get_priority_t {
       return UINT32_MAX;
     }
   }
+  constexpr auto query(stdexec::forwarding_query_t) const noexcept -> bool { return true; }
 };
 
 struct get_scheduler_index_t {
-  constexpr uint32_t operator()(const auto& prop) const noexcept {
+  constexpr size_t operator()(const auto& prop) const noexcept {
     if constexpr (requires { prop.query(get_scheduler_index_t {}); }) {
       return prop.query(get_scheduler_index_t {});
     } else {
       return 0;
     }
   }
+  constexpr auto query(stdexec::forwarding_query_t) const noexcept -> bool { return true; }
 };
 
 constexpr inline get_priority_t get_priority {};

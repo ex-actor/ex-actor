@@ -19,7 +19,7 @@ class PingWorker {
 EXA_REMOTE(&PingWorker::FactoryCreate, &PingWorker::Ping);
 
 namespace {
-std::unique_ptr<ex_actor::ActorRegistry<>> registry;
+std::unique_ptr<ex_actor::ActorRegistry> registry;
 
 exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
   uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
@@ -37,9 +37,7 @@ int main(int /*argc*/, char** argv) {
   uint32_t this_node_id = std::atoi(argv[1]);
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
-  registry = std::make_unique<ex_actor::ActorRegistry<>>(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
-  auto main_coroutine =
-      stdexec::starts_on(registry->GetScheduler(), MainCoroutine(this_node_id, cluster_node_info.size()));
-  stdexec::sync_wait(std::move(main_coroutine));
+  registry = std::make_unique<ex_actor::ActorRegistry>(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
+  stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
   spdlog::info("main exit, node id: {}", this_node_id);
 }

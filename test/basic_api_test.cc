@@ -7,7 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
-#include "ex_actor/internal/actor_creation.h"
+#include "ex_actor/internal/actor_registry.h"
 #include "rfl/internal/has_reflector.hpp"
 
 namespace ex = stdexec;
@@ -58,7 +58,7 @@ TEST(BasicApiTest, ActorRegistryCreationWithDefaultScheduler) {
     EXPECT_EQ(getvalue_reply, 0);
     co_return;
   };
-  ex::sync_wait(stdexec::starts_on(registry.GetScheduler(), coroutine()));
+  ex::sync_wait(coroutine());
 }
 
 TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {

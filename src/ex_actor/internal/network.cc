@@ -229,7 +229,8 @@ void MessageBroker::CheckHeartbeat() {
     if (node.node_id != this_node_id_ &&
         std::chrono::steady_clock::now() - last_seen_[node.node_id] >= heartbeat_.heartbeat_timeout) {
       logger_->error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
-      std::exit(1);
+      // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
+      std::quick_exit(1);
     }
   }
 }

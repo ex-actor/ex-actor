@@ -207,8 +207,8 @@ exec::task<void> MainCoroutine() {
   // `when_all` example, handy for small number of tasks.
   auto [res1, res2, res3] = co_await stdexec::when_all(
     counters[0].Send<&Counter::AddAndGet>(1),
-    counters[1].Send<&Counter::AddAndGet>(2),
-    counters[2].Send<&Counter::AddAndGet>(3)
+    counters[1].Send<&Counter::AddAndGet>(1),
+    counters[2].Send<&Counter::AddAndGet>(1)
   );
   assert(res1 == 1);
   assert(res2 == 1);

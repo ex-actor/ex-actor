@@ -75,7 +75,12 @@ CPMAddPackage(
 )
 
 # ------------------- targets -------------------
-add_library(ex_actor STATIC src/ex_actor/internal/network.cc)
+add_library(
+  ex_actor
+  STATIC
+  src/ex_actor/internal/network.cc
+  src/ex_actor/internal/actor_registry.cc
+)
 target_include_directories(ex_actor PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

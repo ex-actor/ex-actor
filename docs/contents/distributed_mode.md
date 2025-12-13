@@ -26,7 +26,7 @@ In the `EXA_REMOTE` macro, the first argument is a factory function to create yo
 
 This is used to generate a serialization schema for network communication.
 
-Then instead of calling `registry.CreateActor<YourClass>()`, you need to call `registry.CreateActor<YourClass, &FactoryCreate>()`. Or an exception will be thrown.
+Then instead of calling `ex_actor::Spawn<YourClass>()`, you need to call `ex_actor::Spawn<YourClass, &FactoryCreate>()`. Or an exception will be thrown.
 
 ✨ **BTW, this can be simplified in C++26 using reflection, I'll implement it when C++26 is released, stay tuned!** ✨
 
@@ -54,13 +54,11 @@ class PingWorker {
 // 1. Register the class & methods using EXA_REMOTE
 EXA_REMOTE(&PingWorker::FactoryCreate, &PingWorker::Ping);
 
-std::unique_ptr<ex_actor::ActorRegistry> registry;
-
 exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
   uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
 
-  // 2. Specify the factory function in registry.CreateActor
-  auto ping_worker = co_await registry->CreateActor<PingWorker, &PingWorker::FactoryCreate>(
+  // 2. Specify the factory function in ex_actor::Spawn
+  auto ping_worker = co_await ex_actor::Spawn<PingWorker, &PingWorker::FactoryCreate>(
       ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
@@ -70,10 +68,8 @@ int main(int argc, char** argv) {
   uint32_t this_node_id = std::atoi(argv[1]);
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
-  registry = std::make_unique<ex_actor::ActorRegistry>(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
+  ex_actor::Init(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
-  // ensure the registry is destroyed before other static variables
-  std::atexit([]() { registry.reset(); });
 }
 ```
 <!-- doc test end -->

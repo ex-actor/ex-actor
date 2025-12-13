@@ -47,10 +47,10 @@ struct Counter {
 };
 
 exec::task<void> MainCoroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+  ex_actor::Init(/*thread_pool_size=*/1);
 
   // 1. Create the actor.
-  ex_actor::ActorRef actor = co_await registry.CreateActor<Counter>();
+  ex_actor::ActorRef actor = co_await ex_actor::Spawn<Counter>();
 
   // 2. Call it! It returns a `std::execution::task`.
   int res = co_await actor.Send<&Counter::Add>(1);
@@ -70,10 +70,6 @@ Actor's method can be a coroutine. The following example shows how to create an 
 #include <cassert>
 #include "ex_actor/api.h"
 
-// Here we have only one thread in scheduler, but it still can finish the entire work,
-// because we use coroutine, there is no blocking wait in actor's method.
-ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-
 class Child {
 public:
   std::string Ping() {
@@ -83,13 +79,11 @@ public:
 
 class Father {
 public:
-  // actor's method can be a coroutine.
+  // actor's method can be a coroutine
   exec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
-      // this line won't block the scheduler thread
-      child_ = co_await registry.CreateActor<Child>();
+      child_ = co_await ex_actor::Spawn<Child>();
     }
-    // this line won't either
     std::string child_res = co_await child_.Send<&Child::Ping>();
     co_return "Where is my child? " + child_res;
   }
@@ -98,9 +92,11 @@ private:
 };
 
 exec::task<void> MainCoroutine() {
-  ex_actor::ActorRef<Father> father = co_await registry.CreateActor<Father>();
-  // When the return type of your method is a std::execution sender, we'll automatically
-  // unwrap the result for you, so you don't need to `co_await` twice.
+  // Here we have only one thread in scheduler, but it still can finish the entire work
+  // because we use coroutine, there is no blocking wait in actor's method.
+  ex_actor::Init(/*thread_pool_size=*/1);
+
+  ex_actor::ActorRef<Father> father = co_await ex_actor::Spawn<Father>();
   std::string res = co_await father.Send<&Father::SpawnChildAndPing>();
   assert(res == "Where is my child? Dad, I'm here!");
 }
@@ -129,7 +125,7 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 ## Is it production-ready?
 
-The single-process mode is heavily tested in our company's production environment. While minor bugs can occur due to version divergence between open source & internal codes, the overall quality is good, feel free to use it in production.
+The single-process mode is heavily tested in our company's production environment(Linux). While minor bugs can occur due to version divergence between open source & internal codes, the overall quality is good, feel free to use it in production.
 
 The distributed mode's feature is complete and ready to be used, but isn't massively tested in production yet. Welcome to have a try and build together with us!
 

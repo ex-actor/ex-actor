@@ -168,13 +168,13 @@ def build_and_test(temp_dir: Path, verbose: bool = False):
     
     print("\n=== Building ===")
     build_cmd = [
-        "cmake", "--build", str(build_dir), "--config", "Release"
+        "cmake", "--build", str(build_dir), "--config", "Debug"
     ]
     subprocess.run(build_cmd, check=True)
     
     print("\n=== Running Tests ===")
     test_cmd = [
-        "ctest", "-C", "Release", "--output-on-failure"
+        "ctest", "-C", "Debug", "--output-on-failure"
     ]
     if verbose:
         test_cmd.append("-V")

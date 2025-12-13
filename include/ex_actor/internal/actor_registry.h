@@ -348,7 +348,6 @@ class ActorRegistryRequestProcessor {
   }
 };
 
-template <ex::scheduler Scheduler = WorkSharingThreadPool::Scheduler>
 class ActorRegistry {
  public:
   /**
@@ -361,6 +360,7 @@ class ActorRegistry {
   /**
    * @brief Construct in single-node mode, use specified scheduler.
    */
+  template <ex::scheduler Scheduler>
   explicit ActorRegistry(Scheduler scheduler)
       : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler),
                       /*this_node_id=*/0, /*cluster_node_info=*/ {}, /*heartbeat_config=*/ {}) {}
@@ -375,6 +375,7 @@ class ActorRegistry {
   /**
    * @brief Construct in distributed mode, use specified scheduler.
    */
+  template <ex::scheduler Scheduler>
   explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
                          network::HeartbeatConfig heartbeat_config = {})
       : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler), this_node_id,
@@ -445,10 +446,6 @@ class ActorRegistry {
         &ActorRegistryRequestProcessor::GetActorRefByName<UserClass>;
 
     return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(node_id, name));
-  }
-
-  Scheduler GetScheduler() const {
-    return *reinterpret_cast<const Scheduler*>(scheduler_->GetUnderlyingSchedulerPtr());
   }
 
  private:

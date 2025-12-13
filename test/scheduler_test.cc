@@ -68,6 +68,10 @@ TEST(SchedulerTest, PrioritySchedulerTest) {
   ASSERT_EQ(count, 3);
 }
 
+struct TestActor2 {
+  uint64_t GetThreadId() { return std::hash<std::thread::id> {}(std::this_thread::get_id()); }
+};
+
 TEST(SchedulerTest, SchedulerUnionTest) {
   ex_actor::WorkSharingThreadPool thread_pool1(1);
   ex_actor::WorkSharingThreadPool thread_pool2(1);
@@ -81,4 +85,18 @@ TEST(SchedulerTest, SchedulerUnionTest) {
   auto [thread_id1] = ex::sync_wait(sender1).value();
   auto [thread_id2] = ex::sync_wait(sender2).value();
   ASSERT_NE(thread_id1, thread_id2);
+
+  auto coroutine = [&]() -> exec::task<void> {
+    // create a registry with the scheduler union
+    ex_actor::ActorRegistry registry(scheduler);
+    // create two actors, specify the scheduler index in ActorConfig.
+    auto actor1 = co_await registry.CreateActor<TestActor2>(ex_actor::ActorConfig {.scheduler_index = 0});
+    auto actor2 = co_await registry.CreateActor<TestActor2>(ex_actor::ActorConfig {.scheduler_index = 1});
+
+    uint64_t thread_id1 = co_await actor1.Send<&TestActor2::GetThreadId>();
+    uint64_t thread_id2 = co_await actor2.Send<&TestActor2::GetThreadId>();
+    // the two actors should run on different thread pool
+    EXPECT_NE(thread_id1, thread_id2);
+  };
+  ex::sync_wait(coroutine());
 }

@@ -128,17 +128,26 @@ class RemoteFuncHandlerRegistrar {
       RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
     EXA_THROW_CHECK(context.actor != nullptr);
     using Sig = reflect::Signature<decltype(kMethod)>;
+    using UnwrappedType = decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type;
 
     serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args = serde::DeserializeFnArgs<kMethod>(
         context.request_buffer.Current(), context.request_buffer.RemainingSize(), context.info);
 
-    auto return_value =
-        co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
-    std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnValue {std::move(return_value)});
+    std::vector<char> serialized {};
+    if constexpr (std::is_void_v<UnwrappedType>) {
+      co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+    } else {
+      auto return_value =
+          co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+      serialized = serde::Serialize(serde::ActorMethodReturnValue {std::move(return_value)});
+    }
+
     serde::BufferWriter writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) + serialized.size()});
     // TODO optimize the copy here
     writer.WritePrimitive(serde::NetworkReplyType::kActorMethodCallReturn);
-    writer.CopyFrom(serialized.data(), serialized.size());
+    if (serialized.size() > 0) {
+      writer.CopyFrom(serialized.data(), serialized.size());
+    }
     co_return std::move(writer).MoveBufferOut();
   };
 };

@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
+#include "ex_actor/internal/remote_handler_registry.h"
 #include "spdlog/common.h"
 
 using testing::HasSubstr;
@@ -98,6 +99,13 @@ struct ProxyEchoer {
 };
 EXA_REMOTE(&ProxyEchoer::Create, &ProxyEchoer::Echo);
 
+struct RetVoid {
+  static RetVoid Create() { return {}; }
+  void ReturnVoid() {}
+  exec::task<void> CoroutineReturnVoid() { co_return; }
+};
+EXA_REMOTE(&RetVoid::Create, &RetVoid::ReturnVoid, &RetVoid::CoroutineReturnVoid);
+
 TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
   auto node_main = [](uint32_t this_node_id) -> exec::task<void> {
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
@@ -182,6 +190,12 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto error = ping_worker.Send<&PingWorker::Error>();
     EXPECT_THAT([&error]() -> void { stdexec::sync_wait(std::move(error)); },
                 Throws<std::exception>(Property(&std::exception::what, HasSubstr("error"))));
+
+    // test remote call with void as return value
+    spdlog::info("calling RetVoid::ReturnVoid and Retvoid::CoroutineReturnVoid");
+    auto empty_actor = co_await registry.CreateActor<RetVoid, &RetVoid::Create>({.node_id = remote_node_id});
+    co_await empty_actor.Send<&RetVoid::ReturnVoid>();
+    co_await empty_actor.Send<&RetVoid::CoroutineReturnVoid>();
   };
 
   std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });

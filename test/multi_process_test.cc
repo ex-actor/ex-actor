@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstdlib>
 
 #include "ex_actor/api.h"
 
@@ -40,4 +41,7 @@ int main(int /*argc*/, char** argv) {
   registry = std::make_unique<ex_actor::ActorRegistry>(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
   spdlog::info("main exit, node id: {}", this_node_id);
+
+  // ensure the registry is destroyed before other static variables
+  std::atexit([]() { registry.reset(); });
 }

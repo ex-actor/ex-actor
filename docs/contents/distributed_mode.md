@@ -35,6 +35,7 @@ Then instead of calling `registry.CreateActor<YourClass>()`, you need to call `r
 <!-- doc test start, wrapper_script: test/multi_process_test.sh -->
 ```cpp
 #include <cassert>
+#include <cstdlib>
 #include "ex_actor/api.h"
 
 class PingWorker {
@@ -71,6 +72,8 @@ int main(int argc, char** argv) {
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
   registry = std::make_unique<ex_actor::ActorRegistry>(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
+  // ensure the registry is destroyed before other static variables
+  std::atexit([]() { registry.reset(); });
 }
 ```
 <!-- doc test end -->

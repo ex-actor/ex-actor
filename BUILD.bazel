@@ -10,6 +10,7 @@ filegroup(
 cc_library(
     name = "ex_actor",
     srcs = [
+        "src/ex_actor/internal/actor_registry.cc",
         "src/ex_actor/internal/network.cc",
     ],
     hdrs = glob(["include/**/*.h"]),

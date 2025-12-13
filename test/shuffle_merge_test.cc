@@ -148,10 +148,6 @@ class Coordinator {
 
 TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
   auto coroutine = []() -> exec::task<void> {
-    // Create thread pool with multiple threads
-    ex_actor::WorkSharingThreadPool thread_pool(8);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     constexpr int kNumReducers = 4;
     constexpr int kNumWorkers = 16;
     constexpr int kNumSources = 8;
@@ -161,25 +157,25 @@ TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
     std::vector<ex_actor::ActorRef<Reducer>> reducers;
     reducers.reserve(kNumReducers);
     for (int i = 0; i < kNumReducers; ++i) {
-      reducers.push_back(co_await registry.CreateActor<Reducer>());
+      reducers.push_back(co_await ex_actor::Spawn<Reducer>());
     }
 
     // Create workers, each connected to a reducer (round-robin)
     std::vector<ex_actor::ActorRef<Worker>> workers;
     workers.reserve(kNumWorkers);
     for (int i = 0; i < kNumWorkers; ++i) {
-      workers.push_back(co_await registry.CreateActor<Worker>(reducers[i % kNumReducers]));
+      workers.push_back(co_await ex_actor::Spawn<Worker>(reducers[i % kNumReducers]));
     }
 
     // Create data sources, each with reference to all workers
     std::vector<ex_actor::ActorRef<DataSource>> sources;
     sources.reserve(kNumSources);
     for (int i = 0; i < kNumSources; ++i) {
-      sources.push_back(co_await registry.CreateActor<DataSource>(workers));
+      sources.push_back(co_await ex_actor::Spawn<DataSource>(workers));
     }
 
     // Create coordinator
-    auto coordinator = co_await registry.CreateActor<Coordinator>(sources, reducers);
+    auto coordinator = co_await ex_actor::Spawn<Coordinator>(sources, reducers);
     co_await coordinator.template Send<&Coordinator::ExecuteWorkflow>(kDataSizePerSource);
 
     // Collect and verify results
@@ -201,15 +197,13 @@ TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
 
     EXPECT_EQ(total_sum, expected_sum) << "Total sum should match formula for sum of squares from 1 to " << total_items;
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(16);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     constexpr int kNumReducers = 8;
     constexpr int kNumWorkers = 64;
     constexpr int kNumSources = 32;
@@ -221,22 +215,22 @@ TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
     std::vector<ex_actor::ActorRef<Reducer>> reducers;
     reducers.reserve(kNumReducers);
     for (int i = 0; i < kNumReducers; ++i) {
-      reducers.push_back(co_await registry.CreateActor<Reducer>());
+      reducers.push_back(co_await ex_actor::Spawn<Reducer>());
     }
 
     std::vector<ex_actor::ActorRef<Worker>> workers;
     workers.reserve(kNumWorkers);
     for (int i = 0; i < kNumWorkers; ++i) {
-      workers.push_back(co_await registry.CreateActor<Worker>(reducers[i % kNumReducers]));
+      workers.push_back(co_await ex_actor::Spawn<Worker>(reducers[i % kNumReducers]));
     }
 
     std::vector<ex_actor::ActorRef<DataSource>> sources;
     sources.reserve(kNumSources);
     for (int i = 0; i < kNumSources; ++i) {
-      sources.push_back(co_await registry.CreateActor<DataSource>(workers));
+      sources.push_back(co_await ex_actor::Spawn<DataSource>(workers));
     }
 
-    auto coordinator = co_await registry.CreateActor<Coordinator>(sources, reducers);
+    auto coordinator = co_await ex_actor::Spawn<Coordinator>(sources, reducers);
     co_await coordinator.template Send<&Coordinator::ExecuteWorkflow>(kDataSizePerSource);
 
     auto results = co_await coordinator.template Send<&Coordinator::CollectResults>();
@@ -271,16 +265,14 @@ TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
     double load_balance_ratio = static_cast<double>(max_sum) / min_sum;
     EXPECT_LT(load_balance_ratio, 2.0) << "Load imbalance too high: " << load_balance_ratio;
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
   auto coroutine = []() -> exec::task<void> {
     // Test with multiple stages of shuffle-merge (like multi-level MapReduce)
-    ex_actor::WorkSharingThreadPool thread_pool(12);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     constexpr int kNumStage1Reducers = 16;
     constexpr int kNumStage2Reducers = 4;
     constexpr int kNumWorkers = 64;
@@ -291,21 +283,21 @@ TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
     std::vector<ex_actor::ActorRef<Reducer>> stage1_reducers;
     stage1_reducers.reserve(kNumStage1Reducers);
     for (int i = 0; i < kNumStage1Reducers; ++i) {
-      stage1_reducers.push_back(co_await registry.CreateActor<Reducer>());
+      stage1_reducers.push_back(co_await ex_actor::Spawn<Reducer>());
     }
 
     // Create workers for stage 1
     std::vector<ex_actor::ActorRef<Worker>> workers;
     workers.reserve(kNumWorkers);
     for (int i = 0; i < kNumWorkers; ++i) {
-      workers.push_back(co_await registry.CreateActor<Worker>(stage1_reducers[i % kNumStage1Reducers]));
+      workers.push_back(co_await ex_actor::Spawn<Worker>(stage1_reducers[i % kNumStage1Reducers]));
     }
 
     // Create sources
     std::vector<ex_actor::ActorRef<DataSource>> sources;
     sources.reserve(kNumSources);
     for (int i = 0; i < kNumSources; ++i) {
-      sources.push_back(co_await registry.CreateActor<DataSource>(workers));
+      sources.push_back(co_await ex_actor::Spawn<DataSource>(workers));
     }
 
     // Execute stage 1
@@ -338,14 +330,14 @@ TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
     std::vector<ex_actor::ActorRef<Reducer>> stage2_reducers;
     stage2_reducers.reserve(kNumStage2Reducers);
     for (int i = 0; i < kNumStage2Reducers; ++i) {
-      stage2_reducers.push_back(co_await registry.CreateActor<Reducer>());
+      stage2_reducers.push_back(co_await ex_actor::Spawn<Reducer>());
     }
 
     // Create workers for stage 2 to aggregate stage 1 results
     std::vector<ex_actor::ActorRef<Worker>> stage2_workers;
     stage2_workers.reserve(kNumStage2Reducers);
     for (int i = 0; i < kNumStage2Reducers; ++i) {
-      stage2_workers.push_back(co_await registry.CreateActor<Worker>(stage2_reducers[i]));
+      stage2_workers.push_back(co_await ex_actor::Spawn<Worker>(stage2_reducers[i]));
     }
 
     // Distribute stage 1 results to stage 2
@@ -378,16 +370,14 @@ TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
 
     EXPECT_EQ(final_sum, expected_final_sum) << "Stage 2 final sum should be sum of squares of stage 1 results";
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ShuffleMergeTest, ComplexDependencyGraph) {
   auto coroutine = []() -> exec::task<void> {
     // Test with complex dependency graph where workers communicate with multiple reducers
-    ex_actor::WorkSharingThreadPool thread_pool(8);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     constexpr int kNumReducers = 8;
     constexpr int kNumValues = 10000;
 
@@ -395,18 +385,18 @@ TEST(ShuffleMergeTest, ComplexDependencyGraph) {
     std::vector<ex_actor::ActorRef<Reducer>> reducers;
     reducers.reserve(kNumReducers);
     for (int i = 0; i < kNumReducers; ++i) {
-      reducers.push_back(co_await registry.CreateActor<Reducer>());
+      reducers.push_back(co_await ex_actor::Spawn<Reducer>());
     }
 
     // Create workers, each connected to a different reducer
     std::vector<ex_actor::ActorRef<Worker>> workers;
     workers.reserve(kNumReducers);
     for (int i = 0; i < kNumReducers; ++i) {
-      workers.push_back(co_await registry.CreateActor<Worker>(reducers[i]));
+      workers.push_back(co_await ex_actor::Spawn<Worker>(reducers[i]));
     }
 
     // Create a single source that will distribute to all workers
-    auto source = co_await registry.CreateActor<DataSource>(workers);
+    auto source = co_await ex_actor::Spawn<DataSource>(workers);
     // Generate values 1 to kNumValues
     std::vector<int> values;
     values.reserve(kNumValues);
@@ -439,6 +429,7 @@ TEST(ShuffleMergeTest, ComplexDependencyGraph) {
     int64_t expected_sum = static_cast<int64_t>(kNumValues) * (kNumValues + 1) * (2 * kNumValues + 1) / 6;
     EXPECT_EQ(total_sum, expected_sum) << "Total sum should match mathematical formula for sum of squares";
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }

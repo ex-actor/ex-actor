@@ -1,44 +1,83 @@
 # Schedulers
 
-You can use any std::execution scheduler as ex_actor's underlying scheduler, just pass it to the `ActorRegistry` constructor.
-When you pass a scheduler to the `ActorRegistry` constructor, we'll use it as the underlying scheduler, instead of using our
+
+## Using a custom scheduler
+
+You can use any std::execution scheduler as ex_actor's underlying scheduler, just pass it to the `ex_actor::Init` function.
+When you pass a scheduler to the `ex_actor::Init` function, we'll use it as the underlying scheduler, instead of using our
 default scheduler.
 
+
+Be cautious that you should shutdown the runtime before your execution resource is destroyed, or the program will crash or hang forever, because we are still using your execution resource.
+
+<!-- doc test start -->
 ```cpp
 #include "ex_actor/api.h"
 
-ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
+int main() {
+  ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
 
-// pass the scheduler to the registry
-ex_actor::ActorRegistry registry(thread_pool.GetScheduler()); 
+  // pass the scheduler to the ex_actor::Init function
+  ex_actor::Init(thread_pool.GetScheduler());
+  
+  // IMPORTANT: shutdown the runtime before your execution resource is destroyed
+  // or the program will crash or hang forever, because we are still using your execution resource.
+  ex_actor::Shutdown();
+}
 ```
+<!-- doc test end -->
 
-We provide some handy schedulers out-of-box, check them below.
+Another way is to make your execution resource a `shared_ptr`, and pass it in the end of the `ex_actor::Init` function. So we can hold a reference to it. Then you don't need to call `ex_actor::Shutdown` explicitly.
 
-If you are interested in the details, you can read [understanding how actor is scheduled](#understanding-how-actor-is-scheduled) section to understand how ex_actor use a std::execution scheduler to schedule actors.
-
-## Work-Sharing Thread Pool
-
+<!-- doc test start -->
 ```cpp
 #include "ex_actor/api.h"
 
-ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
-ex_actor::ActorRegistry registry(thread_pool.GetScheduler()); 
+int main() {
+  auto thread_pool_shared_ptr = std::make_shared<ex_actor::WorkSharingThreadPool>(/*thread_count=*/10);
+  ex_actor::Init(thread_pool_shared_ptr->GetScheduler(), thread_pool_shared_ptr);
+}
 ```
+<!-- doc test end -->
+
+If you are interested in how actor interacts with the schedulers, you can read [understanding how actor is scheduled](#understanding-how-actor-is-scheduled) section.
+
+## ex_actor Bundled Schedulers
+
+We provide some handy schedulers out-of-box.
+
+### Work-Sharing Thread Pool
+
+<!-- doc test start -->
+```cpp
+#include "ex_actor/api.h"
+
+int main() {
+  ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
+  ex_actor::Init(thread_pool.GetScheduler());
+  ex_actor::Shutdown();
+}
+```
+<!-- doc test end -->
 
 This scheduler is suitable for most cases. It's a classic thread pool with a globally shared lock-free task queue.
 
 It's also the default scheduler we use when you don't pass a scheduler to the `ActorRegistry` constructor.
 
 
-## Work-Stealing Thread Pool
+### Work-Stealing Thread Pool
 
+<!-- doc test start -->
 ```cpp
 #include "ex_actor/api.h"
 
-ex_actor::WorkStealingThreadPool thread_pool(/*thread_count=*/10);
-ex_actor::ActorRegistry registry(thread_pool.GetScheduler()); 
+int main() {
+  ex_actor::WorkStealingThreadPool thread_pool(/*thread_count=*/10);
+  ex_actor::Init(thread_pool.GetScheduler());
+  ex_actor::Shutdown();
+}
 ```
+<!-- doc test end -->
 
 It's an alias of `stdexec`'s `exec::static_thread_pool`, which is a sophisticated [work-stealing-style](https://en.wikipedia.org/wiki/Work_stealing) thread pool.
 Every thread has a LIFO local task queue, and when a thread is idle, it will steal tasks from other threads.
@@ -46,7 +85,7 @@ Every thread has a LIFO local task queue, and when a thread is idle, it will ste
 It has better performance in some cases. But the task stealing overhead can be non-negligible in some low-latency scenarios.
 Use it when you know what you are doing.
 
-## Priority Thread Pool
+### Priority Thread Pool
 
 <!-- doc test start -->
 ```cpp
@@ -58,10 +97,11 @@ struct TestActor {
 
 exec::task<void> MainCoroutine() {
   ex_actor::PriorityThreadPool thread_pool(1);
-  ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-  auto actor = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {
+  ex_actor::Init(thread_pool.GetScheduler());
+  auto actor = co_await ex_actor::Spawn<TestActor>(ex_actor::ActorConfig {
     .priority = 1 // smaller number means higher priority
   });
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }
@@ -77,7 +117,7 @@ In practice it's used to prioritize downstream actors in some high-throughput sy
 Even though this scheduler takes priority into account, the actor scheduling is still cooperative. Which means a thread can't be interrupted and switch to higher priority actors when executing an actor's message.
 If you do have some very high-priority actors, consider using the [`SchedulerUnion`](#scheduler-union) scheduler to put them in a dedicated thread pool.
 
-## Scheduler Union
+### Scheduler Union
 
 <!-- doc test start -->
 ```cpp
@@ -98,15 +138,16 @@ exec::task<void> MainCoroutine() {
   });
   auto scheduler = scheduler_union.GetScheduler();
   // 3. create a registry with the scheduler union
-  ex_actor::ActorRegistry registry(scheduler);
+  ex_actor::Init(scheduler);
   // 4. create two actors, specify the scheduler index in ActorConfig.
-  auto actor1 = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {.scheduler_index = 0});
-  auto actor2 = co_await registry.CreateActor<TestActor>(ex_actor::ActorConfig {.scheduler_index = 1});
+  auto actor1 = co_await ex_actor::Spawn<TestActor>(ex_actor::ActorConfig {.scheduler_index = 0});
+  auto actor2 = co_await ex_actor::Spawn<TestActor>(ex_actor::ActorConfig {.scheduler_index = 1});
 
   uint64_t thread_id1 = co_await actor1.Send<&TestActor::GetThreadId>();
   uint64_t thread_id2 = co_await actor2.Send<&TestActor::GetThreadId>();
   // the two actors should run on different thread pool
   assert(thread_id1 != thread_id2);
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }

@@ -29,11 +29,11 @@ struct Counter {
 };
 
 exec::task<void> MainCoroutine() {
-  // 1. First, create a ex_actor::ActorRegistry.
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+  // 1. First, initialize ex_actor runtime.
+  ex_actor::Init(/*thread_pool_size=*/1);
 
-  // 2. Use the registry to create an actor.
-  ex_actor::ActorRef actor = co_await registry.CreateActor<Counter>();
+  // 2. Create an actor.
+  ex_actor::ActorRef actor = co_await ex_actor::Spawn<Counter>();
   
   /*
   3. Everything is setup, you can call the actor's method now using `actor_ref.Send`.
@@ -109,14 +109,14 @@ class Proxy {
 
 
 exec::task<void> MainCoroutine() {
-  // here we have only one thread in scheduler, but it still can finish the entire work,
+  // here we have only one thread in scheduler, but it still can finish the entire work
   // because we use coroutine, there is no blocking wait in actor's method.
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+  ex_actor::Init(/*thread_pool_size=*/1);
 
-  ex_actor::ActorRef ping_worker = co_await registry.CreateActor<PingWorker>();
+  ex_actor::ActorRef ping_worker = co_await ex_actor::Spawn<PingWorker>();
 
   // 1. create a proxy actor, who has a reference to the ping_worker actor
-  ex_actor::ActorRef proxy = co_await registry.CreateActor<Proxy>(ping_worker);
+  ex_actor::ActorRef proxy = co_await ex_actor::Spawn<Proxy>(ping_worker);
 
   // 2. call through the proxy actor.
   // When the return type of your method is a std::execution sender, we'll automatically
@@ -140,10 +140,6 @@ All APIs of ActorRegistry are thread-safe.
 #include <cassert>
 #include "ex_actor/api.h"
 
-// Again, here we have only one thread in scheduler, but it still can finish the entire work,
-// because we use coroutine, there is no blocking wait in actor's method.
-ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-
 class Child {
 public:
   std::string Ping() {
@@ -157,7 +153,7 @@ public:
   exec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
       // this line won't block the scheduler thread
-      child_ = co_await registry.CreateActor<Child>();
+      child_ = co_await ex_actor::Spawn<Child>();
     }
     // this line won't either
     std::string child_res = co_await child_.Send<&Child::Ping>();
@@ -168,7 +164,11 @@ private:
 };
 
 exec::task<void> MainCoroutine() {
-  ex_actor::ActorRef<Father> father = co_await registry.CreateActor<Father>();
+  // Again, here we have only one thread in scheduler, but it still can finish the entire work,
+  // because we use coroutine, there is no blocking wait in actor's method.
+  ex_actor::Init(/*thread_pool_size=*/1);
+
+  ex_actor::ActorRef<Father> father = co_await ex_actor::Spawn<Father>();
   // When the return type of your method is a std::execution sender, we'll automatically
   // unwrap the result for you, so you don't need to `co_await` twice.
   std::string res = co_await father.Send<&Father::SpawnChildAndPing>();
@@ -196,12 +196,12 @@ struct Counter {
 };
 
 exec::task<void> MainCoroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/3);
+  ex_actor::Init(/*thread_pool_size=*/3);
 
   // create multiple counters, you want to increase them in parallel
   std::vector<ex_actor::ActorRef<Counter>> counters;
   for (int i = 0; i < 3; ++i) {
-    counters.push_back(co_await registry.CreateActor<Counter>());
+    counters.push_back(co_await ex_actor::Spawn<Counter>());
   }
 
   // `when_all` example, handy for small number of tasks.
@@ -263,8 +263,8 @@ struct Counter {
 };
 
 int main() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  auto [actor] = stdexec::sync_wait(registry.CreateActor<Counter>()).value();
+  ex_actor::Init(/*thread_pool_size=*/2);
+  auto [actor] = stdexec::sync_wait(ex_actor::Spawn<Counter>()).value();
 
   // Sender adapter style
   int local_var = 1;
@@ -322,11 +322,11 @@ class Proxy {
 };
 
 exec::task<void> MainCoroutine() {
-  ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
-  ex_actor::ActorRef dummy_actor = co_await registry.CreateActor<DummyActor>();
+  ex_actor::Init(/*thread_pool_size=*/2);
+  ex_actor::ActorRef dummy_actor = co_await ex_actor::Spawn<DummyActor>();
 
   // 2. create a proxy actor, who has a reference to the dummy actor
-  ex_actor::ActorRef proxy = co_await registry.CreateActor<Proxy>(dummy_actor);
+  ex_actor::ActorRef proxy = co_await ex_actor::Spawn<Proxy>(dummy_actor);
 
   // 3. call through the proxy actor
   exec::async_scope scope;

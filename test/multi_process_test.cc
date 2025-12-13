@@ -20,13 +20,11 @@ class PingWorker {
 EXA_REMOTE(&PingWorker::FactoryCreate, &PingWorker::Ping);
 
 namespace {
-std::unique_ptr<ex_actor::ActorRegistry> registry;
-
 exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
   uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
 
   // 2. Specify the factory function in registry.CreateActor
-  auto ping_worker = co_await registry->CreateActor<PingWorker, &PingWorker::FactoryCreate>(
+  auto ping_worker = co_await ex_actor::Spawn<PingWorker, &PingWorker::FactoryCreate>(
       ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
@@ -35,13 +33,13 @@ exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
 }  // namespace
 
 int main(int /*argc*/, char** argv) {
+  auto shared_pool = std::make_shared<ex_actor::WorkSharingThreadPool>(4);
+  auto dummy_resource = std::make_shared<int>(0);
   uint32_t this_node_id = std::atoi(argv[1]);
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
-  registry = std::make_unique<ex_actor::ActorRegistry>(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
+  ex_actor::Init(shared_pool->GetScheduler(), this_node_id, cluster_node_info, shared_pool, dummy_resource,
+                 dummy_resource, dummy_resource, dummy_resource);
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
   spdlog::info("main exit, node id: {}", this_node_id);
-
-  // ensure the registry is destroyed before other static variables
-  std::atexit([]() { registry.reset(); });
 }

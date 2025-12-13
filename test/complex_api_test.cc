@@ -1,6 +1,5 @@
 #include <cmath>
 #include <map>
-#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -380,10 +379,7 @@ class Distributor {
 
 TEST(ComplexApiTest, EmptyConstructorActor) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<EmptyActor>();
+    auto actor = co_await ex_actor::Spawn<EmptyActor>();
 
     int initial = co_await actor.template Send<&EmptyActor::GetCounter>();
     EXPECT_EQ(initial, 0);
@@ -399,16 +395,14 @@ TEST(ComplexApiTest, EmptyConstructorActor) {
     int final_count = co_await actor.template Send<&EmptyActor::GetCounter>();
     EXPECT_EQ(final_count, 7);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, SingleParameterConstructor) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<SingleParamActor>("TestActor");
+    auto actor = co_await ex_actor::Spawn<SingleParamActor>("TestActor");
 
     std::string name = co_await actor.template Send<&SingleParamActor::GetName>();
     EXPECT_EQ(name, "TestActor");
@@ -421,16 +415,14 @@ TEST(ComplexApiTest, SingleParameterConstructor) {
     std::string new_name = co_await actor.template Send<&SingleParamActor::GetName>();
     EXPECT_EQ(new_name, "TestActor_Suffix");
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MultipleParametersConstructor) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<MultiParamActor>(123, "MultiActor", 2.5, true);
+    auto actor = co_await ex_actor::Spawn<MultiParamActor>(123, "MultiActor", 2.5, true);
 
     int id = co_await actor.template Send<&MultiParamActor::GetId>();
     EXPECT_EQ(id, 123);
@@ -455,17 +447,15 @@ TEST(ComplexApiTest, MultipleParametersConstructor) {
     bool new_enabled = co_await actor.template Send<&MultiParamActor::IsEnabled>();
     EXPECT_FALSE(new_enabled);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MoveOnlyConstructorParameters) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     auto initial_data = std::make_unique<std::string>("Initial");
-    auto actor = co_await registry.CreateActor<MoveOnlyConstructorActor>(std::move(initial_data));
+    auto actor = co_await ex_actor::Spawn<MoveOnlyConstructorActor>(std::move(initial_data));
 
     std::string data = co_await actor.template Send<&MoveOnlyConstructorActor::GetData>();
     EXPECT_EQ(data, "Initial");
@@ -477,21 +467,19 @@ TEST(ComplexApiTest, MoveOnlyConstructorParameters) {
     std::string updated_data = co_await actor.template Send<&MoveOnlyConstructorActor::GetData>();
     EXPECT_EQ(updated_data, "Updated");
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, ComplexContainerConstructor) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     std::vector<int> ids = {1, 2, 3, 4, 5};
     std::map<std::string, int> lookup = {{"a", 10}, {"b", 20}, {"c", 30}};
     std::optional<std::string> description = "Test Actor";
 
     auto actor =
-        co_await registry.CreateActor<ComplexContainerActor>(std::move(ids), std::move(lookup), std::move(description));
+        co_await ex_actor::Spawn<ComplexContainerActor>(std::move(ids), std::move(lookup), std::move(description));
     auto retrieved_ids = co_await actor.template Send<&ComplexContainerActor::GetIds>();
     EXPECT_EQ(retrieved_ids.size(), 5);
     EXPECT_EQ(retrieved_ids[0], 1);
@@ -524,16 +512,14 @@ TEST(ComplexApiTest, ComplexContainerConstructor) {
     int last_id = co_await actor.template Send<&ComplexContainerActor::GetIdAt>(5);
     EXPECT_EQ(last_id, 6);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, VariousArgumentTypes) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<VariousArgsActor>();
+    auto actor = co_await ex_actor::Spawn<VariousArgsActor>();
     // No arguments
     int state = co_await actor.template Send<&VariousArgsActor::GetState>();
     EXPECT_EQ(state, 0);
@@ -586,16 +572,14 @@ TEST(ComplexApiTest, VariousArgumentTypes) {
     size_t nested_size = co_await actor.template Send<&VariousArgsActor::GetNestedDataSize>();
     EXPECT_EQ(nested_size, 6);  // 2 + 3 + 1
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MoveOnlyArguments) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<MoveOnlyArgsActor>();
+    auto actor = co_await ex_actor::Spawn<MoveOnlyArgsActor>();
     // unique_ptr<int>
     auto int_ptr = std::make_unique<int>(42);
     co_await actor.template Send<&MoveOnlyArgsActor::StoreIntPtr>(std::move(int_ptr));
@@ -630,16 +614,14 @@ TEST(ComplexApiTest, MoveOnlyArguments) {
     size_t map_size = co_await actor.template Send<&MoveOnlyArgsActor::GetMapSize>();
     EXPECT_EQ(map_size, 3);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, ReferenceReturnTypes) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<ReferenceReturnActor>("Initial");
+    auto actor = co_await ex_actor::Spawn<ReferenceReturnActor>("Initial");
     std::string data = co_await actor.template Send<&ReferenceReturnActor::GetDataCopy>();
     EXPECT_EQ(data, "Initial");
 
@@ -654,17 +636,15 @@ TEST(ComplexApiTest, ReferenceReturnTypes) {
     size_t size = co_await actor.template Send<&ReferenceReturnActor::GetDataSize>();
     EXPECT_EQ(size, 8);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, ActorWithActorRefMember) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto child = co_await registry.CreateActor<ChildActor>();
-    auto parent = co_await registry.CreateActor<ParentActor>(child);
+    auto child = co_await ex_actor::Spawn<ChildActor>();
+    auto parent = co_await ex_actor::Spawn<ParentActor>(child);
     // Direct access to child
     co_await child.template Send<&ChildActor::IncrementCounter>();
     int count = co_await child.template Send<&ChildActor::GetCounter>();
@@ -679,20 +659,18 @@ TEST(ComplexApiTest, ActorWithActorRefMember) {
     count = co_await parent.template Send<&ParentActor::GetChildCounter>();
     EXPECT_EQ(count, 12);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, ActorWithMultipleActorRefMembers) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+    auto acc1 = co_await ex_actor::Spawn<Accumulator>();
+    auto acc2 = co_await ex_actor::Spawn<Accumulator>();
+    auto acc3 = co_await ex_actor::Spawn<Accumulator>();
 
-    auto acc1 = co_await registry.CreateActor<Accumulator>();
-    auto acc2 = co_await registry.CreateActor<Accumulator>();
-    auto acc3 = co_await registry.CreateActor<Accumulator>();
-
-    auto distributor = co_await registry.CreateActor<Distributor>(acc1, acc2, acc3);
+    auto distributor = co_await ex_actor::Spawn<Distributor>(acc1, acc2, acc3);
     // Distribute values
     co_await distributor.template Send<&Distributor::DistributeValue>(10);
     co_await distributor.template Send<&Distributor::DistributeValue>(20);
@@ -716,26 +694,24 @@ TEST(ComplexApiTest, ActorWithMultipleActorRefMembers) {
     EXPECT_EQ(sum2, 60);
     EXPECT_EQ(sum3, 60);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MixedComplexScenario) {
   auto coroutine = []() -> exec::task<void> {
     // Test combining multiple complex features
-    ex_actor::WorkSharingThreadPool thread_pool(8);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     // Create a complex hierarchy
-    auto acc1 = co_await registry.CreateActor<Accumulator>();
-    auto acc2 = co_await registry.CreateActor<Accumulator>();
-    auto acc3 = co_await registry.CreateActor<Accumulator>();
+    auto acc1 = co_await ex_actor::Spawn<Accumulator>();
+    auto acc2 = co_await ex_actor::Spawn<Accumulator>();
+    auto acc3 = co_await ex_actor::Spawn<Accumulator>();
 
-    auto distributor = co_await registry.CreateActor<Distributor>(acc1, acc2, acc3);
+    auto distributor = co_await ex_actor::Spawn<Distributor>(acc1, acc2, acc3);
 
-    auto multi_actor = co_await registry.CreateActor<MultiParamActor>(1, "Complex", 1.5, true);
-    auto various_actor = co_await registry.CreateActor<VariousArgsActor>();
-    auto move_actor = co_await registry.CreateActor<MoveOnlyArgsActor>();
+    auto multi_actor = co_await ex_actor::Spawn<MultiParamActor>(1, "Complex", 1.5, true);
+    auto various_actor = co_await ex_actor::Spawn<VariousArgsActor>();
+    auto move_actor = co_await ex_actor::Spawn<MoveOnlyArgsActor>();
     // Work with distributor
     co_await distributor.template Send<&Distributor::DistributeValue>(100);
     auto sums = co_await distributor.template Send<&Distributor::CollectSums>();
@@ -760,8 +736,9 @@ TEST(ComplexApiTest, MixedComplexScenario) {
     std::string stored = co_await move_actor.template Send<&MoveOnlyArgsActor::GetStoredString>();
     EXPECT_EQ(stored, "Complex Test");
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 // ===========================
@@ -998,10 +975,7 @@ class NestedStructActor {
 
 TEST(ComplexApiTest, StructArguments) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<StructActor>();
+    auto actor = co_await ex_actor::Spawn<StructActor>();
     // Test Point struct
     Point pt {.x = 3.0, .y = 4.0};
     co_await actor.template Send<&StructActor::SetPoint>(pt);
@@ -1043,15 +1017,13 @@ TEST(ComplexApiTest, StructArguments) {
     double sum = co_await actor.template Send<&StructActor::SumPacketValues>();
     EXPECT_DOUBLE_EQ(sum, 11.0);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, StructInConstructor) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
     Configuration config;
     config.app_name = "TestApp";
     config.version = 2;
@@ -1059,7 +1031,7 @@ TEST(ComplexApiTest, StructInConstructor) {
     config.features = {"feature1", "feature2", "feature3"};
     config.is_production = true;
 
-    auto actor = co_await registry.CreateActor<StructConstructorActor>(std::move(config));
+    auto actor = co_await ex_actor::Spawn<StructConstructorActor>(std::move(config));
     Configuration retrieved = co_await actor.template Send<&StructConstructorActor::GetConfig>();
     EXPECT_EQ(retrieved.app_name, "TestApp");
     EXPECT_EQ(retrieved.version, 2);
@@ -1097,16 +1069,14 @@ TEST(ComplexApiTest, StructInConstructor) {
     bool is_prod_after = co_await actor.template Send<&StructConstructorActor::IsProduction>();
     EXPECT_FALSE(is_prod_after);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MultipleStructArguments) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<MultiStructActor>();
+    auto actor = co_await ex_actor::Spawn<MultiStructActor>();
     // Test with Point and Person
     Point pt {.x = 10.0, .y = 20.0};
     Person person {.name = "Bob", .age = 25, .email = "bob@example.com"};
@@ -1139,16 +1109,14 @@ TEST(ComplexApiTest, MultipleStructArguments) {
     bool has_data = co_await actor.template Send<&MultiStructActor::HasData>();
     EXPECT_TRUE(has_data);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MoveOnlyStructArgument) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<MoveOnlyStructActor>();
+    auto actor = co_await ex_actor::Spawn<MoveOnlyStructActor>();
     // Create move-only data
     auto content = std::make_unique<std::string>("Test Content");
     auto numbers = std::make_unique<std::vector<int>>(std::vector<int> {10, 20, 30, 40, 50});
@@ -1172,16 +1140,14 @@ TEST(ComplexApiTest, MoveOnlyStructArgument) {
     bool has_data = co_await actor.template Send<&MoveOnlyStructActor::HasData>();
     EXPECT_TRUE(has_data);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, NestedStructArgument) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::WorkSharingThreadPool thread_pool(4);
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-
-    auto actor = co_await registry.CreateActor<NestedStructActor>();
+    auto actor = co_await ex_actor::Spawn<NestedStructActor>();
     // Create nested struct
     Employee emp;
     emp.person_info = {.name = "Charlie", .age = 35, .email = "charlie@example.com"};
@@ -1214,6 +1180,7 @@ TEST(ComplexApiTest, NestedStructArgument) {
     int age = co_await actor.template Send<&NestedStructActor::GetAge>();
     EXPECT_EQ(age, 35);
   };
-
+  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }

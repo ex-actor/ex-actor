@@ -62,7 +62,7 @@ int main() {
 
 This scheduler is suitable for most cases. It's a classic thread pool with a globally shared lock-free task queue.
 
-It's also the default scheduler we use when you don't pass a scheduler to the `ActorRegistry` constructor.
+It's also the default scheduler we use when you don't pass a scheduler to the `ex_actor::Init`.
 
 
 ### Work-Stealing Thread Pool
@@ -136,9 +136,8 @@ exec::task<void> MainCoroutine() {
   ex_actor::SchedulerUnion scheduler_union(std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {
     thread_pool1.GetScheduler(), thread_pool2.GetScheduler()
   });
-  auto scheduler = scheduler_union.GetScheduler();
-  // 3. create a registry with the scheduler union
-  ex_actor::Init(scheduler);
+  // 3. initialize the runtime with the scheduler union
+  ex_actor::Init(scheduler_union.GetScheduler());
   // 4. create two actors, specify the scheduler index in ActorConfig.
   auto actor1 = co_await ex_actor::Spawn<TestActor>(ex_actor::ActorConfig {.scheduler_index = 0});
   auto actor2 = co_await ex_actor::Spawn<TestActor>(ex_actor::ActorConfig {.scheduler_index = 1});

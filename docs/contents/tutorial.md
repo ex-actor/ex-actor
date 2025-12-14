@@ -132,9 +132,6 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Create actors inside an actor
 
-If you want to create an actor inside an actor, it will be handy to make ActorRegistry a global variable.
-All APIs of ActorRegistry are thread-safe.
-
 <!-- doc test start -->
 ```cpp
 #include <cassert>
@@ -345,7 +342,7 @@ To understand why the callback of ex::then runs on the target actor's thread, wh
 
 In `std::execution`, scheduler's switch should be explicit - by calling `continue_on` explicitly.
 
-An actor itself is a scheduler (not the scheduler passed to the `ActorRegistry` constructor, but **actor itself**), when you call its method, you schedule a task on it.
+An actor itself is a scheduler (not the scheduler inside the runtime which used to shceudle the actor, but **actor itself**), when you call its method, you schedule a task on it.
 So all the callbacks will run on the actor's thread.
 
 But in a coroutine, the code **looks like** they are executing in the same thread.

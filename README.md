@@ -12,7 +12,7 @@
 
 ![image](assets/ex_actor_banner.jpg)
 
-**ex_actor** is a modern C++ [actor framework](https://www.youtube.com/watch?v=ELwEdb_pD0k) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
+**ex_actor** is a modern C++ [actor framework](#learning-resources) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
 This framework **turns your C++ class into a stateful async service** (so called actor) by one line of code. All method calls to it will be queued and executed in serial, so in your class you don't need any lock, just focus on your logic.
 

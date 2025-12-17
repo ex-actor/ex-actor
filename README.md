@@ -12,7 +12,7 @@
 
 ![image](assets/ex_actor_banner.jpg)
 
-**ex_actor** is a modern C++ [actor framework](#learning-resources) based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
+**ex_actor** is a modern C++ actor framework based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
 This framework **turns your C++ class into a stateful async service** (so called actor) by one line of code. All method calls to it will be queued and executed in serial, so in your class you don't need any lock, just focus on your logic.
 
@@ -111,9 +111,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 See ⚙️[Installation](https://ex-actor.github.io/ex-actor/installation/) page in our documentation.
 
-## Learning Resources
-
-Theoretical learning resources for newbies to actor model:
+## Learning Resources for Actor Model
 
  - [Actor Model Explained (Video)](https://www.youtube.com/watch?v=ELwEdb_pD0k)
  - [Wikipedia - Actor Model](https://en.wikipedia.org/wiki/Actor_model)

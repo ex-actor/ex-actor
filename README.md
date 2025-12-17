@@ -111,6 +111,13 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 See ⚙️[Installation](https://ex-actor.github.io/ex-actor/installation/) page in our documentation.
 
+## Learning Resources
+
+Theoretical learning resources for newbies to actor model:
+
+ - [Actor Model Explained (Video)](https://www.youtube.com/watch?v=ELwEdb_pD0k)
+ - [Wikipedia - Actor Model](https://en.wikipedia.org/wiki/Actor_model)
+
 # FAQs
 
 ## `std::execution` is in C++26, why does it only require C++20?
@@ -128,13 +135,6 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 The single-process mode is heavily tested in our company's production environment(Linux). While minor bugs can occur due to version divergence between open source & internal codes, the overall quality is good, feel free to use it in production.
 
 The distributed mode's feature is complete and ready to be used, but isn't massively tested in production yet. Welcome to have a try and build together with us!
-
-## Learning Resources
-
-Theoretical learning resources for newbies to actor model:
-
- - [Actor Model Explained (Video)](https://www.youtube.com/watch?v=ELwEdb_pD0k)
- - [Wikipedia - Actor Model](https://en.wikipedia.org/wiki/Actor_model)
 
 ## The Team Behind `ex_actor`
 

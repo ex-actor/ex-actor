@@ -29,10 +29,15 @@ struct Counter {
 };
 
 exec::task<void> MainCoroutine() {
-  // 1. First, initialize ex_actor runtime.
+  /*
+  1. First, initialize ex_actor runtime.
+  */
   ex_actor::Init(/*thread_pool_size=*/1);
 
-  // 2. Create an actor.
+  /*
+  2. Create an actor, returns an `ActorRef` object.
+  this object can be copied and passed between actors.
+  */
   ex_actor::ActorRef actor = co_await ex_actor::Spawn<Counter>();
   
   /*
@@ -72,65 +77,11 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
   
     **If you only run ex_actor in a single process, you can use `SendLocal()` instead, which doesn't require the args to be serializable, see below.**
 
+## Create and call an actor inside another actor
 
-## Send message from one actor to another
+When you want to create or call an actor inside another actor. You should make the method a coroutine.
 
-
-When calling an actor's method from another actor, you should make the method a coroutine.
-
-This example shows how to call an actor's method from another actor without blocking the scheduler thread.
-
-
-<!-- doc test start -->
-```cpp
-#include <cassert>
-#include <iostream>
-#include "ex_actor/api.h"
-
-class PingWorker {
- public:
-  std::string Ping() { return "Hi"; }
-};
-
-class Proxy {
- public:
-  explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
-  
-  // Actor's method can be a coroutine.
-  exec::task<std::string> ProxyPing() {
-    // This line won't block the scheduler thread.
-    std::string ping_res = co_await actor_ref_.template Send<&PingWorker::Ping>();
-    co_return ping_res + " from Proxy";
-  }
-
- private:
-  ex_actor::ActorRef<PingWorker> actor_ref_;
-};
-
-
-exec::task<void> MainCoroutine() {
-  // here we have only one thread in scheduler, but it still can finish the entire work
-  // because we use coroutine, there is no blocking wait in actor's method.
-  ex_actor::Init(/*thread_pool_size=*/1);
-
-  ex_actor::ActorRef ping_worker = co_await ex_actor::Spawn<PingWorker>();
-
-  // 1. create a proxy actor, who has a reference to the ping_worker actor
-  ex_actor::ActorRef proxy = co_await ex_actor::Spawn<Proxy>(ping_worker);
-
-  // 2. call through the proxy actor.
-  // When the return type of your method is a std::execution sender, we'll automatically
-  // unwrap the result for you, so you don't need to `co_await` twice.
-  std::string res = co_await proxy.Send<&Proxy::ProxyPing>();
-  assert(res == "Hi from Proxy");
-}
-
-int main() { stdexec::sync_wait(MainCoroutine()); }
-```
-<!-- doc test end -->
-
-
-## Create actors inside an actor
+The following example shows how to create an actor inside an actor and call it without blocking the scheduler thread.
 
 <!-- doc test start -->
 ```cpp
@@ -157,11 +108,12 @@ public:
     co_return "Where is my child? " + child_res;
   }
 private:
+  // ActorRef is default-constructible, you can create an empty ActorRef and set it later.
   ex_actor::ActorRef<Child> child_;
 };
 
 exec::task<void> MainCoroutine() {
-  // Again, here we have only one thread in scheduler, but it still can finish the entire work,
+  // Here we have only one thread in scheduler, but it still can finish the entire work,
   // because we use coroutine, there is no blocking wait in actor's method.
   ex_actor::Init(/*thread_pool_size=*/1);
 
@@ -175,6 +127,94 @@ exec::task<void> MainCoroutine() {
 int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
+
+## Pass ActorRef between actors
+
+ActorRef is copyable and can be passed freely between actors.
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include <string>
+#include "ex_actor/api.h"
+
+class PingWorker {
+ public:
+  std::string Ping() { return "Hi"; }
+};
+
+class Proxy {
+ public:
+  explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
+
+  // Actor's method can be a coroutine.
+  exec::task<std::string> ProxyPing() {
+    // This line won't block the scheduler thread.
+    std::string ping_res = co_await actor_ref_.template Send<&PingWorker::Ping>();
+    co_return ping_res + " from Proxy";
+  }
+
+ private:
+  ex_actor::ActorRef<PingWorker> actor_ref_;
+};
+
+
+exec::task<void> MainCoroutine() {
+  ex_actor::Init(/*thread_pool_size=*/1);
+
+  ex_actor::ActorRef ping_worker = co_await ex_actor::Spawn<PingWorker>();
+
+  // 1. create a proxy actor, who has a reference to the ping_worker actor
+  ex_actor::ActorRef proxy = co_await ex_actor::Spawn<Proxy>(ping_worker);
+
+  // 2. call through the proxy actor.
+  std::string res = co_await proxy.Send<&Proxy::ProxyPing>();
+  assert(res == "Hi from Proxy");
+}
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
+```
+<!-- doc test end -->
+
+
+## Trigger task without waiting for the result immediately
+
+You can use [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.html) to trigger a task without waiting for the result immediately.
+
+<!-- doc test start -->
+```cpp
+#include <cassert>
+#include "ex_actor/api.h"
+
+struct Counter {
+  int AddAndGet(int x) { return count += x; }
+  void Add(int x) { count += x; }
+  int GetValue() const { return count; }
+  int count = 0;
+};
+
+exec::task<void> MainCoroutine() {
+  ex_actor::Init(/*thread_pool_size=*/1);
+  ex_actor::ActorRef actor = co_await ex_actor::Spawn<Counter>();
+  exec::async_scope scope;
+
+  // async_scope.spawn only accepts void tasks.
+  scope.spawn(actor.Send<&Counter::Add>(1));
+  
+  // for non-void tasks, use spawn_future to get a future-like object.
+  auto future = scope.spawn_future(actor.Send<&Counter::AddAndGet>(1));
+  int res = co_await std::move(future);
+  assert(res == 2);
+  
+  // you must wait for all task done before destroying the scope,
+  // or an exception will be thrown.
+  co_await scope.on_empty();
+}
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
+```
+<!-- doc test end -->
+
 
 ## Execute multiple tasks in parallel
 
@@ -201,7 +241,9 @@ exec::task<void> MainCoroutine() {
     counters.push_back(co_await ex_actor::Spawn<Counter>());
   }
 
-  // `when_all` example, handy for small number of tasks.
+  /*
+  1. `when_all` example, handy for small number of tasks.
+  */
   auto [res1, res2, res3] = co_await stdexec::when_all(
     counters[0].Send<&Counter::AddAndGet>(1),
     counters[1].Send<&Counter::AddAndGet>(1),
@@ -211,10 +253,26 @@ exec::task<void> MainCoroutine() {
   assert(res2 == 1);
   assert(res3 == 1);
 
-  // for large number of tasks where you need a loop, use `async_scope`.
+  /*
+  2. for large number of tasks where you need a loop, use `async_scope`.
+  */
   exec::async_scope scope;
 
-  // `async_scope.spawn_future` example, which returns a future-like object which you can wait for later.
+  /*
+  2.1 async_scope.spawn example, which only accepts void tasks.
+  */
+  for (int i = 0; i < counters.size(); ++i) {
+    scope.spawn(counters[i].Send<&Counter::Add>(1));
+  }
+  co_await scope.on_empty();
+  for (int i = 0; i < counters.size(); ++i) {
+    int value = co_await counters[i].Send<&Counter::GetValue>();
+    assert(value == 2);
+  }
+
+  /*
+  2.2 `async_scope.spawn_future` example, which returns a future-like object which you can wait for later.
+  */
   using FutureType = decltype(scope.spawn_future(counters[0].Send<&Counter::AddAndGet>(1)));
   std::vector<FutureType> futures;
   for (int i = 0; i < counters.size(); ++i) {
@@ -224,16 +282,6 @@ exec::task<void> MainCoroutine() {
   co_await scope.on_empty();
   for (int i = 0; i < futures.size(); ++i) {
     int value = co_await std::move(futures[i]);
-    assert(value == 2);
-  }
-
-  // async_scope.spawn example, which only accepts void tasks.
-  for (int i = 0; i < counters.size(); ++i) {
-    scope.spawn(counters[i].Send<&Counter::Add>(1));
-  }
-  co_await scope.on_empty();
-  for (int i = 0; i < counters.size(); ++i) {
-    int value = co_await counters[i].Send<&Counter::GetValue>();
     assert(value == 3);
   }
 }

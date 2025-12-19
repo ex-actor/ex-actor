@@ -189,7 +189,6 @@ You can use [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.h
 struct Counter {
   int AddAndGet(int x) { return count += x; }
   void Add(int x) { count += x; }
-  int GetValue() const { return count; }
   int count = 0;
 };
 
@@ -198,13 +197,23 @@ exec::task<void> MainCoroutine() {
   ex_actor::ActorRef actor = co_await ex_actor::Spawn<Counter>();
   exec::async_scope scope;
 
-  // async_scope.spawn only accepts void tasks.
+  /*
+  for void tasks, use `async_scope.spawn`.
+  */
   scope.spawn(actor.Send<&Counter::Add>(1));
   
-  // for non-void tasks, use spawn_future to get a future-like object.
+  /*
+  for non-void tasks, if you don't want to get the result, attach an empty `then`
+  to discard the result, then use `async_scope.spawn`.
+  */
+  scope.spawn(actor.Send<&Counter::AddAndGet>(1) | stdexec::then([](auto) {}));
+
+  /*
+  if you care about the result, use `spawn_future` instead of `spawn` to get a future-like object.
+  */
   auto future = scope.spawn_future(actor.Send<&Counter::AddAndGet>(1));
   int res = co_await std::move(future);
-  assert(res == 2);
+  assert(res == 3);
   
   // you must wait for all task done before destroying the scope,
   // or an exception will be thrown.

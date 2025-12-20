@@ -113,8 +113,9 @@ See ⚙️[Installation](https://ex-actor.github.io/ex-actor/installation/) page
 
 ## Learning Resources for Actor Model
 
- - [Actor Model Explained (Video)](https://www.youtube.com/watch?v=ELwEdb_pD0k)
+ - [Actor Model Explained (Video, English)](https://www.youtube.com/watch?v=ELwEdb_pD0k)
  - [Wikipedia - Actor Model](https://en.wikipedia.org/wiki/Actor_model)
+ - [Talk at PureCpp 2025 (Video, Chinese)](https://www.bilibili.com/video/BV1Ddq6BoEJM)
 
 # FAQs
 

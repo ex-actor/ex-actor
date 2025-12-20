@@ -5,6 +5,7 @@
 [![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-blue.svg)](https://opensource.org/licenses/apache-2.0)
 [![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
 [![Build and test](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml/badge.svg)](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ex-actor/ex-actor)
 
 <!-- GITHUB README ONLY START -->
 **📖 Documentation: <https://ex-actor.github.io/ex-actor/>**

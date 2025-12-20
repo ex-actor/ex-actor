@@ -28,6 +28,7 @@ cc_library(
 
 cc_test(
     name = "distributed_test",
+    timeout = "short",
     srcs = [
         "test/distributed_test.cc",
     ],

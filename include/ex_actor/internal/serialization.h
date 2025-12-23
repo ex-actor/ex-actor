@@ -87,6 +87,10 @@ struct ActorMethodReturnValue {
   T return_value;
 };
 
+struct ActorMethodReturnError {
+  std::string error;
+};
+
 template <>
 struct ActorMethodReturnValue<void> {};
 

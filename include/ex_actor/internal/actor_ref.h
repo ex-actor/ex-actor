@@ -133,9 +133,8 @@ class ActorRef {
     serde::BufferReader reader {std::move(response_buffer)};
     auto type = reader.NextPrimitive<serde::NetworkReplyType>();
     if (type == serde::NetworkReplyType::kActorMethodCallError) {
-      auto res =
-          serde::Deserialize<serde::ActorMethodReturnValue<std::string>>(reader.Current(), reader.RemainingSize());
-      EXA_THROW << res.return_value;
+      auto res = serde::Deserialize<serde::ActorMethodReturnError>(reader.Current(), reader.RemainingSize());
+      EXA_THROW << res.error;
     }
     if constexpr (std::is_void_v<UnwrappedType>) {
       co_return;

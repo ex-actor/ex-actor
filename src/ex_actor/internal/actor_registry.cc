@@ -110,7 +110,7 @@ serde::NetworkRequestType ActorRegistryRequestProcessor::ParseMessageType(const 
 
 void ActorRegistryRequestProcessor::ReplyError(uint64_t received_request_id, serde::NetworkReplyType reply_type,
                                                std::string error_msg) {
-  std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnValue {std::move(error_msg)});
+  std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnError {std::move(error_msg)});
   serde::BufferWriter writer(network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
   writer.WritePrimitive(reply_type);
   writer.CopyFrom(serialized.data(), serialized.size());

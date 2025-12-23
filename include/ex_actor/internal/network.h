@@ -158,3 +158,7 @@ class MessageBroker {
 };
 
 }  // namespace ex_actor::internal::network
+
+namespace ex_actor {
+using internal::network::HeartbeatConfig;
+}  // namespace ex_actor

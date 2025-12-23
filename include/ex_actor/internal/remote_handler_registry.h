@@ -159,7 +159,7 @@ class RemoteFuncHandlerRegistrar {
     serde::BufferWriter writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) + serialized.size()});
     // TODO optimize the copy here
     writer.WritePrimitive(serde::NetworkReplyType::kActorMethodCallReturn);
-    if (serialized.size() > 0) {
+    if constexpr (!std::is_void_v<UnwrappedType>) {
       writer.CopyFrom(serialized.data(), serialized.size());
     }
     co_return std::move(writer).MoveBufferOut();

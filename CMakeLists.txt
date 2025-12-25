@@ -80,6 +80,7 @@ add_library(
   STATIC
   src/ex_actor/internal/network.cc
   src/ex_actor/internal/actor_registry.cc
+  src/ex_actor/internal/logging.cc
 )
 target_include_directories(ex_actor PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

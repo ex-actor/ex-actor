@@ -86,6 +86,7 @@
         "distributed_test",
         "network_test",
         "skynet_test",
+        "logging_test",
       ]
     }
   ]

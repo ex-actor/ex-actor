@@ -3,6 +3,8 @@
 
 #include "ex_actor/api.h"
 
+namespace logging = ex_actor::internal::logging;
+
 class PingWorker {
  public:
   explicit PingWorker(std::string name) : name_(std::move(name)) {}
@@ -41,5 +43,5 @@ int main(int /*argc*/, char** argv) {
   ex_actor::Init(shared_pool->GetScheduler(), this_node_id, cluster_node_info, shared_pool, dummy_resource,
                  dummy_resource, dummy_resource, dummy_resource);
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
-  spdlog::info("main exit, node id: {}", this_node_id);
+  logging::Info("main exit, node id: {}", this_node_id);
 }

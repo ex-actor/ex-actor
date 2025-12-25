@@ -21,59 +21,32 @@
 #include <rfl/to_view.hpp>
 #include <spdlog/spdlog.h>
 
-#ifdef _WIN32
-#include <spdlog/sinks/wincolor_sink.h>
-#else
-#include <spdlog/sinks/ansicolor_sink.h>
-#endif
-
-#if __cpp_lib_stacktrace >= 202011L
-#include <stacktrace>
-#endif
-
-namespace ex_actor::internal::logging {
-
-inline std::unique_ptr<spdlog::logger> CreateLogger(const std::string& name) {
-#ifdef _WIN32
-  auto color_sink = std::make_unique<spdlog::sinks::wincolor_stdout_sink_mt>();
-#else
-  auto color_sink = std::make_unique<spdlog::sinks::ansicolor_stdout_sink_mt>();
-#endif
-  auto logger = std::make_unique<spdlog::logger>(name, std::move(color_sink));
-  logger->set_pattern("[%Y-%m-%d %T.%e%z] [%^%L%$] [%t] %v");
-  return logger;
-}
-
-inline void InstallFallbackExceptionHandler() {
-  std::set_terminate([] {
-    if (auto ex = std::current_exception()) {
-      try {
-        std::rethrow_exception(ex);
-      } catch (const std::exception& e) {
-        spdlog::critical("terminate called with an active exception, type: {}, what: {}", typeid(e).name(), e.what());
-      } catch (...) {
-        spdlog::critical("terminate called with an unknown exception");
-      }
-    } else {
-      spdlog::critical("terminate called without an active exception");
-    }
-#if __cpp_lib_stacktrace >= 202011L
-    spdlog::info("backtrace:\n{}", std::to_string(std::stacktrace::current()));
-#endif
-    std::abort();
-  });
+namespace ex_actor::logging {
+enum class LogLevel : uint8_t {
+  kDebug = 0,
+  kInfo = 1,
+  kWarn = 2,
+  kError = 3,
+  kFatal = 4,
 };
 
-inline void SetupProcessWideLoggingConfig() {
-  static std::atomic_bool is_setup = false;
-  bool expected = false;
-  bool changed = is_setup.compare_exchange_strong(expected, true);
-  if (!changed) {
-    return;
-  }
-  spdlog::set_pattern("[%Y-%m-%d %T.%e%z] [%^%L%$] [%t] %v");
-  InstallFallbackExceptionHandler();
-}
+struct LogConfig {
+  LogLevel level = LogLevel::kInfo;
+  // empty means print to stdout
+  std::string log_file_path;
+};
+}  // namespace ex_actor::logging
+
+namespace ex_actor::internal::logging {
+inline constexpr char kDefaultLoggerPattern[] = "[%Y-%m-%d %T.%e%z] [%^%L%$] [%t] %v";
+
+spdlog::level::level_enum ToSpdlogLevel(ex_actor::logging::LogLevel level);
+
+std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const ex_actor::logging::LogConfig& config);
+
+std::unique_ptr<spdlog::logger>& GlobalLogger();
+
+void InstallFallbackExceptionHandler();
 
 template <typename T>
 concept Enum = std::is_enum_v<T>;
@@ -186,4 +159,21 @@ std::string JoinVarsNameValue(std::string_view names, T&& first, Args&&... remai
 }
 
 #define EXA_DUMP_VARS(...) ::ex_actor::internal::logging::JoinVarsNameValue(#__VA_ARGS__, __VA_ARGS__)
+
+template <typename... Args>
+inline void Info(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+  logging::GlobalLogger()->info(fmt, std::forward<Args>(args)...);
+}
+template <typename... Args>
+inline void Warn(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+  logging::GlobalLogger()->warn(fmt, std::forward<Args>(args)...);
+}
+template <typename... Args>
+inline void Error(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+  logging::GlobalLogger()->error(fmt, std::forward<Args>(args)...);
+}
+template <typename... Args>
+inline void Critical(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+  logging::GlobalLogger()->critical(fmt, std::forward<Args>(args)...);
+}
 }  // namespace ex_actor::internal::logging

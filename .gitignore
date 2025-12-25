@@ -10,3 +10,5 @@ bazel-*
 docs/contents/assets
 docs/contents/index.md
 Testing/
+core.*
+*.log

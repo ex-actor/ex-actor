@@ -173,7 +173,6 @@ class ActorRegistryRequestProcessor {
   exec::task<void> HandleNetworkRequest(uint64_t received_request_id, network::ByteBufferType request_buffer);
 
  private:
-  std::unique_ptr<spdlog::logger> logger_ = logging::CreateLogger("ActorRegistryRequestProcessor");
   bool is_distributed_mode_ = false;
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
@@ -285,7 +284,6 @@ class ActorRegistry {
   }
 
  private:
-  std::unique_ptr<spdlog::logger> logger_ = logging::CreateLogger("ActorRegistry");
   bool is_distributed_mode_;
   uint32_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;
@@ -308,7 +306,7 @@ ActorRegistry& GetGlobalDefaultRegistry();
 void AssignGlobalDefaultRegistry(std::unique_ptr<ActorRegistry> registry);
 bool IsGlobalDefaultRegistryInitialized();
 void AddResourceToHolder(std::shared_ptr<void> resource);
-void RegisterAtExitCleanup();
+void SetupGlobalHandlers();
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
@@ -324,12 +322,7 @@ void Init(uint32_t thread_pool_size);
  * @brief Init the global default registry in single-node mode, use specified scheduler. Not thread-safe.
  */
 template <ex::scheduler Scheduler, class... Resources>
-void Init(Scheduler scheduler, std::shared_ptr<Resources>... resources) {
-  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized());
-  AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
-  (internal::AddResourceToHolder(std::move(resources)), ...);
-  internal::RegisterAtExitCleanup();
-}
+void Init(Scheduler scheduler, std::shared_ptr<Resources>... resources);
 
 /**
  * @brief Init the global default registry in distributed mode, use the default work-sharing thread pool as the
@@ -342,12 +335,7 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
  */
 template <ex::scheduler Scheduler, class... Resources>
 void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-          std::shared_ptr<Resources>... resources) {
-  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized());
-  AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), this_node_id, cluster_node_info));
-  (internal::AddResourceToHolder(std::move(resources)), ...);
-  internal::RegisterAtExitCleanup();
-}
+          std::shared_ptr<Resources>... resources);
 
 /**
  * @brief Shutdown the global default registry. Not thread-safe.
@@ -395,4 +383,33 @@ internal::reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActor
   return internal::GetGlobalDefaultRegistry().GetActorRefByName<UserClass>(node_id, name);
 }
 
+/**
+ * @brief Configure the logging of ex_actor. Not thread-safe, please call it only when no logs are printing.
+ */
+void ConfigureLogging(const logging::LogConfig& config = {});
+}  // namespace ex_actor
+
+// -----------template function implementations-------------
+
+namespace ex_actor {
+template <ex::scheduler Scheduler, class... Resources>
+void Init(Scheduler scheduler, std::shared_ptr<Resources>... resources) {
+  internal::logging::Info("Initializing ex_actor in single-node mode with custom scheduler.");
+  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
+  internal::SetupGlobalHandlers();
+  AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
+  (internal::AddResourceToHolder(std::move(resources)), ...);
+}
+
+template <ex::scheduler Scheduler, class... Resources>
+void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
+          std::shared_ptr<Resources>... resources) {
+  internal::logging::Info(
+      "Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}, total_nodes={}", this_node_id,
+      cluster_node_info.size());
+  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
+  internal::SetupGlobalHandlers();
+  AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), this_node_id, cluster_node_info));
+  (internal::AddResourceToHolder(std::move(resources)), ...);
+}
 }  // namespace ex_actor

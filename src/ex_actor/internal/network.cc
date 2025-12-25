@@ -37,7 +37,6 @@ MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t
       heartbeat_(heartbeat_config),
       quit_latch_(node_list_.size()),
       last_heartbeat_(std::chrono::steady_clock::now()) {
-  logging::SetupProcessWideLoggingConfig();
   EstablishConnections();
 
   auto start_time_point = std::chrono::steady_clock::now();
@@ -59,7 +58,7 @@ MessageBroker::~MessageBroker() {
 
 void MessageBroker::ClusterAlignedStop() {
   // tell all other nodes: I'm going to quit
-  logger_->info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_id_);
+  logging::Info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_id_);
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_) {
       auto sender = SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kQuit) | ex::then([](auto empty) {});
@@ -72,13 +71,13 @@ void MessageBroker::ClusterAlignedStop() {
   quit_latch_.wait();
   stopped_.store(true);
   ex::sync_wait(async_scope_.on_empty());
-  logger_->info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_id_);
+  logging::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_id_);
   // stop io threads first
   send_thread_.request_stop();
   recv_thread_.request_stop();
   send_thread_.join();
   recv_thread_.join();
-  logger_->info("[Cluster Aligned Stop] Node {}'s io threads stopped, cluster aligned stop completed", this_node_id_);
+  logging::Info("[Cluster Aligned Stop] Node {}'s io threads stopped, cluster aligned stop completed", this_node_id_);
 }
 
 void MessageBroker::EstablishConnections() {
@@ -89,7 +88,7 @@ void MessageBroker::EstablishConnections() {
       recv_socket_.bind(node.address);
       recv_socket_.set(zmq::sockopt::linger, 0);
       found_local_address = true;
-      logger_->info("Node {}'s recv socket bound to {}", this_node_id_, node.address);
+      logging::Info("Node {}'s recv socket bound to {}", this_node_id_, node.address);
       break;
     }
   }
@@ -104,7 +103,7 @@ void MessageBroker::EstablishConnections() {
       auto& send_socket = node_id_to_send_socket_.At(node.node_id);
       send_socket.set(zmq::sockopt::linger, 0);
       send_socket.connect(node.address);
-      logger_->info("Node {} added a send socket, connected to node {} at {}", this_node_id_, node.node_id,
+      logging::Info("Node {} added a send socket, connected to node {} at {}", this_node_id_, node.node_id,
                     node.address);
     }
   }
@@ -198,7 +197,7 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   auto identifier = internal::serde::Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
-    logger_->info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
+    logging::Info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
     quit_latch_.count_down();
     return;
   }
@@ -228,7 +227,7 @@ void MessageBroker::CheckHeartbeat() {
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_ &&
         std::chrono::steady_clock::now() - last_seen_[node.node_id] >= heartbeat_.heartbeat_timeout) {
-      logger_->error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
+      logging::Error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
       // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
       std::quick_exit(1);
     }

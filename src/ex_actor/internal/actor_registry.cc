@@ -29,7 +29,6 @@ ActorRegistryRequestProcessor::ActorRegistryRequestProcessor(std::unique_ptr<Typ
       scheduler_(std::move(scheduler)),
       this_node_id_(this_node_id),
       message_broker_(message_broker) {
-  logging::SetupProcessWideLoggingConfig();
   InitRandomNumGenerator();
   ValidateNodeInfo(cluster_node_info);
 }
@@ -37,13 +36,13 @@ ActorRegistryRequestProcessor::ActorRegistryRequestProcessor(std::unique_ptr<Typ
 exec::task<void> ActorRegistryRequestProcessor::AsyncDestroyAllActors() {
   exec::async_scope async_scope;
   // bulk destroy actors
-  logger_->info("Sending destroy messages to actors");
+  logging::Info("Sending destroy messages to actors");
   for (auto& [_, actor] : actor_id_to_actor_) {
     async_scope.spawn(actor->AsyncDestroy());
   }
-  logger_->info("Waiting for actors to be destroyed");
+  logging::Info("Waiting for actors to be destroyed");
   co_await async_scope.on_empty();
-  logger_->info("All actors destroyed");
+  logging::Info("All actors destroyed");
 }
 
 exec::task<void> ActorRegistryRequestProcessor::HandleNetworkRequest(uint64_t received_request_id,
@@ -195,14 +194,14 @@ exec::task<void> ActorRegistryRequestProcessor::HandleActorMethodCallRequest(
 
 // ----------------------ActorRegistry--------------------------
 ActorRegistry::~ActorRegistry() {
-  logger_->info("Start to shutdown actor registry");
+  logging::Info("Start to shutdown actor registry");
   if (is_distributed_mode_) {
     message_broker_->ClusterAlignedStop();
   }
   ex::sync_wait(processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::AsyncDestroyAllActors>());
   ex::sync_wait(processor_actor_.AsyncDestroy());
   ex::sync_wait(async_scope_.on_empty());
-  logger_->info("Actor registry shutdown completed");
+  logging::Info("Actor registry shutdown completed");
 }
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
@@ -232,7 +231,6 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
                        cluster_node_info, message_broker_.get()),
       processor_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &processor_actor_,
                            message_broker_.get()) {}
-
 }  // namespace ex_actor::internal
 
 // ----------------------Global Default Registry--------------------------
@@ -240,7 +238,6 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
 namespace {
 std::vector<std::shared_ptr<void>> resource_holder;
 std::unique_ptr<ex_actor::ActorRegistry> global_default_registry;
-bool at_exit_cleanup_registered = false;
 }  // namespace
 
 namespace ex_actor::internal {
@@ -257,7 +254,9 @@ bool IsGlobalDefaultRegistryInitialized() { return global_default_registry != nu
 
 void AddResourceToHolder(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
 
-void RegisterAtExitCleanup() {
+static void RegisterAtExitCleanup() {
+  static bool at_exit_cleanup_registered = false;
+
   if (at_exit_cleanup_registered) {
     return;
   }
@@ -279,25 +278,41 @@ void RegisterAtExitCleanup() {
     }
   });
 }
+
+void SetupGlobalHandlers() {
+  logging::InstallFallbackExceptionHandler();
+  RegisterAtExitCleanup();
+}
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
 void Init(uint32_t thread_pool_size) {
+  internal::logging::Info("Initializing ex_actor in single-node mode with default scheduler, thread_pool_size={}",
+                          thread_pool_size);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
+  internal::SetupGlobalHandlers();
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size);
-  internal::RegisterAtExitCleanup();
 }
 
 void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
+  internal::logging::Info(
+      "Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}, this_node_id={}, "
+      "total_nodes={}",
+      thread_pool_size, this_node_id, cluster_node_info.size());
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
+  internal::SetupGlobalHandlers();
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, this_node_id, cluster_node_info);
-  internal::RegisterAtExitCleanup();
 }
 
 void Shutdown() {
+  internal::logging::Info("Shutting down ex_actor.");
   EXA_THROW_CHECK(internal::IsGlobalDefaultRegistryInitialized()) << "Not initialized.";
   global_default_registry.reset();
   resource_holder.clear();
+}
+
+void ConfigureLogging(const logging::LogConfig& config) {
+  internal::logging::GlobalLogger() = internal::logging::CreateLoggerUsingConfig(config);
 }
 
 }  // namespace ex_actor

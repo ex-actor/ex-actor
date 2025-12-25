@@ -7,12 +7,14 @@
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
+#include "ex_actor/internal/actor_registry.h"
 #include "ex_actor/internal/remote_handler_registry.h"
-#include "spdlog/common.h"
 
 using testing::HasSubstr;
 using testing::Property;
 using testing::Throws;
+
+namespace logging = ex_actor::internal::logging;
 
 class A {
  public:
@@ -142,22 +144,22 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     // test remote creation
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
 
-    spdlog::info("node {} creating remote actor A", this_node_id);
+    logging::Info("node {} creating remote actor A", this_node_id);
     auto remote_a = co_await registry.CreateActor<A, &A::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "A"});
 
-    spdlog::info("node {} creating remote actor B", this_node_id);
+    logging::Info("node {} creating remote actor B", this_node_id);
     auto remote_b = co_await registry.CreateActor<B, &B::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "B"}, 1, "asd", std::make_unique<int>());
 
-    spdlog::info("creating remote actor C without registering with EXA_REMOTE");
+    logging::Info("creating remote actor C without registering with EXA_REMOTE");
     auto do_create = [&]() -> void {
       stdexec::sync_wait(registry.CreateActor<C, &C::Create>(ex_actor::ActorConfig {.node_id = remote_node_id}));
     };
     EXPECT_THAT(do_create, Throws<std::exception>(
                                Property(&std::exception::what, HasSubstr("forgot to register it with EXA_REMOTE"))));
 
-    spdlog::info("creating remote actor D without static create function");
+    logging::Info("creating remote actor D without static create function");
     EXPECT_THAT(
         [&]() { stdexec::sync_wait(registry.CreateActor<D>(ex_actor::ActorConfig {.node_id = remote_node_id})); },
         Throws<std::exception>(Property(&std::exception::what, HasSubstr("can only be used to create local actor"))));
@@ -170,29 +172,29 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     EXPECT_THAT(do_create_error, Throws<std::exception>(Property(&std::exception::what, HasSubstr("Just an error"))));
 
     // test remote call
-    spdlog::info("creating remote actor PingWorker");
+    logging::Info("creating remote actor PingWorker");
     auto ping_worker = co_await registry.CreateActor<PingWorker, &PingWorker::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id},
         /*name=*/"Alice");
-    spdlog::info("calling PingWorker::Ping");
+    logging::Info("calling PingWorker::Ping");
     auto sender = ping_worker.Send<&PingWorker::Ping>("hello");
     auto reply = co_await std::move(sender);
     EXPECT_EQ(reply, "ack from Alice, msg got: hello");
 
     // test call a not registered function
-    spdlog::info("calling PingWorker::NotRegisteredFunc");
+    logging::Info("calling PingWorker::NotRegisteredFunc");
     EXPECT_THAT(
         [&]() -> void { stdexec::sync_wait(ping_worker.Send<&PingWorker::NotRegisteredFunc>()); },
         Throws<std::exception>(Property(&std::exception::what, HasSubstr("forgot to register it with EXA_REMOTE"))));
 
     // test remote call error propagation
-    spdlog::info("calling PingWorker::Error");
+    logging::Info("calling PingWorker::Error");
     auto error = ping_worker.Send<&PingWorker::Error>();
     EXPECT_THAT([&error]() -> void { stdexec::sync_wait(std::move(error)); },
                 Throws<std::exception>(Property(&std::exception::what, HasSubstr("error"))));
 
     // test remote call with void as return value
-    spdlog::info("calling RetVoid::ReturnVoid and Retvoid::CoroutineReturnVoid");
+    logging::Info("calling RetVoid::ReturnVoid and Retvoid::CoroutineReturnVoid");
     auto empty_actor = co_await registry.CreateActor<RetVoid, &RetVoid::Create>({.node_id = remote_node_id});
     co_await empty_actor.Send<&RetVoid::ReturnVoid>();
     co_await empty_actor.Send<&RetVoid::CoroutineReturnVoid>();

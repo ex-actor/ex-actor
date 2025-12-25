@@ -15,6 +15,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -242,6 +243,9 @@ class LockGuardedSet {
   void Erase(const T& value) {
     std::lock_guard lock(mutex_);
     set_.erase(value);
+    if (set_.empty()) {
+      cv_.notify_all();
+    }
   }
 
   bool Empty() {
@@ -249,15 +253,21 @@ class LockGuardedSet {
     return set_.empty();
   }
 
-  bool Contains(T value) {
+  bool Contains(const T& value) {
     std::lock_guard lock(mutex_);
     return set_.contains(value);
+  }
+
+  void Wait() {
+    std::unique_lock lock(mutex_);
+    cv_.wait(lock, [this]() { return set_.empty(); });
   }
 
   std::mutex& GetMutex() const { return mutex_; }
 
  private:
   std::unordered_set<T> set_;
+  std::condition_variable cv_;
   mutable std::mutex mutex_;
 };
 

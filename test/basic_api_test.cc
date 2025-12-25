@@ -69,6 +69,8 @@ TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
     auto future = scope.spawn_future(counter.SendLocal<&Counter::GetValue>());
     auto res = co_await std::move(future);
     EXPECT_EQ(res, 1);
+    // Wait for all spawned work to complete before destroying the scope
+    co_await scope.on_empty();
     co_return;
   };
   ex_actor::Init(/*thread_pool_size=*/10);

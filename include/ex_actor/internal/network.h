@@ -29,8 +29,6 @@
 
 #include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/util.h"
-#include "spdlog/sinks/stdout_sinks.h"
-#include "spdlog/spdlog.h"
 
 namespace ex_actor {
 struct NodeInfo {
@@ -87,7 +85,7 @@ class MessageBroker {
       bool expected = false;
       bool changed = started.compare_exchange_strong(expected, true);
       if (!changed) [[unlikely]] {
-        spdlog::critical("MessageBroker Operation already started");
+        logging::Critical("MessageBroker Operation already started");
         std::terminate();
       }
       message_broker->PushOperation(this);
@@ -127,8 +125,6 @@ class MessageBroker {
     Identifier identifier;
     ByteBufferType data;
   };
-
-  std::unique_ptr<spdlog::logger> logger_ = logging::CreateLogger("MessageBroker");
 
   std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;

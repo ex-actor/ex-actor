@@ -8,6 +8,7 @@
 #include "ex_actor/api.h"
 
 using ex_actor::internal::network::ByteBufferType;
+namespace logging = ex_actor::internal::logging;
 
 TEST(NetworkTest, MessageBrokerTest) {
   auto test_once = []() {
@@ -28,7 +29,7 @@ TEST(NetworkTest, MessageBrokerTest) {
         scope.spawn(message_broker.SendRequest(to_node_id, ByteBufferType(std::to_string(node_id))) |
                     stdexec::then([node_id](ByteBufferType data) {
                       std::string data_str(static_cast<char*>(data.data()), data.size());
-                      spdlog::info("got response data, node id: {}, data: {}", node_id, data_str);
+                      logging::Info("got response data, node id: {}, data: {}", node_id, data_str);
                       ASSERT_EQ(data_str, std::to_string(node_id));
                     }));
       }
@@ -40,7 +41,7 @@ TEST(NetworkTest, MessageBrokerTest) {
   };
 
   for (int i = 0; i < 10; ++i) {
-    spdlog::info("test once, {}", i);
+    logging::Info("test once, {}", i);
     test_once();
   }
 }

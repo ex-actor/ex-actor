@@ -10,6 +10,7 @@
 #include "ex_actor/api.h"
 
 namespace ex = stdexec;
+namespace logging = ex_actor::internal::logging;
 
 struct SkynetActor;
 
@@ -18,9 +19,9 @@ struct SkynetActor {
 };
 
 exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
-  if (verbose) spdlog::info("DEBUG: Process level {} start", level);
+  if (verbose) logging::Info("DEBUG: Process level {} start", level);
   if (level == 0) {
-    if (verbose) spdlog::info("DEBUG: Process level 0 returning");
+    if (verbose) logging::Info("DEBUG: Process level 0 returning");
     co_return 1;
   }
 
@@ -33,7 +34,7 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
   std::vector<FutureType> futures;
   futures.reserve(10);
 
-  if (verbose) spdlog::info("DEBUG: Creating children for level {}", level);
+  if (verbose) logging::Info("DEBUG: Creating children for level {}", level);
   for (int i = 0; i < 10; ++i) {
     futures.push_back(async_scope.spawn_future(ex_actor::Spawn<SkynetActor>()));
   }
@@ -45,7 +46,7 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
   auto make_child_sender = [&children, verbose, level](int index) {
     // test ephemeral stacks
     return children.at(index).Send<&SkynetActor::Process>(level - 1, false) | ex::then([verbose, index](uint64_t res) {
-             if (verbose) spdlog::info("Skynet Progress: {} subtree finished.", index + 1);
+             if (verbose) logging::Info("Skynet Progress: {} subtree finished.", index + 1);
              return res;
            });
   };
@@ -76,7 +77,7 @@ TEST(SkynetTest, ActorRegistryCanBeInvokeInsideActorMethods) {
 
   int depth = 4;
 
-  spdlog::info("Starting Skynet (Depth {}, Width 10)...", depth);
+  logging::Info("Starting Skynet (Depth {}, Width 10)...", depth);
   auto start = std::chrono::high_resolution_clock::now();
 
   auto task = root.SendLocal<&SkynetActor::Process>(depth, true);
@@ -86,6 +87,6 @@ TEST(SkynetTest, ActorRegistryCanBeInvokeInsideActorMethods) {
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-  spdlog::info("Result: {} ms", result);
-  spdlog::info("Time: {} ms", duration);
+  logging::Info("Result: {} ms", result);
+  logging::Info("Time: {} ms", duration);
 }

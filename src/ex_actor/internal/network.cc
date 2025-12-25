@@ -28,20 +28,20 @@
 
 namespace ex_actor::internal::network {
 
-MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t this_node_id,
+MessageBroker::MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                              std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
                              HeartbeatConfig heartbeat_config)
     : node_list_(std::move(node_list)),
       this_node_id_(this_node_id),
       request_handler_(std::move(request_handler)),
       heartbeat_(heartbeat_config),
-      quit_latch_(node_list_.size()),
       last_heartbeat_(std::chrono::steady_clock::now()) {
   EstablishConnections();
 
   auto start_time_point = std::chrono::steady_clock::now();
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_) {
+      alive_peers_.Insert(node.node_id);
       last_seen_.emplace(node.node_id, start_time_point);
     }
   }
@@ -66,9 +66,8 @@ void MessageBroker::ClusterAlignedStop() {
     }
   }
 
-  quit_latch_.count_down();
   // wait until all nodes are going to quit
-  quit_latch_.wait();
+  alive_peers_.Wait();
   stopped_.store(true);
   ex::sync_wait(async_scope_.on_empty());
   logging::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_id_);
@@ -206,7 +205,7 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
     logging::Info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
-    quit_latch_.count_down();
+    alive_peers_.Erase(identifier.request_node_id);
     return;
   }
 

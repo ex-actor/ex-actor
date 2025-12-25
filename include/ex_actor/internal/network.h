@@ -19,7 +19,6 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
-#include <latch>
 #include <thread>
 
 #include <exec/async_scope.hpp>
@@ -145,7 +144,7 @@ class MessageBroker {
   std::jthread send_thread_;
   std::jthread recv_thread_;
   std::atomic_bool stopped_ = false;
-  std::latch quit_latch_;
+  util::LockGuardedSet<uint32_t> alive_peers_;
   exec::async_scope async_scope_;
 
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;

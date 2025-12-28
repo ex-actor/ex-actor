@@ -102,12 +102,15 @@ TEST(SchedulerTest, SchedulerUnionTest) {
 }
 
 TEST(SchedulerTest, TestResourceHolder) {
-  auto shared_pool1 = std::make_shared<ex_actor::WorkSharingThreadPool>(10);
-  auto shared_pool2 = std::make_shared<ex_actor::WorkSharingThreadPool>(10);
-  auto union_pool = std::make_shared<ex_actor::SchedulerUnion<ex_actor::WorkSharingThreadPool::Scheduler>>(
+  auto shared_pool1 = std::make_unique<ex_actor::WorkSharingThreadPool>(10);
+  auto shared_pool2 = std::make_unique<ex_actor::WorkSharingThreadPool>(10);
+  auto union_pool = std::make_unique<ex_actor::SchedulerUnion<ex_actor::WorkSharingThreadPool::Scheduler>>(
       std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {shared_pool1->GetScheduler(),
                                                                shared_pool2->GetScheduler()});
-  ex_actor::Init(union_pool->GetScheduler(), shared_pool1, shared_pool2, union_pool);
+  ex_actor::Init(union_pool->GetScheduler());
+  ex_actor::HoldResource(std::move(shared_pool1));
+  ex_actor::HoldResource(std::move(shared_pool2));
+  ex_actor::HoldResource(std::move(union_pool));
   auto coroutine = [&]() -> exec::task<void> {
     // create two actors, specify the scheduler index in ActorConfig.
     auto actor1 = co_await ex_actor::Spawn<TestActor2>(ex_actor::ActorConfig {.scheduler_index = 0});

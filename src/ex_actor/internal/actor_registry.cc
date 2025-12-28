@@ -252,8 +252,6 @@ void AssignGlobalDefaultRegistry(std::unique_ptr<ex_actor::ActorRegistry> regist
 
 bool IsGlobalDefaultRegistryInitialized() { return global_default_registry != nullptr; }
 
-void AddResourceToHolder(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
-
 static void RegisterAtExitCleanup() {
   static bool at_exit_cleanup_registered = false;
 
@@ -303,6 +301,8 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
   internal::SetupGlobalHandlers();
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, this_node_id, cluster_node_info);
 }
+
+void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
 
 void Shutdown() {
   internal::logging::Info("Shutting down ex_actor.");

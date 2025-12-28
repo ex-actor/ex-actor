@@ -27,15 +27,17 @@ int main() {
 ```
 <!-- doc test end -->
 
-Another way is to make your execution resource a `shared_ptr`, and pass it in the end of the `ex_actor::Init` function. So we can hold a reference to it. Then you don't need to call `ex_actor::Shutdown` explicitly.
+Another way is to make your execution resource an `unique_ptr` or `shared_ptr`, and use `ex_actor::HoldResource` to hold it, then we're able to control its lifecycle, and you don't need to call `ex_actor::Shutdown` explicitly anymore.
 
 <!-- doc test start -->
 ```cpp
 #include "ex_actor/api.h"
 
 int main() {
-  auto thread_pool_shared_ptr = std::make_shared<ex_actor::WorkSharingThreadPool>(/*thread_count=*/10);
-  ex_actor::Init(thread_pool_shared_ptr->GetScheduler(), thread_pool_shared_ptr);
+  // can also be a `shared_ptr` if you want to use it elsewhere.
+  auto thread_pool = std::make_unique<ex_actor::WorkSharingThreadPool>(/*thread_count=*/10);
+  ex_actor::Init(thread_pool->GetScheduler());
+  ex_actor::HoldResource(std::move(thread_pool));
 }
 ```
 <!-- doc test end -->

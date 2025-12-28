@@ -305,7 +305,6 @@ namespace ex_actor::internal {
 ActorRegistry& GetGlobalDefaultRegistry();
 void AssignGlobalDefaultRegistry(std::unique_ptr<ActorRegistry> registry);
 bool IsGlobalDefaultRegistryInitialized();
-void AddResourceToHolder(std::shared_ptr<void> resource);
 void SetupGlobalHandlers();
 }  // namespace ex_actor::internal
 
@@ -321,8 +320,8 @@ void Init(uint32_t thread_pool_size);
 /**
  * @brief Init the global default registry in single-node mode, use specified scheduler. Not thread-safe.
  */
-template <ex::scheduler Scheduler, class... Resources>
-void Init(Scheduler scheduler, std::shared_ptr<Resources>... resources);
+template <ex::scheduler Scheduler>
+void Init(Scheduler scheduler);
 
 /**
  * @brief Init the global default registry in distributed mode, use the default work-sharing thread pool as the
@@ -333,12 +332,18 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
 /**
  * @brief Init the global default registry in distributed mode, use specified scheduler. Not thread-safe.
  */
-template <ex::scheduler Scheduler, class... Resources>
-void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-          std::shared_ptr<Resources>... resources);
+template <ex::scheduler Scheduler>
+void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 
 /**
- * @brief Shutdown the global default registry. Not thread-safe.
+ * @brief Ask ex_actor to hold a resource, the resource won't be released until runtime is shut down.
+ * Often used to hold an execution resource when using custom scheduler. This API is not thread-safe.
+ * @param resource The resource to hold. Can pass any `unique_ptr` or `shared_ptr`.
+ */
+void HoldResource(std::shared_ptr<void> resource);
+
+/**
+ * @brief Shutdown the global default registry. Will also be called automatically when `main` exits. Not thread-safe.
  */
 void Shutdown();
 
@@ -392,24 +397,21 @@ void ConfigureLogging(const logging::LogConfig& config = {});
 // -----------template function implementations-------------
 
 namespace ex_actor {
-template <ex::scheduler Scheduler, class... Resources>
-void Init(Scheduler scheduler, std::shared_ptr<Resources>... resources) {
+template <ex::scheduler Scheduler>
+void Init(Scheduler scheduler) {
   internal::logging::Info("Initializing ex_actor in single-node mode with custom scheduler.");
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   internal::SetupGlobalHandlers();
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
-  (internal::AddResourceToHolder(std::move(resources)), ...);
 }
 
-template <ex::scheduler Scheduler, class... Resources>
-void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-          std::shared_ptr<Resources>... resources) {
+template <ex::scheduler Scheduler>
+void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
   internal::logging::Info(
       "Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}, total_nodes={}", this_node_id,
       cluster_node_info.size());
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   internal::SetupGlobalHandlers();
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), this_node_id, cluster_node_info));
-  (internal::AddResourceToHolder(std::move(resources)), ...);
 }
 }  // namespace ex_actor

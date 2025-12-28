@@ -36,12 +36,11 @@ exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
 
 int main(int /*argc*/, char** argv) {
   auto shared_pool = std::make_shared<ex_actor::WorkSharingThreadPool>(4);
-  auto dummy_resource = std::make_shared<int>(0);
   uint32_t this_node_id = std::atoi(argv[1]);
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
-  ex_actor::Init(shared_pool->GetScheduler(), this_node_id, cluster_node_info, shared_pool, dummy_resource,
-                 dummy_resource, dummy_resource, dummy_resource);
+  ex_actor::Init(shared_pool->GetScheduler(), this_node_id, cluster_node_info);
+  ex_actor::HoldResource(shared_pool);
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
   logging::Info("main exit, node id: {}", this_node_id);
 }

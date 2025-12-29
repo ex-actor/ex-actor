@@ -126,6 +126,11 @@ struct LinearizableUnboundedQueue {
     return value;
   }
 
+  bool Empty() {
+    std::lock_guard lock(mutex_);
+    return queue_.empty();
+  }
+
  private:
   std::queue<T> queue_;
   mutable std::mutex mutex_;

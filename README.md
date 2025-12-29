@@ -1,6 +1,3 @@
-<!-- GITHUB README ONLY START -->
-# ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) ex_actor
-<!-- GITHUB README ONLY END -->
 
 [![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-blue.svg)](https://opensource.org/licenses/apache-2.0)
 [![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
@@ -11,7 +8,7 @@
 **📖 Documentation: <https://ex-actor.github.io/ex-actor/>**
 <!-- GITHUB README ONLY END -->
 
-![image](assets/ex_actor_banner.jpg)
+![image](assets/ex_actor_banner.png)
 
 **ex_actor** is a modern C++ actor framework based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 

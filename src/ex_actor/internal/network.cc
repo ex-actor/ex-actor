@@ -240,6 +240,7 @@ void MessageBroker::SendHeartbeat() {
       if (node.node_id != this_node_id_) {
         auto heartbeat =
             SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kHeartbeat) | ex::then([](auto&& null) {});
+        last_heartbeat_ = std::chrono::steady_clock::now();
         async_scope_.spawn(std::move(heartbeat));
       }
     }

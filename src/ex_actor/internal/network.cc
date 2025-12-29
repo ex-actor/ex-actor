@@ -168,7 +168,9 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
       EXA_THROW_CHECK(multi.send(send_socket));
     }
     SendHeartbeat();
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (pending_send_operations_.Empty() && pending_reply_operations_.Empty()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
   }
 }
 

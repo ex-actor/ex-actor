@@ -145,12 +145,24 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
 
     logging::Info("node {} creating remote actor A", this_node_id);
-    auto remote_a = co_await registry.CreateActor<A, &A::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "A"});
+    /*
+    before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
+    here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
+
+    i.e. you can't `co_await CreateActor<X>(ActorConfig {.actor_name = "A"})`, instead, you should do this:
+    ```cpp
+    ex_actor::ActorConfig a_config {.actor_name = "A"};
+    auto remote_a = co_await registry.CreateActor<A, &A::Create>(a_config);
+    ```
+
+    see https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
+    */
+    ex_actor::ActorConfig a_config {.node_id = remote_node_id, .actor_name = "A"};
+    auto remote_a = co_await registry.CreateActor<A, &A::Create>(a_config);
 
     logging::Info("node {} creating remote actor B", this_node_id);
-    auto remote_b = co_await registry.CreateActor<B, &B::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "B"}, 1, "asd", std::make_unique<int>());
+    ex_actor::ActorConfig b_config {.node_id = remote_node_id};
+    auto remote_b = co_await registry.CreateActor<B, &B::Create>(b_config, 1, "asd", std::make_unique<int>());
 
     logging::Info("creating remote actor C without registering with EXA_REMOTE");
     auto do_create = [&]() -> void {
@@ -216,8 +228,8 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
                                      /*this_node_id=*/this_node_id, cluster_node_info);
 
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
-    auto remote_actor = co_await registry.CreateActor<Echoer, &Echoer::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Alice"});
+    ex_actor::ActorConfig echoer_config {.node_id = remote_node_id, .actor_name = "Alice"};
+    auto remote_actor = co_await registry.CreateActor<Echoer, &Echoer::Create>(echoer_config);
     auto lookup_result = co_await registry.GetActorRefByName<Echoer>(remote_node_id, "Alice");
     auto lookup_error = co_await registry.GetActorRefByName<Echoer>(remote_node_id, "A");
 
@@ -251,10 +263,10 @@ TEST(DistributedTest, ActorRefSerializationTest) {
 
     auto local_actor_a = co_await registry.CreateActor<Echoer>();
     auto local_actor_b = co_await registry.CreateActor<Echoer>();
-    auto remote_actor_a = co_await registry.CreateActor<Echoer, &Echoer::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Alice"});
-    auto remote_actor_b = co_await registry.CreateActor<Echoer, &Echoer::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id, .actor_name = "Bob"});
+    ex_actor::ActorConfig echoer_config_a {.node_id = remote_node_id, .actor_name = "Alice"};
+    ex_actor::ActorConfig echoer_config_b {.node_id = remote_node_id, .actor_name = "Bob"};
+    auto remote_actor_a = co_await registry.CreateActor<Echoer, &Echoer::Create>(echoer_config_a);
+    auto remote_actor_b = co_await registry.CreateActor<Echoer, &Echoer::Create>(echoer_config_b);
     std::string msg = "hi";
 
     // Pass the local actor to remote actor

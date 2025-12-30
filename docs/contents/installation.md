@@ -1,6 +1,12 @@
 # Installation
 
-Can't find your build system? Open an issue to let us know. Welcome to open a PR to contribute!
+## Compiler Requirements
+
+- gcc 11+
+- clang 16+
+- MSVC 19.3+ (experimental support)
+
+Don't forget to set `--std=c++20` or above when compiling.
 
 ## CMake Projects
 

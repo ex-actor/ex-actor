@@ -153,7 +153,7 @@ class RemoteFuncHandlerRegistrar {
     } else {
       auto return_value =
           co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
-      serialized = serde::Serialize(serde::ActorMethodReturnValue {std::move(return_value)});
+      serialized = serde::Serialize(serde::ActorMethodReturnValue<UnwrappedType> {std::move(return_value)});
     }
 
     serde::BufferWriter writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) + serialized.size()});

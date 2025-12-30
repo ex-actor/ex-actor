@@ -113,9 +113,24 @@ TEST(BasicApiTest, NestActorRefCase) {
 
 TEST(BasicApiTest, CreateActorWithFullConfig) {
   auto coroutine = []() -> exec::task<void> {
-    auto counter = co_await ex_actor::Spawn<Counter>(
-        ex_actor::ActorConfig {.max_message_executed_per_activation = 10, .actor_name = "counter1"});
-    co_await ex_actor::Spawn<Counter>(ex_actor::ActorConfig {.actor_name = "counter2"});
+    /*
+    before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
+    here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
+
+    i.e. you can't `co_await CreateActor<X>(ActorConfig {.actor_name = "A"})`, instead, you should do this:
+    ```cpp
+    ex_actor::ActorConfig a_config {.actor_name = "A"};
+    auto remote_a = co_await registry.CreateActor<A, &A::Create>(a_config);
+    ```
+
+    see https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
+    */
+    ex_actor::ActorConfig config1 {.max_message_executed_per_activation = 10, .actor_name = "counter1"};
+    auto counter = co_await ex_actor::Spawn<Counter>(config1);
+
+    ex_actor::ActorConfig config2 {.actor_name = "counter2"};
+    co_await ex_actor::Spawn<Counter>(config2);
+
     co_await ex_actor::Spawn<Counter>(ex_actor::ActorConfig {.scheduler_index = 0, .priority = 1});
 
     static_assert(rfl::internal::has_read_reflector<ex_actor::ActorRef<Counter>>);
@@ -139,7 +154,8 @@ class TestActorWithNamedLookup {
 
 TEST(BasicApiTest, LookUpNamedActor) {
   auto coroutine = []() -> exec::task<void> {
-    co_await ex_actor::Spawn<Counter>(ex_actor::ActorConfig {.actor_name = "counter"});
+    ex_actor::ActorConfig config {.actor_name = "counter"};
+    co_await ex_actor::Spawn<Counter>(config);
     auto test_retriever_actor = co_await ex_actor::Spawn<TestActorWithNamedLookup>();
 
     auto lookup_sender = test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();

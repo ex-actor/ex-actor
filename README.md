@@ -3,8 +3,10 @@
 **📖 Documentation: <https://ex-actor.github.io/ex-actor/>**
 <!-- GITHUB README ONLY END -->
 
-[![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-blue.svg)](https://opensource.org/licenses/apache-2.0)
+[![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-00c600.svg)](https://opensource.org/licenses/apache-2.0)
 [![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
+[![Generic badge](https://img.shields.io/badge/gcc-11+-blue.svg)](https://shields.io/)
+[![Generic badge](https://img.shields.io/badge/clang-16+-blue.svg)](https://shields.io/)
 [![Build and test](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml/badge.svg)](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ex-actor/ex-actor)
 
@@ -129,7 +131,7 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 ## Is it production-ready?
 
-The single-process mode is heavily tested in our company's production environment(Linux). While minor bugs can occur due to version divergence between open source & internal codes, the overall quality is good, feel free to use it in production.
+The single-process mode is heavily tested in our company's production environment(ubuntu22.04, gcc12). While minor bugs can occur due to version divergence between open source & internal codes, the overall quality is good, feel free to use it in production.
 
 The distributed mode's feature is complete and ready to be used, but isn't massively tested in production yet. Welcome to have a try and build together with us!
 

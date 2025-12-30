@@ -25,7 +25,24 @@ namespace ex_actor {
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
   uint32_t node_id = 0;
-  // The name should be unique within one node.
+
+  /**
+   * @brief Actor's name, should be unique within one node.
+   *
+   * @note Before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free
+   * error. here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it
+   * explicitly.
+   *
+   * i.e. you can't `co_await CreateActor<X>(ActorConfig {.actor_name = "xxx"})` directly, instead, you
+   * should define a separate named variable for the config, and pass it to CreateActor(), like this:
+   *
+   * @code
+   * ex_actor::ActorConfig config {.actor_name = "xxx"};
+   * auto actor = co_await CreateActor<X>(config);
+   * @endcode
+   *
+   * see gcc's bug report: https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
+   */
   std::optional<std::string> actor_name;
 
   /*

@@ -31,10 +31,18 @@ jobs:
         build_type: [RelWithDebInfo]
         toolchain:
           - { os: windows-latest, compiler: { cc: cl, cpp: cl } }
-          - { os: ubuntu-24.04, compiler: { cc: gcc, cpp: g++ } }
-          - { os: ubuntu-24.04, compiler: { cc: clang, cpp: clang++ } }
-          - { os: ubuntu-24.04, compiler: { cc: clang, cpp: clang++ }, cxxflags: "-fsanitize=thread" }
-          - { os: ubuntu-24.04, compiler: { cc: clang, cpp: clang++ }, cxxflags: "-fsanitize=address" }
+          # GCC versions
+          - { os: ubuntu-24.04, compiler: { cc: gcc-11, cpp: g++-11 } }
+          - { os: ubuntu-24.04, compiler: { cc: gcc-12, cpp: g++-12 } }
+          - { os: ubuntu-24.04, compiler: { cc: gcc-13, cpp: g++-13 } }
+          - { os: ubuntu-24.04, compiler: { cc: gcc-14, cpp: g++-14 } }
+          # Clang versions
+          - { os: ubuntu-24.04, compiler: { cc: clang-16, cpp: clang++-16 } }
+          - { os: ubuntu-24.04, compiler: { cc: clang-17, cpp: clang++-17 } }
+          - { os: ubuntu-24.04, compiler: { cc: clang-18, cpp: clang++-18 } }
+          # Sanitizers (using latest clang)
+          - { os: ubuntu-24.04, compiler: { cc: clang-18, cpp: clang++-18 }, cxxflags: "-fsanitize=thread" }
+          - { os: ubuntu-24.04, compiler: { cc: clang-18, cpp: clang++-18 }, cxxflags: "-fsanitize=address" }
 
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +50,14 @@ jobs:
       - name: Setup MSVC Developer Environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install specific compiler version
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+
+          # Install the compiler
+          sudo apt-get install -y ${{ matrix.toolchain.compiler.cc }} ${{ matrix.toolchain.compiler.cpp }}
 
       - name: Set reusable strings
         # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
@@ -59,7 +75,7 @@ jobs:
           -B ${{ steps.strings.outputs.build-output-dir }}
           -DCMAKE_CXX_COMPILER=${{ matrix.toolchain.compiler.cpp }}
           -DCMAKE_C_COMPILER=${{ matrix.toolchain.compiler.cc }}
-          -DCMAKE_CXX_FLAGS=${{ matrix.toolchain.cxxflags }}
+          -DCMAKE_CXX_FLAGS="${{ matrix.toolchain.cxxflags }}"
           -G "Ninja Multi-Config"
 
       - name: Build

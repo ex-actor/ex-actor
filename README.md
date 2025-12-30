@@ -14,15 +14,15 @@
 
 **ex_actor** is a modern C++ actor framework based on `std::execution`. **Only requires C++20 [(?)](#faqs)**.
 
-This framework **turns your C++ class into a stateful async service** (so called actor) by one line of code. All method calls to it will be queued and executed in serial, so in your class you don't need any lock, just focus on your logic.
+This framework **turns your C++ class into a stateful async service** (so called actor) by one line of code. All method calls to it will be queued and executed in serial, so in your class you don't need any locks, just focus on your logic.
 
-When the actor is local, args in method will be passed directly in memory. When it's a remote actor, it'll help you to serialize them, send through network, and get the return value back.
+When the actor is local, args in method will be passed directly in memory. When it's a remote actor, we'll help you to serialize them, send through network, and get the return value back.
 
 This programming paradigm is called "Actor Model". It's a very easy way to write distributed & highly concurrent programs, because you don't need any locks in your code. Just write plain classes.
 
 # Key Features
 
-1. **Easy to Use** - Non-intrusive API, turn your existing class into an actor, no need to modify your class.
+1. **Easy to Use** - Clean & intuitive API, turn your existing class into an actor.
 2. **Standard-Compliant** - Composible with everything in std::execution ecosystem.
 3. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also [provide many out-of-box](https://ex-actor.github.io/ex-actor/schedulers/): work-sharing, work-stealing, custom priority and so on.
 
@@ -131,9 +131,9 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 ## Is it production-ready?
 
-The single-process mode is heavily tested in our company's production environment(ubuntu22.04, gcc12). While minor bugs can occur due to version divergence between open source & internal codes, the overall quality is good, feel free to use it in production.
+The single-process mode is heavily tested in our company's production environment. While minor issues can occur due to version divergence between internal and open source codes, the overall quality is good, feel free to use it in production.
 
-The distributed mode's feature is complete and ready to be used, but isn't massively tested in production yet. Welcome to have a try and build together with us!
+The distributed mode is fully functional and ready for use, but isn't tested in production yet. Welcome to have a try and build together with us!
 
 ## The Team Behind `ex_actor`
 

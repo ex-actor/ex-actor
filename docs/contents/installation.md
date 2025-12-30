@@ -1,10 +1,12 @@
 # Installation
 
-## Compiler Requirements
+## Supported Compilers
 
-- gcc 11+
-- clang 16+
-- MSVC 19.3+ (experimental support)
+We've tested on:
+
+  - gcc 11 - 14
+  - clang 16 - 18
+  - MSVC 14.44 (windows support is experimental)
 
 Don't forget to set `--std=c++20` or above when compiling.
 

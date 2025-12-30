@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build_and_test:
-    name: Build and test on ${{ toJson(matrix) }}
+    name: ${{ matrix.toolchain.os }}+${{ matrix.toolchain.compiler.cc }}
     runs-on: ${{ matrix.toolchain.os }}
 
     strategy:
@@ -98,3 +98,11 @@ jobs:
         if: runner.os == 'Windows'
         run: >
           ctest --build-config ${{ matrix.build_type }} --output-on-failure
+
+  # This is the job you would "Require" in GitHub settings
+  all-tests-passed:
+    name: check whether all tests passed
+    needs: build_and_test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All matrix jobs passed!"

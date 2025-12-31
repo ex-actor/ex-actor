@@ -108,6 +108,12 @@ class Semaphore {
 };  // namespace ex_actor::util
 
 namespace ex_actor::internal::util {
+
+/**
+ * std::mutex+std::queue performs surprisingly good on small items. Because there are spin-lock optimization in
+ * std::mutex. In our code the actor message is just a pointer to the operation state, which is very small. So this
+ * simple implementation is good enough. No need to use a sophisticated lock-free MPSC queue.
+ */
 template <class T>
 struct LinearizableUnboundedQueue {
  public:

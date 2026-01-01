@@ -14,8 +14,11 @@
 
 #include "ex_actor/internal/actor_registry.h"
 
+#include <chrono>
+#include <cstdint>
 #include <exception>
 
+#include "ex_actor/internal/network.h"
 #include "ex_actor/internal/remote_handler_registry.h"
 
 namespace ex_actor::internal {
@@ -191,6 +194,12 @@ exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(
   }
 }
 
+bool ActorRegistryBackend::CheckNode(uint32_t node_id) {
+  auto node_list = message_broker_->GetNodeList();
+  return std::ranges::find_if(node_list, [node_id](auto& element) { return element.node_id == node_id; }) !=
+         node_list.end();
+}
+
 // ----------------------ActorRegistry--------------------------
 ActorRegistry::~ActorRegistry() {
   logging::Info("Start to shutdown actor registry");
@@ -205,31 +214,40 @@ ActorRegistry::~ActorRegistry() {
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                             network::HeartbeatConfig heartbeat_config)
+                             network::HeartbeatConfig heartbeat_config, std::chrono::milliseconds gossip_interval)
     : is_distributed_mode_(!cluster_node_info.empty()),
       this_node_id_(this_node_id),
       default_work_sharing_thread_pool_(thread_pool_size),
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
-      message_broker_([&cluster_node_info, &heartbeat_config, this]() -> std::unique_ptr<network::MessageBroker> {
-        if (cluster_node_info.empty()) {
-          return nullptr;
-        }
-        return std::make_unique<network::MessageBroker>(
-            cluster_node_info, this_node_id_,
-            /*request_handler=*/
-            [this](uint64_t received_request_id, network::ByteBufferType data) {
-              auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
-                  received_request_id, std::move(data));
-              async_scope_.spawn(std::move(task));
-            },
-            heartbeat_config);
-      }()),
+      message_broker_(
+          [&cluster_node_info, &heartbeat_config, &gossip_interval, this]() -> std::unique_ptr<network::MessageBroker> {
+            if (cluster_node_info.empty()) {
+              return nullptr;
+            }
+            return std::make_unique<network::MessageBroker>(
+                cluster_node_info, this_node_id_,
+                /*request_handler=*/
+                [this](uint64_t received_request_id, network::ByteBufferType data) {
+                  auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
+                      received_request_id, std::move(data));
+                  async_scope_.spawn(std::move(task));
+                },
+                heartbeat_config, gossip_interval);
+          }()),
       backend_actor_(scheduler_->Clone(), ActorConfig {.node_id = this_node_id_}, scheduler_->Clone(), this_node_id,
                      cluster_node_info, message_broker_.get()),
       backend_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &backend_actor_,
                          message_broker_.get()) {}
+
+// TODO: Improve this
+bool ActorRegistry::WaitNode(uint32_t node_id) {
+  auto query = backend_actor_ref_.Send<&ActorRegistryBackend::CheckNode>(node_id);
+  auto [result] = stdexec::sync_wait(std::move(query)).value();
+  return result;
+}
+
 }  // namespace ex_actor::internal
 
 // ----------------------Global Default Registry--------------------------
@@ -304,6 +322,34 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
 }
 
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
+
+void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
+  auto this_node_id = cluster_config.this_node.node_id;
+  internal::logging::Info(
+      "Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}, this_node_id={}, ",
+      thread_pool_size, cluster_config.this_node.node_id);
+  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
+  internal::SetupGlobalHandlers();
+  std::vector<NodeInfo> cluster_node_info = {cluster_config.this_node};
+  if (!cluster_config.contact_node.address.empty()) {
+    cluster_node_info.push_back(cluster_config.contact_node);
+  }
+  // TODO: Pass the gossip_interval and  heartbeat_config to the constructor
+  global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, this_node_id, cluster_node_info);
+}
+
+// exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {}
+
+// TODO: The current implementation is for testing only.
+bool WaitNode(uint32_t node_id, std::chrono::milliseconds timeout) {
+  auto start_time = std::chrono::steady_clock::now();
+  while (std::chrono::steady_clock::now() - start_time < timeout) {
+    if (global_default_registry->WaitNode(node_id)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 void Shutdown() {
   internal::logging::Info("Shutting down ex_actor.");

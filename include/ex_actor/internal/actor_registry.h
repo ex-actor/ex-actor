@@ -170,11 +170,11 @@ class ActorRegistryBackend {
     if (actor_id.has_value()) {
       co_return ActorRef<UserClass>(this_node_id_, node_id, actor_id.value(), nullptr, message_broker_);
     }
-
     co_return std::nullopt;
   }
 
   exec::task<void> HandleNetworkRequest(uint64_t received_request_id, network::ByteBufferType request_buffer);
+  bool CheckNode(uint32_t node_id);
 
  private:
   bool is_distributed_mode_ = false;
@@ -290,6 +290,8 @@ class ActorRegistry {
     return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(node_id, name));
   }
 
+  bool WaitNode(uint32_t node_id);
+
  private:
   bool is_distributed_mode_;
   uint32_t this_node_id_;
@@ -302,8 +304,10 @@ class ActorRegistry {
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                          uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         network::HeartbeatConfig heartbeat_config = {});
+                         network::HeartbeatConfig heartbeat_config = {},
+                         std::chrono::milliseconds gossip_interval = kDefaultGossipInterval);
 };
+
 }  // namespace ex_actor::internal
 
 // ----------------Global Default Registry--------------------------
@@ -342,6 +346,9 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 
+void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config);
+
+bool WaitNode(uint32_t node_id, std::chrono::milliseconds timeout);
 /**
  * @brief Ask ex_actor to hold a resource, the resource won't be released until runtime is shut down.
  * Often used to hold an execution resource when using custom scheduler. This API is not thread-safe.

@@ -98,6 +98,10 @@ struct ActorLookUpRequest {
   std::string actor_name;
 };
 
+struct GossipNodeList {
+  std::vector<NodeInfo> node_list;
+};
+
 template <auto kFn>
 auto DeserializeFnArgs(const uint8_t* data, size_t size, const ActorRefDeserializationInfo& info) {
   using Sig = reflect::Signature<decltype(kFn)>;

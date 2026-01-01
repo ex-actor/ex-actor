@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <mutex>
 #include <thread>
 
 #include <exec/async_scope.hpp>
@@ -39,7 +40,7 @@ struct NodeInfo {
 namespace ex_actor::internal::network {
 using ByteBufferType = zmq::message_t;
 
-enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kHeartbeat };
+enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kHeartbeat, kGossip };
 
 struct Identifier {
   uint32_t request_node_id;
@@ -53,11 +54,19 @@ struct HeartbeatConfig {
   std::chrono::milliseconds heartbeat_interval = kDefaultHeartbeatInterval;
 };
 
+struct ClusterConfig {
+  NodeInfo this_node;
+  NodeInfo contact_node = {};
+  network::HeartbeatConfig heartbeat_config = {};
+  std::chrono::milliseconds gossip_interval = kDefaultGossipInterval;
+};
+
 class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                          std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
-                         HeartbeatConfig heartbeat_config = {});
+                         HeartbeatConfig heartbeat_config = {},
+                         std::chrono::milliseconds gossip_interval = kDefaultGossipInterval);
   ~MessageBroker();
 
   void ClusterAlignedStop();
@@ -111,6 +120,8 @@ class MessageBroker {
 
   void ReplyRequest(uint64_t received_request_id, ByteBufferType data);
 
+  std::vector<NodeInfo> GetNodeList();
+
  private:
   void EstablishConnections();
   void PushOperation(TypeErasedSendOperation* operation);
@@ -119,6 +130,9 @@ class MessageBroker {
   void HandleReceivedMessage(zmq::multipart_t multi);
   void CheckHeartbeat();
   void SendHeartbeat();
+  void SendGossip();
+  void HandleGossip(zmq::message_t gossip_msg);
+  size_t NextContactNode();
 
   struct ReplyOperation {
     Identifier identifier;
@@ -128,9 +142,13 @@ class MessageBroker {
   std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;
   std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
-  HeartbeatConfig heartbeat_;
+  HeartbeatConfig heartbeat_config_;
+  std::chrono::milliseconds gossip_interval_;
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;
+  size_t contact_node_index_ = 0;
+  // TODO: Just for test
+  mutable std::mutex node_list_mutex_;
 
   zmq::context_t context_ {/*io_threads_=*/1};
   util::LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
@@ -149,11 +167,13 @@ class MessageBroker {
 
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
   TimePoint last_heartbeat_;
+  TimePoint last_gossip_;
   std::unordered_map<uint32_t, TimePoint> last_seen_;
 };
 
 }  // namespace ex_actor::internal::network
 
 namespace ex_actor {
+using internal::network::ClusterConfig;
 using internal::network::HeartbeatConfig;
 }  // namespace ex_actor

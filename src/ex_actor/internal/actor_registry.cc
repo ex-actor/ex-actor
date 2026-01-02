@@ -214,28 +214,27 @@ ActorRegistry::~ActorRegistry() {
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                             network::HeartbeatConfig heartbeat_config, std::chrono::milliseconds gossip_interval)
+                             network::NetworkConfig network_config)
     : is_distributed_mode_(!cluster_node_info.empty()),
       this_node_id_(this_node_id),
       default_work_sharing_thread_pool_(thread_pool_size),
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
-      message_broker_(
-          [&cluster_node_info, &heartbeat_config, &gossip_interval, this]() -> std::unique_ptr<network::MessageBroker> {
-            if (cluster_node_info.empty()) {
-              return nullptr;
-            }
-            return std::make_unique<network::MessageBroker>(
-                cluster_node_info, this_node_id_,
-                /*request_handler=*/
-                [this](uint64_t received_request_id, network::ByteBufferType data) {
-                  auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
-                      received_request_id, std::move(data));
-                  async_scope_.spawn(std::move(task));
-                },
-                heartbeat_config, gossip_interval);
-          }()),
+      message_broker_([&cluster_node_info, &network_config, this]() -> std::unique_ptr<network::MessageBroker> {
+        if (cluster_node_info.empty()) {
+          return nullptr;
+        }
+        return std::make_unique<network::MessageBroker>(
+            cluster_node_info, this_node_id_,
+            /*request_handler=*/
+            [this](uint64_t received_request_id, network::ByteBufferType data) {
+              auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
+                  received_request_id, std::move(data));
+              async_scope_.spawn(std::move(task));
+            },
+            network_config);
+      }()),
       backend_actor_(scheduler_->Clone(), ActorConfig {.node_id = this_node_id_}, scheduler_->Clone(), this_node_id,
                      cluster_node_info, message_broker_.get()),
       backend_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &backend_actor_,

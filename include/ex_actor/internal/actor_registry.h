@@ -207,7 +207,7 @@ class ActorRegistry {
    */
   explicit ActorRegistry(uint32_t thread_pool_size)
       : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, /*this_node_id=*/0, /*cluster_node_info=*/ {},
-                      /*heartbeat_config=*/ {}) {}
+                      /*network_config=*/ {}) {}
 
   /**
    * @brief Construct in single-node mode, use specified scheduler.
@@ -215,23 +215,23 @@ class ActorRegistry {
   template <ex::scheduler Scheduler>
   explicit ActorRegistry(Scheduler scheduler)
       : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler),
-                      /*this_node_id=*/0, /*cluster_node_info=*/ {}, /*heartbeat_config=*/ {}) {}
+                      /*this_node_id=*/0, /*cluster_node_info=*/ {}, /*network_config=*/ {}) {}
 
   /**
    * @brief Construct in distributed mode, use the default work-sharing thread pool as the scheduler.
    */
   explicit ActorRegistry(uint32_t thread_pool_size, uint32_t this_node_id,
-                         const std::vector<NodeInfo>& cluster_node_info, network::HeartbeatConfig heartbeat_config = {})
-      : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, this_node_id, cluster_node_info, heartbeat_config) {}
+                         const std::vector<NodeInfo>& cluster_node_info, network::NetworkConfig network_config = {})
+      : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, this_node_id, cluster_node_info, network_config) {}
 
   /**
    * @brief Construct in distributed mode, use specified scheduler.
    */
   template <ex::scheduler Scheduler>
   explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         network::HeartbeatConfig heartbeat_config = {})
+                         network::NetworkConfig network_config = {})
       : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler), this_node_id,
-                      cluster_node_info, heartbeat_config) {}
+                      cluster_node_info, network_config) {}
 
   ~ActorRegistry();
 
@@ -304,8 +304,7 @@ class ActorRegistry {
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                          uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         network::HeartbeatConfig heartbeat_config = {},
-                         std::chrono::milliseconds gossip_interval = kDefaultGossipInterval);
+                         network::NetworkConfig network_config = {});
 };
 
 }  // namespace ex_actor::internal

@@ -49,24 +49,23 @@ struct Identifier {
   MessageFlag flag;
 };
 
-struct HeartbeatConfig {
+struct NetworkConfig {
   std::chrono::milliseconds heartbeat_timeout = kDefaultHeartbeatTimeout;
   std::chrono::milliseconds heartbeat_interval = kDefaultHeartbeatInterval;
+  std::chrono::milliseconds gossip_interval = kDefaultGossipInterval;
 };
 
 struct ClusterConfig {
   NodeInfo this_node;
   NodeInfo contact_node = {};
-  network::HeartbeatConfig heartbeat_config = {};
-  std::chrono::milliseconds gossip_interval = kDefaultGossipInterval;
+  network::NetworkConfig network_config = {};
 };
 
 class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                          std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
-                         HeartbeatConfig heartbeat_config = {},
-                         std::chrono::milliseconds gossip_interval = kDefaultGossipInterval);
+                         NetworkConfig network_config = {});
   ~MessageBroker();
 
   void ClusterAlignedStop();
@@ -142,8 +141,7 @@ class MessageBroker {
   std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;
   std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
-  HeartbeatConfig heartbeat_config_;
-  std::chrono::milliseconds gossip_interval_;
+  NetworkConfig network_config_;
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;
   size_t contact_node_index_ = 0;
@@ -175,5 +173,5 @@ class MessageBroker {
 
 namespace ex_actor {
 using internal::network::ClusterConfig;
-using internal::network::HeartbeatConfig;
+using internal::network::NetworkConfig;
 }  // namespace ex_actor

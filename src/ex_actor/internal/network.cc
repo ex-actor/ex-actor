@@ -33,13 +33,12 @@ namespace ex_actor::internal::network {
 
 MessageBroker::MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                              std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
-                             HeartbeatConfig heartbeat_config, std::chrono::milliseconds gossip_interval)
+                             NetworkConfig network_config)
     : node_list_(std::move(node_list)),
       this_node_id_(this_node_id),
       request_handler_(std::move(request_handler)),
-      heartbeat_config_(heartbeat_config),
+      network_config_(network_config),
       last_heartbeat_(std::chrono::steady_clock::now()),
-      gossip_interval_(gossip_interval),
       last_gossip_(std::chrono::steady_clock::now()) {
   EstablishConnections();
 
@@ -47,8 +46,8 @@ MessageBroker::MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_) {
       last_seen_.emplace(node.node_id, start_time_point);
+      alive_peers_.Insert(node.node_id);
     }
-    alive_peers_.Insert(node.node_id);
   }
   send_thread_ = std::jthread([this](const std::stop_token& stop_token) { SendProcessLoop(stop_token); });
   recv_thread_ = std::jthread([this](const std::stop_token& stop_token) { ReceiveProcessLoop(stop_token); });
@@ -72,8 +71,6 @@ void MessageBroker::ClusterAlignedStop() {
       }
     }
   }
-  // NOTE: The size of latch is fixed, we need a synchronization primitives that have the ability to change.
-  alive_peers_.Erase(this_node_id_);
   alive_peers_.Wait();
   stopped_.store(true);
   ex::sync_wait(async_scope_.on_empty());
@@ -248,7 +245,7 @@ void MessageBroker::CheckHeartbeat() {
   std::lock_guard lock {node_list_mutex_};
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_ &&
-        std::chrono::steady_clock::now() - last_seen_[node.node_id] >= heartbeat_config_.heartbeat_timeout) {
+        std::chrono::steady_clock::now() - last_seen_[node.node_id] >= network_config_.heartbeat_timeout) {
       logging::Error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
       // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
       std::quick_exit(1);
@@ -258,7 +255,7 @@ void MessageBroker::CheckHeartbeat() {
 
 void MessageBroker::SendHeartbeat() {
   std::lock_guard lock {node_list_mutex_};
-  if (!stopped_.load() && std::chrono::steady_clock::now() - last_heartbeat_ >= heartbeat_config_.heartbeat_interval) {
+  if (!stopped_.load() && std::chrono::steady_clock::now() - last_heartbeat_ >= network_config_.heartbeat_interval) {
     for (const auto& node : node_list_) {
       if (node.node_id != this_node_id_) {
         auto heartbeat =
@@ -292,7 +289,7 @@ void MessageBroker::SendGossip() {
     return;
   }
 
-  if (!stopped_.load() && std::chrono::steady_clock::now() - last_gossip_ >= gossip_interval_) {
+  if (!stopped_.load() && std::chrono::steady_clock::now() - last_gossip_ >= network_config_.gossip_interval) {
     auto serialized_node_list = serde::Serialize(serde::GossipNodeList {node_list_});
     serde::BufferWriter writer {network::ByteBufferType(serialized_node_list.size())};
     writer.CopyFrom(serialized_node_list.data(), serialized_node_list.size());
@@ -316,7 +313,7 @@ void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
     if (node.node_id == this_node_id_) {
       continue;
     }
-    // TODO: If a node dead, it won't be able to reconnect cause it's info have been stored into the node_lsit.
+    // TODO: If a node dead, it won't be able to reconnect cause it's info have been stored into the node_list.
     std::lock_guard lock {node_list_mutex_};
     if (std::ranges::find_if(node_list_, [node](auto& element) { return element.node_id == node.node_id; }) ==
         node_list_.end()) {

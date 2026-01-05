@@ -16,14 +16,17 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
+#include <oneapi/tbb/partitioner.h>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
@@ -34,8 +37,16 @@ namespace ex_actor {
 struct NodeInfo {
   uint32_t node_id = 0;
   std::string address;
+  friend bool operator==(const NodeInfo& lhs, const NodeInfo& rhs) { return lhs.node_id == rhs.node_id; }
 };
 }  // namespace ex_actor
+
+namespace std {
+template <>
+struct hash<ex_actor::NodeInfo> {
+  size_t operator()(const ex_actor::NodeInfo& k) const noexcept { return hash<uint32_t> {}(k.node_id); }
+};
+}  // namespace std
 
 namespace ex_actor::internal::network {
 using ByteBufferType = zmq::message_t;
@@ -61,11 +72,66 @@ struct ClusterConfig {
   network::NetworkConfig network_config = {};
 };
 
+class PeerNodes {
+ public:
+  void Insert(const NodeInfo& node, bool state) {
+    std::lock_guard lock(mutex_);
+    map_.try_emplace(node, state);
+    alive_peers_ += 1;
+  }
+
+  bool Contains(const NodeInfo& node) {
+    std::lock_guard lock(mutex_);
+    return map_.contains(node);
+  }
+
+  void ActivateNode(const uint32_t& node_id) {
+    std::lock_guard lock(mutex_);
+    NodeInfo node {.node_id = node_id};
+    map_[node] = true;
+    alive_peers_ += 1;
+  }
+
+  void DeactivateNode(const uint32_t& node_id) {
+    std::lock_guard lock(mutex_);
+    NodeInfo node {.node_id = node_id};
+    map_[node] = false;
+    alive_peers_ -= 1;
+    if (alive_peers_ == 0) {
+      cv_.notify_all();
+    }
+  }
+
+  void WaitAllNodesExit() {
+    std::unique_lock lock(mutex_);
+    cv_.wait(lock, [this]() { return alive_peers_ == 0; });
+  }
+
+  std::vector<NodeInfo> GetNodeList() {
+    std::lock_guard lock(mutex_);
+    std::vector<NodeInfo> node_list {};
+    node_list.reserve(map_.size());
+    for (auto& pair : map_) {
+      node_list.push_back(pair.first);
+    }
+    return node_list;
+  }
+
+ private:
+  std::unordered_map<NodeInfo, bool> map_;
+  std::condition_variable cv_;
+  std::mutex mutex_;
+  uint32_t alive_peers_ = 0;
+};
+
 class MessageBroker {
  public:
   explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                          std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
                          NetworkConfig network_config = {});
+  explicit MessageBroker(const ClusterConfig& cluster_config,
+                         std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler);
+
   ~MessageBroker();
 
   void ClusterAlignedStop();
@@ -119,9 +185,10 @@ class MessageBroker {
 
   void ReplyRequest(uint64_t received_request_id, ByteBufferType data);
 
-  std::vector<NodeInfo> GetNodeList();
+  bool CheckNode(uint32_t node_id);
 
  private:
+  void EstablishConnectionTo(const NodeInfo& node_info);
   void EstablishConnections();
   void PushOperation(TypeErasedSendOperation* operation);
   void SendProcessLoop(const std::stop_token& stop_token);
@@ -145,8 +212,6 @@ class MessageBroker {
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;
   size_t contact_node_index_ = 0;
-  // TODO: Just for test
-  mutable std::mutex node_list_mutex_;
 
   zmq::context_t context_ {/*io_threads_=*/1};
   util::LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
@@ -160,8 +225,9 @@ class MessageBroker {
   std::jthread send_thread_;
   std::jthread recv_thread_;
   std::atomic_bool stopped_ = false;
-  util::LockGuardedSet<uint32_t> alive_peers_;
+  PeerNodes peer_nodes_;
   exec::async_scope async_scope_;
+  bool enable_dynamic_connectivity_ = false;
 
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
   TimePoint last_heartbeat_;

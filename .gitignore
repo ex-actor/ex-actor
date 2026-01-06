@@ -9,6 +9,7 @@ TARGET_COMPILE_PDB.pdb
 bazel-*
 docs/contents/assets
 docs/contents/index.md
+docs/contents/contributing.md
 Testing/
 core.*
 *.log

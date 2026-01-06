@@ -9,12 +9,17 @@ set -e -x
 rm -rf ./contents/assets
 cp -r ../assets ./contents/assets
 
+# copy the README.md to the contents/index.md
 rm -f ./contents/index.md
 cp ../README.md ./contents/index.md
 sed -i '1i # Introduction' ./contents/index.md
 
 # remove all lines between <!-- GITHUB README ONLY START --> and <!-- GITHUB README ONLY END -->
 sed -i '/<!-- GITHUB README ONLY START -->/,/<!-- GITHUB README ONLY END -->/d' ./contents/index.md
+
+# copy the CONTRIBUTING.md to the contents/contributing.md
+rm -f ./contents/contributing.md
+cp ../CONTRIBUTING.md ./contents/contributing.md
 
 
 # check the first args, should be "serve" or "build"

@@ -73,30 +73,37 @@ struct ClusterConfig {
 };
 
 class PeerNodes {
+  enum class NodeState : uint8_t { kAlive = 0, kQuitting, kDead };
+
  public:
-  void Insert(const NodeInfo& node, bool state) {
+  void Add(const NodeInfo& node) {
     std::lock_guard lock(mutex_);
-    map_.try_emplace(node, state);
+    map_.try_emplace(node, NodeState::kAlive);
     alive_peers_ += 1;
   }
 
-  bool Contains(const NodeInfo& node) {
+  bool Contains(const uint32_t& node_id) {
     std::lock_guard lock(mutex_);
-    return map_.contains(node);
+    return map_.contains({.node_id = node_id});
   }
 
   void ActivateNode(const uint32_t& node_id) {
     std::lock_guard lock(mutex_);
     NodeInfo node {.node_id = node_id};
-    map_[node] = true;
-    alive_peers_ += 1;
+    if (map_.at(node) == NodeState::kDead) {
+      map_[node] = NodeState::kAlive;
+      alive_peers_ += 1;
+    }
   }
 
   void DeactivateNode(const uint32_t& node_id) {
     std::lock_guard lock(mutex_);
     NodeInfo node {.node_id = node_id};
-    map_[node] = false;
-    alive_peers_ -= 1;
+    if (map_.at(node) == NodeState::kAlive) {
+      map_[node] = NodeState::kQuitting;
+      alive_peers_ -= 1;
+    }
+
     if (alive_peers_ == 0) {
       cv_.notify_all();
     }
@@ -112,13 +119,15 @@ class PeerNodes {
     std::vector<NodeInfo> node_list {};
     node_list.reserve(map_.size());
     for (auto& pair : map_) {
-      node_list.push_back(pair.first);
+      if (pair.second == NodeState::kQuitting || pair.second == NodeState::kAlive) {
+        node_list.push_back(pair.first);
+      }
     }
     return node_list;
   }
 
  private:
-  std::unordered_map<NodeInfo, bool> map_;
+  std::unordered_map<NodeInfo, NodeState> map_;
   std::condition_variable cv_;
   std::mutex mutex_;
   uint32_t alive_peers_ = 0;
@@ -195,10 +204,8 @@ class MessageBroker {
   void ReceiveProcessLoop(const std::stop_token& stop_token);
   void HandleReceivedMessage(zmq::multipart_t multi);
   void CheckHeartbeat();
-  void SendHeartbeat();
-  void SendGossip();
+  void SendHeartbeatOrGossip();
   void HandleGossip(zmq::message_t gossip_msg);
-  size_t NextContactNode();
 
   struct ReplyOperation {
     Identifier identifier;

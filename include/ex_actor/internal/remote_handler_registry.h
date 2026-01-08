@@ -150,10 +150,11 @@ class RemoteFuncHandlerRegistrar {
 
     std::vector<char> serialized {};
     if constexpr (std::is_void_v<UnwrappedType>) {
-      co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+      co_await context.actor->template CallActorMethodUseTuple<kMethod>(
+          /*unsafe_message_slot_index=*/std::nullopt, std::move(call_args.args_tuple));
     } else {
-      auto return_value =
-          co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+      auto return_value = co_await context.actor->template CallActorMethodUseTuple<kMethod>(
+          /*unsafe_message_slot_index=*/std::nullopt, std::move(call_args.args_tuple));
       serialized = Serialize(ActorMethodReturnValue<UnwrappedType> {std::move(return_value)});
     }
 

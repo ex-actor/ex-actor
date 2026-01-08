@@ -195,7 +195,7 @@ ActorRegistry::~ActorRegistry() {
   if (message_broker_ != nullptr) {
     message_broker_->ClusterAlignedStop();
   }
-  ex::sync_wait(backend_actor_.CallActorMethod<&ActorRegistryBackend::AsyncDestroyAllActors>());
+  ex::sync_wait(backend_actor_ref_.SendLocal<&ActorRegistryBackend::AsyncDestroyAllActors>());
   ex::sync_wait(backend_actor_.AsyncDestroy());
   ex::sync_wait(async_scope_.on_empty());
   log::Info("Actor registry shutdown completed");
@@ -218,8 +218,8 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
             cluster_config,
             /*request_handler=*/
             [this](uint64_t received_request_id, ByteBufferType data) {
-              auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
-                  received_request_id, std::move(data));
+              auto task = backend_actor_ref_.SendLocal<&ActorRegistryBackend::HandleNetworkRequest>(received_request_id,
+                                                                                                    std::move(data));
               async_scope_.spawn(std::move(task));
             });
       }()),

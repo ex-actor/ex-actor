@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/common_structs.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
 

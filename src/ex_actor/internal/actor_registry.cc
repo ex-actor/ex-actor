@@ -155,6 +155,7 @@ exec::task<void> ActorRegistryRequestProcessor::HandleActorMethodCallRequest(
   auto handler_key_len = reader.NextPrimitive<uint64_t>();
   auto handler_key = reader.PullString(handler_key_len);
   auto actor_id = reader.NextPrimitive<uint64_t>();
+  auto mailbox_index = reader.NextPrimitive<size_t>();
   if (!actor_id_to_actor_.contains(actor_id)) {
     ReplyError(
         received_request_id, serde::NetworkReplyType::kActorMethodCallError,
@@ -183,7 +184,10 @@ exec::task<void> ActorRegistryRequestProcessor::HandleActorMethodCallRequest(
                                     .message_broker = message_broker_};
   try {
     auto task = handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
-        .actor = actor_id_to_actor_.at(actor_id).get(), .request_buffer = std::move(reader), .info = info});
+        .actor_message_context =
+            ActorMessageContext {.actor = actor_id_to_actor_.at(actor_id).get(), .mailbox_index = mailbox_index},
+        .request_buffer = std::move(reader),
+        .info = info});
     auto buffer = co_await std::move(task);
     message_broker_->ReplyRequest(received_request_id, std::move(buffer));
   } catch (std::exception& error) {
@@ -198,7 +202,7 @@ ActorRegistry::~ActorRegistry() {
   if (is_distributed_mode_) {
     message_broker_->ClusterAlignedStop();
   }
-  ex::sync_wait(processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::AsyncDestroyAllActors>());
+  ex::sync_wait(processor_actor_ref_.SendLocal<&ActorRegistryRequestProcessor::AsyncDestroyAllActors>());
   ex::sync_wait(processor_actor_.AsyncDestroy());
   ex::sync_wait(async_scope_.on_empty());
   logging::Info("Actor registry shutdown completed");
@@ -221,7 +225,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
             cluster_node_info, this_node_id_,
             /*request_handler=*/
             [this](uint64_t received_request_id, network::ByteBufferType data) {
-              auto task = processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::HandleNetworkRequest>(
+              auto task = processor_actor_ref_.SendLocal<&ActorRegistryRequestProcessor::HandleNetworkRequest>(
                   received_request_id, std::move(data));
               async_scope_.spawn(std::move(task));
             },

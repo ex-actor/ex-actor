@@ -22,9 +22,9 @@
 #include <rfl/capnproto.hpp>
 #include <spdlog/spdlog.h>
 
-#include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/actor_ref_serialization/actor_ref_deserialization_info.h"
 #include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization_reader.h"
+#include "ex_actor/internal/common_structs.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/reflect.h"
 

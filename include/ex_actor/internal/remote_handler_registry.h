@@ -36,7 +36,7 @@ class RemoteActorRequestHandlerRegistry {
   }
 
   struct RemoteActorMethodCallHandlerContext {
-    TypeErasedActor* actor;
+    ActorMessageContext actor_message_context;
     serde::BufferReader<network::ByteBufferType> request_buffer;
     ActorRefDeserializationInfo info;
   };
@@ -140,7 +140,8 @@ class RemoteFuncHandlerRegistrar {
   template <auto kMethod>
   exec::task<network::ByteBufferType> DeserializeAndInvokeActorMethod(
       RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
-    EXA_THROW_CHECK(context.actor != nullptr);
+    EXA_THROW_CHECK(context.actor_message_context.actor != nullptr);
+    auto [actor, mailbox_index] = context.actor_message_context;
     using Sig = reflect::Signature<decltype(kMethod)>;
     using UnwrappedType = decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type;
 
@@ -149,10 +150,10 @@ class RemoteFuncHandlerRegistrar {
 
     std::vector<char> serialized {};
     if constexpr (std::is_void_v<UnwrappedType>) {
-      co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+      co_await actor->template CallActorMethodUseTuple<kMethod>(mailbox_index, std::move(call_args.args_tuple));
     } else {
       auto return_value =
-          co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+          co_await actor->template CallActorMethodUseTuple<kMethod>(mailbox_index, std::move(call_args.args_tuple));
       serialized = serde::Serialize(serde::ActorMethodReturnValue<UnwrappedType> {std::move(return_value)});
     }
 

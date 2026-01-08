@@ -22,6 +22,8 @@
 #include <rfl/Tuple.hpp>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/internal/common_structs.h"
+
 namespace ex_actor::internal::reflect {
 
 template <typename T>
@@ -164,6 +166,11 @@ std::string GetUniqueNameForFunction() {
   // it's an unique mangled name. So it works now, maybe replace it with a more robust way in the future.
   return typeid(kFunc).name();
 }
+
+template <class T>
+concept HasManualActivationHook = requires(T cls, MessagePushEvent event) {
+  { cls.ExActorManualActivationHook(event) } -> std::same_as<bool>;
+};
 }  // namespace ex_actor::internal::reflect
 
 namespace ex_actor::reflect {

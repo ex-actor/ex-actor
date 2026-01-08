@@ -198,7 +198,7 @@ ActorRegistry::~ActorRegistry() {
   if (is_distributed_mode_) {
     message_broker_->ClusterAlignedStop();
   }
-  ex::sync_wait(processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::AsyncDestroyAllActors>());
+  ex::sync_wait(processor_actor_ref_.SendLocal<&ActorRegistryRequestProcessor::AsyncDestroyAllActors>());
   ex::sync_wait(processor_actor_.AsyncDestroy());
   ex::sync_wait(async_scope_.on_empty());
   logging::Info("Actor registry shutdown completed");
@@ -221,7 +221,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
             cluster_node_info, this_node_id_,
             /*request_handler=*/
             [this](uint64_t received_request_id, network::ByteBufferType data) {
-              auto task = processor_actor_.CallActorMethod<&ActorRegistryRequestProcessor::HandleNetworkRequest>(
+              auto task = processor_actor_ref_.SendLocal<&ActorRegistryRequestProcessor::HandleNetworkRequest>(
                   received_request_id, std::move(data));
               async_scope_.spawn(std::move(task));
             },

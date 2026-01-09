@@ -22,36 +22,36 @@
 #include <stdexec/execution.hpp>
 
 namespace ex_actor {
+
+/// @brief Actor configuration, passed to ex_actor::Spawn.
+/// @attention If you meet segmentation fault(double free) in destructor of ActorConfig, read the following details.
+///
+/// Before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error. So
+/// when using ActorConfig before gcc 13, we must give it a variable name(lvalue);
+///
+/// i.e. you can't `co_await CreateActor<X>(ActorConfig {...})`, instead, you should define a
+/// separate named variable for the config, and copy it to CreateActor(), like this:
+///
+/// ```cpp
+/// ex_actor::ActorConfig config {...}; // must give it a variable name(lvalue)
+/// auto actor = co_await CreateActor<X>(config);
+/// ```
+///
+/// see gcc's bug report: https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
   uint32_t node_id = 0;
 
-  /**
-   * @brief Actor's name, should be unique within one node.
-   *
-   * @note Before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free
-   * error. here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it
-   * explicitly.
-   *
-   * i.e. you can't `co_await CreateActor<X>(ActorConfig {.actor_name = "xxx"})` directly, instead, you
-   * should define a separate named variable for the config, and pass it to CreateActor(), like this:
-   *
-   * @code
-   * ex_actor::ActorConfig config {.actor_name = "xxx"};
-   * auto actor = co_await CreateActor<X>(config);
-   * @endcode
-   *
-   * see gcc's bug report: https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
-   */
+  /// actor's name, should be unique within one node.
   std::optional<std::string> actor_name;
 
-  /*
-  -----scheduler specific configs-----
-  */
+  size_t unsafe_message_slots = 0;
 
-  // used in SchedulerUnion
+  //-----scheduler specific configs(experimental, might be changed in the future)-----
+
+  /// used in SchedulerUnion
   size_t scheduler_index = 0;
-  // used in PriorityThreadPool
+  /// used in PriorityThreadPool
   uint32_t priority = UINT32_MAX;
 };
 

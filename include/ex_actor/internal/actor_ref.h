@@ -60,8 +60,6 @@ class ActorRef {
    * @note This method requires your args and return value can be serialized by reflect-cpp, if you met compile errors
    * like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/ to add a serializer for it. Or if you
    * can confirm it's a local actor, use SendLocal() instead, which doesn't require your args to be serializable.
-   * @note Dynamic memory allocation will happen due to the use of coroutine. If you can confirm it's a local actor,
-   * consider using SendLocal() instead, which has better performance.
    * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>
@@ -71,7 +69,7 @@ class ActorRef {
   }
 
   /**
-   * @brief Send message to a local actor. Has better performance than the generic Send(). No heap allocation.
+   * @brief Send message to a local actor. Doesn't require your args to be serializable.
    */
   template <auto kMethod, class... Args>
   [[nodiscard]] ex::sender auto SendLocal(Args... args) const {
@@ -81,7 +79,27 @@ class ActorRef {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
     EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
-    return type_erased_actor_->template CallActorMethod<kMethod>(std::move(args)...);
+    return type_erased_actor_->template CallActorMethod<kMethod>(/*unsafe_message_slot_index=*/std::nullopt,
+                                                                 std::move(args)...);
+  }
+
+  struct UnsafeSendOperation {
+    TypeErasedActor* type_erased_actor = nullptr;
+    size_t unsafe_message_slot_index = 0;
+
+    template <auto kMethod, class... Args>
+    [[nodiscard]] ex::sender auto Send(Args... args) const {
+      using Sig = reflect::Signature<decltype(kMethod)>;
+      static_assert(!stdexec::sender<typename Sig::ReturnType>,
+                    "only works for methods that returns non-sender(one-step methods)");
+      return type_erased_actor->template CallActorMethod<kMethod>(
+          /*unsafe_message_slot_index=*/unsafe_message_slot_index, std::move(args)...);
+    }
+  };
+
+  UnsafeSendOperation UnsafeMessageSlot(size_t index) {
+    EXA_THROW_CHECK(node_id_ == this_node_id_) << "Cannot use unsafe message slot on remote actor.";
+    return UnsafeSendOperation {.type_erased_actor = type_erased_actor_, .unsafe_message_slot_index = index};
   }
 
   bool IsEmpty() const { return is_empty_; }

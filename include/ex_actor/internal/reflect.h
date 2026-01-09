@@ -168,8 +168,8 @@ std::string GetUniqueNameForFunction() {
 }
 
 template <class T>
-concept HasManualActivationHook = requires(T cls, MessagePushEvent event) {
-  { cls.ExActorManualActivationHook(event) } -> std::same_as<bool>;
+concept HasOnUnsafeMessageSlotFilledHook = requires(T cls, size_t unsafe_message_slot_index) {
+  { cls.ExActorOnUnsafeMessageSlotFilled(unsafe_message_slot_index) } -> std::same_as<bool>;
 };
 }  // namespace ex_actor::internal::reflect
 

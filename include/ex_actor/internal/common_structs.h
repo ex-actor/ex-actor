@@ -23,19 +23,6 @@
 
 namespace ex_actor {
 
-/// the event passed to user's hook function in manual actor activation.
-struct MessagePushEvent {
-  /// index of the mailbox the message was pushed to.
-  size_t mailbox_index = 0;
-  /// whether the message is a destroy message, when it's true, all other fields are invalid.
-  /// when a destroy message is pushed, the actor will be marked as pending to be destroyed.
-  /// this flag will be checked every time the actor is activated. Once found, the actor will be destroyed.
-  ///
-  /// @attention you should make sure the actor will be activated at least once after this event. Or the actor will
-  /// never be destroyed, and you'll possible block forever when shutting down.
-  bool is_destroy_message = false;
-};
-
 /// @brief Actor configuration, passed to ex_actor::Spawn.
 /// @attention If you meet segmentation fault(double free) in destructor of ActorConfig, read the following details.
 ///
@@ -58,21 +45,7 @@ struct ActorConfig {
   /// actor's name, should be unique within one node.
   std::optional<std::string> actor_name;
 
-  // ------------ mailbox related configs -----------
-
-  /// default mailbox type, a thread-safe unbounded queue.
-  struct UnboundedThreadSafeMailboxConfig {};
-
-  /// a mailbox with only one slot, not thread-safe.
-  ///
-  /// ususally combined with manually actor activation and multiple mailboxes. useful when you want to precisely
-  /// control the actor activation and get rid of the mailbox's synchronization overhead.
-  struct OneSlotUnsafeMailboxConfig {};
-
-  using MailboxConfig = std::variant<UnboundedThreadSafeMailboxConfig, OneSlotUnsafeMailboxConfig>;
-
-  /// configs of each mailbox, the number of mailboxes is the size of this vector.
-  std::vector<MailboxConfig> mailbox_configs = {UnboundedThreadSafeMailboxConfig {}};
+  size_t unsafe_message_slots = 0;
 
   //-----scheduler specific configs(experimental, might be changed in the future)-----
 

@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include <exec/async_scope.hpp>
@@ -41,10 +40,10 @@ class TypeErasedActor;
  */
 struct ActorMessageContext {
   TypeErasedActor* actor = nullptr;
-  size_t mailbox_index = 0;
+  std::optional<size_t> unsafe_message_slot_index;
 
   friend bool operator==(const ActorMessageContext& lhs, const ActorMessageContext& rhs) noexcept {
-    return lhs.actor == rhs.actor && lhs.mailbox_index == rhs.mailbox_index;
+    return lhs.actor == rhs.actor && lhs.unsafe_message_slot_index == rhs.unsafe_message_slot_index;
   }
 };
 
@@ -64,14 +63,16 @@ class TypeErasedActor {
   virtual exec::task<void> AsyncDestroy() = 0;
 
   template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethod(size_t mailbox_index, Args... args);
+  ex::sender auto CallActorMethod(std::optional<size_t> unsafe_message_slot_index, Args... args);
 
   template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethodUseTuple(size_t mailbox_index, std::tuple<Args...> args_tuple);
+  ex::sender auto CallActorMethodUseTuple(std::optional<size_t> unsafe_message_slot_index,
+                                          std::tuple<Args...> args_tuple);
 
   const ActorConfig& GetActorConfig() const { return actor_config_; }
 
   virtual void PullMailboxAndRun() = 0;
+  virtual void PullUnsafeMessageSlotsAndRun() = 0;
 
  protected:
   ActorConfig actor_config_;
@@ -80,7 +81,8 @@ class TypeErasedActor {
 class TypeErasedActorScheduler {
  public:
   virtual ~TypeErasedActorScheduler() = default;
-  virtual void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope) = 0;
+  virtual void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope,
+                        bool is_unsafe_message_slot_activation) = 0;
   virtual std::unique_ptr<TypeErasedActorScheduler> Clone() const = 0;
 
   virtual const void* GetUnderlyingSchedulerPtr() const = 0;
@@ -90,11 +92,18 @@ template <ex::scheduler Scheduler>
 class AnyStdExecScheduler : public TypeErasedActorScheduler {
  public:
   explicit AnyStdExecScheduler(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
-  void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope) override {
+  void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope,
+                bool is_unsafe_message_slot_activation) override {
     const auto& actor_config = actor->GetActorConfig();
     auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, actor_config.priority}) |
                   ex::write_env(ex::prop {ex_actor::get_scheduler_index, actor_config.scheduler_index}) |
-                  ex::then([actor] { actor->PullMailboxAndRun(); });
+                  ex::then([actor, is_unsafe_message_slot_activation] {
+                    if (is_unsafe_message_slot_activation) {
+                      actor->PullUnsafeMessageSlotsAndRun();
+                    } else {
+                      actor->PullMailboxAndRun();
+                    }
+                  });
     async_scope.spawn(std::move(sender));
   }
 
@@ -168,52 +177,10 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t, Actor
   }
 };
 
-// ---------------Mailbox------------------
-
-class Mailbox {
- public:
-  virtual ~Mailbox() = default;
-  virtual void Push(ActorMessage* task) = 0;
-  virtual std::optional<ActorMessage*> TryPop() = 0;
-};
-
-class UnboundedThreadSafeMailbox : public Mailbox {
- public:
-  void Push(ActorMessage* task) override { queue_.Push(task); }
-  std::optional<ActorMessage*> TryPop() override { return queue_.TryPop(); }
-
- private:
-  util::LinearizableUnboundedQueue<ActorMessage*> queue_;
-};
-
-class OneSlotUnsafeMailbox : public Mailbox {
- public:
-  void Push(ActorMessage* task) override {
-    if (message_ != nullptr) {
-      throw std::runtime_error("Mailbox is full");
-    }
-    message_ = task;
-  }
-
-  std::optional<ActorMessage*> TryPop() override {
-    if (message_ == nullptr) {
-      return std::nullopt;
-    }
-    auto* to_return = message_;
-    message_ = nullptr;
-    return to_return;
-  }
-
- private:
-  ActorMessage* message_ = nullptr;
-};
 // ---------------Actor Class---------------
 
 template <class UserClass, auto kCreateFn = nullptr>
 class Actor : public TypeErasedActor {
- private:
-  static constexpr bool kIsManualActivation = reflect::HasManualActivationHook<UserClass>;
-
  public:
   template <typename... Args>
   explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args... args)
@@ -223,15 +190,7 @@ class Actor : public TypeErasedActor {
     } else {
       user_class_instance_ = std::make_unique<UserClass>(std::move(args)...);
     }
-
-    EXA_THROW_CHECK_GT(actor_config_.mailbox_configs.size(), 0) << "At least one mailbox is required";
-    for (const auto& mailbox_config : actor_config_.mailbox_configs) {
-      if (std::holds_alternative<ActorConfig::UnboundedThreadSafeMailboxConfig>(mailbox_config)) {
-        mailboxes_.push_back(std::make_unique<UnboundedThreadSafeMailbox>());
-      } else if (std::holds_alternative<ActorConfig::OneSlotUnsafeMailboxConfig>(mailbox_config)) {
-        mailboxes_.push_back(std::make_unique<OneSlotUnsafeMailbox>());
-      }
-    }
+    unsafe_message_slots_.resize(actor_config_.unsafe_message_slots);
   }
 
   template <typename... Args>
@@ -253,48 +212,46 @@ class Actor : public TypeErasedActor {
       co_return co_await async_scope_.on_empty();
     }
     pending_to_be_destroyed_.store(true, std::memory_order_release);
-    NotifyPushEventAndTryActivate(MessagePushEvent {.is_destroy_message = true});
+    pending_message_count_.fetch_add(1, std::memory_order_release);
+    TryActivate();
     co_await async_scope_.on_empty();
   }
 
   void PushMessage(ActorMessage* task) override {
-    mailboxes_.at(task->mailbox_index)->Push(task);
-    NotifyPushEventAndTryActivate(MessagePushEvent {.mailbox_index = task->mailbox_index});
+    // normal mailbox message
+    if (!task->unsafe_message_slot_index.has_value()) {
+      mailbox_.Push(task);
+      pending_message_count_.fetch_add(1, std::memory_order_release);
+      TryActivate();
+      return;
+    }
+
+    // unsafe message slot
+    unsafe_message_slots_.at(task->unsafe_message_slot_index.value()) = task;
+    if constexpr (reflect::HasOnUnsafeMessageSlotFilledHook<UserClass>) {
+      bool should_activate =
+          user_class_instance_->ExActorOnUnsafeMessageSlotFilled(task->unsafe_message_slot_index.value());
+      if (should_activate) {
+        scheduler_->Schedule(this, async_scope_, /*is_unsafe_message_slot_activation=*/true);
+      }
+    } else {
+      EXA_THROW << "User class " << typeid(UserClass).name() << " does not have OnUnsafeMessageSlotFilled hook";
+    }
   }
 
   void* GetUserClassAddress() override { return user_class_instance_.get(); }
 
  private:
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
-  std::vector<std::unique_ptr<Mailbox>> mailboxes_;
+  util::LinearizableUnboundedQueue<ActorMessage*> mailbox_;
+  std::vector<ActorMessage*> unsafe_message_slots_;
   std::atomic_size_t pending_message_count_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
   exec::async_scope async_scope_;
   std::atomic_bool activated_ = false;
   std::atomic_bool pending_to_be_destroyed_ = false;
 
-  void NotifyPushEventAndTryActivate(MessagePushEvent event) {
-    bool should_activate = true;
-    if constexpr (kIsManualActivation) {
-      // in manual mode, user won't push messages to the actor after it's destroyed.
-      should_activate = user_class_instance_->ExActorManualActivationHook(event);
-    } else {
-      // message count is only used in auto activate mode.
-      pending_message_count_.fetch_add(1, std::memory_order_release);
-    }
-    if (should_activate) {
-      TryActivate();
-    }
-  }
-
   void TryActivate() {
-    if (kIsManualActivation) {
-      // in maunal mode, it's user's responsibility to ensure safe activation.
-      // so no need to check if the actor is already activated, just schedule it.
-      scheduler_->Schedule(this, async_scope_);
-      return;
-    }
-
     // Auto activate mode, do a CAS check, don't activate twice
     bool expect = false;
     bool changed = activated_.compare_exchange_strong(expect, /*desired=*/true, /*success=*/std::memory_order_acq_rel,
@@ -302,75 +259,77 @@ class Actor : public TypeErasedActor {
     if (!changed) {
       return;
     }
-    scheduler_->Schedule(this, async_scope_);
+    scheduler_->Schedule(this, async_scope_, /*is_unsafe_message_slot_activation=*/false);
   }
 
   void PullMailboxAndRun() override {
     if (user_class_instance_ == nullptr) [[unlikely]] {
       // already destroyed
       size_t remaining = pending_message_count_.load(std::memory_order_acquire);
-      logging::Warn("Actor {}(name:{}) is already destroyed, but triggered again, it has {} messages remaining",
-                    (void*)this, actor_config_.actor_name.value_or("null"), remaining);
+      logging::Warn("{} is already destroyed, but triggered again, it has {} messages remaining", Description(),
+                    remaining);
       return;
     }
 
     if (pending_to_be_destroyed_.load(std::memory_order_acquire)) [[unlikely]] {
       user_class_instance_.reset();
       activated_.store(false, std::memory_order_release);
-      if constexpr (!kIsManualActivation) {
-        size_t remaining = pending_message_count_.fetch_sub(1, std::memory_order_acq_rel) - 1;
-        if (remaining > 0) {
-          logging::Warn("Actor {}(name:{}) is destroyed but still has {} messages remaining", (void*)this,
-                        actor_config_.actor_name.value_or("null"), remaining);
-        }
+      size_t remaining = pending_message_count_.fetch_sub(1, std::memory_order_acq_rel) - 1;
+      if (remaining > 0) {
+        logging::Warn("{} is destroyed but still has {} messages remaining", Description(), remaining);
       }
       return;
     }
 
     size_t message_executed = 0;
-    bool limit_reached = false;
-    for (auto& mailbox : mailboxes_) {
-      while (auto optional_msg = mailbox->TryPop()) {
-        optional_msg.value()->Execute();
-        message_executed++;
-        if (message_executed >= actor_config_.max_message_executed_per_activation) [[unlikely]] {
-          limit_reached = true;
-          break;
-        }
-      }
-      if (limit_reached) {
+    while (auto optional_msg = mailbox_.TryPop()) {
+      optional_msg.value()->Execute();
+      message_executed++;
+      if (message_executed >= actor_config_.max_message_executed_per_activation) [[unlikely]] {
         break;
       }
     }
 
-    if constexpr (kIsManualActivation) {
-      activated_.store(false, std::memory_order_release);
-    } else {
-      pending_message_count_.fetch_sub(message_executed, std::memory_order_release);
-      // use seq_cst to prevent reordering activated_.store() and pending_message_count_.load()
-      // or the actor might not be activated correctly
-      activated_.store(false, std::memory_order_seq_cst);
+    pending_message_count_.fetch_sub(message_executed, std::memory_order_release);
 
-      if (pending_message_count_.load(std::memory_order_acquire) > 0) {
-        TryActivate();
+    // use seq_cst to prevent reordering activated_.store() and pending_message_count_.load()
+    // or the actor might not be activated correctly
+    activated_.store(false, std::memory_order_seq_cst);
+
+    if (pending_message_count_.load(std::memory_order_acquire) > 0) {
+      TryActivate();
+    }
+  }
+
+  void PullUnsafeMessageSlotsAndRun() override {
+    for (auto& task : unsafe_message_slots_) {
+      if (task != nullptr) [[likely]] {
+        task->Execute();
+        task = nullptr;
       }
     }
+  }
+
+  std::string Description() {
+    return fmt_lib::format("Actor {}(type:{},name:{})", (void*)this, typeid(UserClass).name(),
+                           actor_config_.actor_name.value_or("null"));
   }
 };  // class Actor
 
 template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethod(size_t mailbox_index, Args... args) {
-  return CallActorMethodUseTuple<kMethod>(mailbox_index, std::make_tuple(std::move(args)...));
+ex::sender auto TypeErasedActor::CallActorMethod(std::optional<size_t> unsafe_message_slot_index, Args... args) {
+  return CallActorMethodUseTuple<kMethod>(unsafe_message_slot_index, std::make_tuple(std::move(args)...));
 }
 
 template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethodUseTuple(size_t mailbox_index, std::tuple<Args...> args_tuple) {
+ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::optional<size_t> unsafe_message_slot_index,
+                                                         std::tuple<Args...> args_tuple) {
   using Sig = reflect::Signature<decltype(kMethod)>;
   using ReturnType = Sig::ReturnType;
   using UserClass = Sig::ClassType;
   constexpr bool kIsNested = ex::sender<ReturnType>;
-  auto start = ex::schedule(
-      StdExecSchedulerForActorMessageSubmission(ActorMessageContext {.actor = this, .mailbox_index = mailbox_index}));
+  auto start = ex::schedule(StdExecSchedulerForActorMessageSubmission(
+      ActorMessageContext {.actor = this, .unsafe_message_slot_index = unsafe_message_slot_index}));
 
   auto* user_class_instance = static_cast<UserClass*>(GetUserClassAddress());
 

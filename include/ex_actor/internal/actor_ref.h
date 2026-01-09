@@ -55,43 +55,51 @@ class ActorRef {
 
   friend rfl::Reflector<ActorRef<UserClass>>;
 
-  struct SendOperation {
-    const ActorRef<UserClass>* actor_ref = nullptr;
-    size_t mailbox_index = 0;
+  /**
+   * @brief Send message to an actor. Returns a coroutine carrying the result.
+   * @note This method requires your args and return value can be serialized by reflect-cpp, if you met compile errors
+   * like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/ to add a serializer for it. Or if you
+   * can confirm it's a local actor, use SendLocal() instead, which doesn't require your args to be serializable.
+   * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
+   */
+  template <auto kMethod, class... Args>
+  [[nodiscard]] auto Send(Args... args) const {
+    // Add a fallback inline_scheduler for it.
+    return util::WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...));
+  }
 
-    /**
-     * @brief Send message to an actor. Returns a coroutine carrying the result.
-     * @note This method requires your args and return value can be serialized by reflect-cpp, if you met compile errors
-     * like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/ to add a serializer for it. Or if
-     * you can confirm it's a local actor, use SendLocal() instead, which doesn't require your args to be serializable.
-     * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
-     */
-    template <auto kMethod, class... Args>
-    [[nodiscard]] auto Send(Args... args) const&& {
-      return util::WrapSenderWithInlineScheduler(
-          actor_ref->template SendWithMailboxIndex<kMethod>(mailbox_index, std::move(args)...));
+  /**
+   * @brief Send message to a local actor. Doesn't require your args to be serializable.
+   */
+  template <auto kMethod, class... Args>
+  [[nodiscard]] ex::sender auto SendLocal(Args... args) const {
+    static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
+                  "method is not invocable with the provided arguments");
+    if (IsEmpty()) [[unlikely]] {
+      throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
+    EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
+    return type_erased_actor_->template CallActorMethod<kMethod>(/*unsafe_message_slot_index=*/std::nullopt,
+                                                                 std::move(args)...);
+  }
 
-    /// nearly the same as Send(), but doesn't require your args to be serializable. Only for local actors.
+  struct UnsafeSendOperation {
+    TypeErasedActor* type_erased_actor = nullptr;
+    size_t unsafe_message_slot_index = 0;
+
     template <auto kMethod, class... Args>
-    [[nodiscard]] ex::sender auto SendLocal(Args... args) const&& {
-      return actor_ref->template SendLocalWithMailboxIndex<kMethod>(mailbox_index, std::move(args)...);
+    [[nodiscard]] ex::sender auto Send(Args... args) const {
+      using Sig = reflect::Signature<decltype(kMethod)>;
+      static_assert(!stdexec::sender<typename Sig::ReturnType>,
+                    "only works for methods that returns non-sender(one-step methods)");
+      return type_erased_actor->template CallActorMethod<kMethod>(
+          /*unsafe_message_slot_index=*/unsafe_message_slot_index, std::move(args)...);
     }
   };
 
-  /// send to specific mailbox, used when you have multiple mailboxes.
-  SendOperation Mailbox(size_t mailbox_index) const { return SendOperation {this, mailbox_index}; }
-
-  /// @copydoc SendOperation::Send()
-  template <auto kMethod, class... Args>
-  [[nodiscard]] auto Send(Args... args) const {
-    return Mailbox(0).template Send<kMethod>(std::move(args)...);
-  }
-
-  /// @copydoc SendOperation::SendLocal()
-  template <auto kMethod, class... Args>
-  [[nodiscard]] ex::sender auto SendLocal(Args... args) const {
-    return Mailbox(0).template SendLocal<kMethod>(std::move(args)...);
+  UnsafeSendOperation UnsafeMessageSlot(size_t index) {
+    EXA_THROW_CHECK(node_id_ == this_node_id_) << "Cannot use unsafe message slot on remote actor.";
+    return UnsafeSendOperation {.type_erased_actor = type_erased_actor_, .unsafe_message_slot_index = index};
   }
 
   bool IsEmpty() const { return is_empty_; }
@@ -108,18 +116,7 @@ class ActorRef {
   network::MessageBroker* message_broker_ = nullptr;
 
   template <auto kMethod, class... Args>
-  [[nodiscard]] ex::sender auto SendLocalWithMailboxIndex(size_t mailbox_index, Args... args) const {
-    static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
-                  "method is not invocable with the provided arguments");
-    if (IsEmpty()) [[unlikely]] {
-      throw std::runtime_error("Empty ActorRef, cannot call method on it.");
-    }
-    EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
-    return type_erased_actor_->template CallActorMethod<kMethod>(mailbox_index, std::move(args)...);
-  }
-
-  template <auto kMethod, class... Args>
-  [[nodiscard]] auto SendWithMailboxIndex(size_t mailbox_index, Args... args) const
+  [[nodiscard]] auto SendInternal(Args... args) const
       -> exec::task<typename decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
@@ -127,7 +124,7 @@ class ActorRef {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
     if (node_id_ == this_node_id_) {
-      co_return co_await SendLocalWithMailboxIndex<kMethod>(mailbox_index, std::move(args)...);
+      co_return co_await SendLocal<kMethod>(std::move(args)...);
     }
 
     // remote call
@@ -137,16 +134,15 @@ class ActorRef {
         .args_tuple = typename Sig::DecayedArgsTupleType(std::move(args)...)};
     auto serialized_args = serde::Serialize(method_call_args);
     std::string handler_key = reflect::GetUniqueNameForFunction<kMethod>();
-    serde::BufferWriter buffer_writer(network::ByteBufferType {
-        sizeof(serde::NetworkRequestType) + sizeof(uint64_t) + sizeof(handler_key.size()) + handler_key.size() +
-        sizeof(actor_id_) + sizeof(mailbox_index) + serialized_args.size()});
-    // protocol: [request_type][handler_key_len][handler_key][actor_id][mailbox_index][ActorMethodCallArgs]
+    serde::BufferWriter buffer_writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) + sizeof(uint64_t) +
+                                                               sizeof(handler_key.size()) + handler_key.size() +
+                                                               sizeof(actor_id_) + serialized_args.size()});
+    // protocol: [request_type][handler_key_len][handler_key][actor_id][ActorMethodCallArgs]
 
     buffer_writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallRequest);
     buffer_writer.WritePrimitive(handler_key.size());
     buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
     buffer_writer.WritePrimitive(actor_id_);
-    buffer_writer.WritePrimitive(mailbox_index);
     buffer_writer.CopyFrom(serialized_args.data(), serialized_args.size());
 
     using UnwrappedType = decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type;

@@ -1,27 +1,39 @@
+#include <atomic>
+
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
 
+namespace logging = ex_actor::internal::logging;
+
 class Counter {
  public:
-  void Increment() { count_++; }
-  uint32_t GetCount() const { return count_; }
+  void Increment() { semaphore_.Acquire(1); }
+  uint32_t GetCount() const { return 10 - semaphore_.CurrentValue(); }
+
+  exec::task<void> WaitAllMessageArrived() { co_await semaphore_.OnDrained(); }
 
  private:
-  uint32_t count_ = 0;
+  ex_actor::util::Semaphore semaphore_ {10};
 };
 
 class ManualActivationActor {
  public:
   explicit ManualActivationActor(ex_actor::ActorRef<Counter> counter) : counter_(counter) {}
-  bool ExActorManualActivationHook(ex_actor::MessagePushEvent event) {
-    // only activate when message is pushed to mailbox 0
-    return event.mailbox_index == 0 || event.is_destroy_message;
+  bool ExActorOnUnsafeMessageSlotFilled(size_t /*unsafe_message_slot_index*/) {
+    size_t cnt = unsafe_message_cnt_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    if (cnt == 10) {
+      logging::Info("activate the actor");
+      return true;
+    }
+    return false;
   }
 
-  exec::task<void> Ping() { co_await counter_.Send<&Counter::Increment>(); }
+  void Ping() { async_scope_.spawn(counter_.Send<&Counter::Increment>()); }
 
  private:
+  std::atomic_size_t unsafe_message_cnt_ = 0;
+  exec::async_scope async_scope_;
   ex_actor::ActorRef<Counter> counter_;
 };
 
@@ -33,21 +45,23 @@ TEST(ManualActivationTest, ManualActivation) {
     auto counter = co_await ex_actor::Spawn<Counter>();
 
     // 10 mailboxes
-    ex_actor::ActorConfig config = {.mailbox_configs = {10, ex_actor::ActorConfig::OneSlotUnsafeMailboxConfig {}}};
+    ex_actor::ActorConfig config = {.unsafe_message_slots = 10};
     auto manual_activation_actor = co_await ex_actor::Spawn<ManualActivationActor>(config, counter);
 
-    // send to mailbox 1 to 9, should not activate the actor
-    for (int i = 1; i < 10; i++) {
-      async_scope.spawn(manual_activation_actor.Mailbox(i).Send<&ManualActivationActor::Ping>());
+    logging::Info("Sending to unsafe slot 0 to 8, should not activate the actor");
+    for (int i = 0; i < 9; i++) {
+      async_scope.spawn(manual_activation_actor.UnsafeMessageSlot(i).Send<&ManualActivationActor::Ping>());
     }
     std::this_thread::sleep_for(std::chrono::seconds(1));
+    logging::Info("Checking count, should be 0");
     uint32_t count = co_await counter.Send<&Counter::GetCount>();
     EXPECT_EQ(count, 0);
 
-    // send to mailbox 0, should activate the actor
-    co_await manual_activation_actor.Mailbox(0).Send<&ManualActivationActor::Ping>();
+    logging::Info("Sending to unsafe slot 9, now has 10 messages, should activate the actor");
+    co_await manual_activation_actor.UnsafeMessageSlot(9).Send<&ManualActivationActor::Ping>();
+
+    co_await counter.Send<&Counter::WaitAllMessageArrived>();
     count = co_await counter.Send<&Counter::GetCount>();
-    EXPECT_EQ(count, 10);
 
     co_await async_scope.on_empty();
   };

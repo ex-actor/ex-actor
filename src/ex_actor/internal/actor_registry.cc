@@ -155,7 +155,6 @@ exec::task<void> ActorRegistryRequestProcessor::HandleActorMethodCallRequest(
   auto handler_key_len = reader.NextPrimitive<uint64_t>();
   auto handler_key = reader.PullString(handler_key_len);
   auto actor_id = reader.NextPrimitive<uint64_t>();
-  auto mailbox_index = reader.NextPrimitive<size_t>();
   if (!actor_id_to_actor_.contains(actor_id)) {
     ReplyError(
         received_request_id, serde::NetworkReplyType::kActorMethodCallError,
@@ -184,10 +183,7 @@ exec::task<void> ActorRegistryRequestProcessor::HandleActorMethodCallRequest(
                                     .message_broker = message_broker_};
   try {
     auto task = handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
-        .actor_message_context =
-            ActorMessageContext {.actor = actor_id_to_actor_.at(actor_id).get(), .mailbox_index = mailbox_index},
-        .request_buffer = std::move(reader),
-        .info = info});
+        .actor = actor_id_to_actor_.at(actor_id).get(), .request_buffer = std::move(reader), .info = info});
     auto buffer = co_await std::move(task);
     message_broker_->ReplyRequest(received_request_id, std::move(buffer));
   } catch (std::exception& error) {

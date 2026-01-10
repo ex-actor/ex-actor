@@ -25,6 +25,7 @@
 #include <spdlog/spdlog.h>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/3rd_lib/daking/MPSC_queue.h"
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/logging.h"
@@ -117,29 +118,18 @@ namespace ex_actor::internal::util {
 template <class T>
 struct LinearizableUnboundedQueue {
  public:
-  void Push(T value) {
-    std::lock_guard lock(mutex_);
-    queue_.push(std::move(value));
-  }
+  void Push(T value) { queue_.enqueue(std::move(value)); }
 
   std::optional<T> TryPop() {
-    std::lock_guard lock(mutex_);
-    if (queue_.empty()) {
-      return std::nullopt;
+    T value;
+    if (queue_.try_dequeue(value)) {
+      return value;
     }
-    auto value = std::move(queue_.front());
-    queue_.pop();
-    return value;
-  }
-
-  bool Empty() {
-    std::lock_guard lock(mutex_);
-    return queue_.empty();
+    return std::nullopt;
   }
 
  private:
-  std::queue<T> queue_;
-  mutable std::mutex mutex_;
+  ex_actor::embedded_3rd::daking::MPSC_queue<T> queue_;
 };
 
 template <class T>

@@ -12,6 +12,7 @@ cc_library(
     srcs = glob(["src/**/*.cc"]),
     hdrs = glob(["include/**/*.h"]),
     includes = ["include"],
+    linkopts = ["-latomic"],
     deps = [
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/capnp:capnpc",

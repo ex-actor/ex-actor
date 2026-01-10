@@ -143,6 +143,7 @@ void MessageBroker::PushOperation(TypeErasedSendOperation* operation) {
 void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
   util::SetThreadName("snd_proc_loop");
   while (!stop_token.stop_requested()) {
+    bool any_item_pulled = false;
     while (auto optional_operation = pending_send_operations_.TryPop()) {
       auto* operation = optional_operation.value();
       auto serialized_identifier = internal::serde::Serialize(operation->identifier);
@@ -156,6 +157,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         // quit operation and heartbeat has no response, complete it immediately
         operation->Complete(ByteBufferType {});
       }
+      any_item_pulled = true;
     }
     while (auto optional_reply_operation = pending_reply_operations_.TryPop()) {
       auto& reply_operation = optional_reply_operation.value();
@@ -166,9 +168,10 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
       multi.add(std::move(reply_operation.data));
       last_heartbeat_ = std::chrono::steady_clock::now();
       EXA_THROW_CHECK(multi.send(send_socket));
+      any_item_pulled = true;
     }
     SendHeartbeat();
-    if (pending_send_operations_.Empty() && pending_reply_operations_.Empty()) {
+    if (!any_item_pulled) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }

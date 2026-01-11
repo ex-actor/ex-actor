@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -21,7 +22,9 @@
 #include <exception>
 #include <functional>
 #include <mutex>
+#include <random>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <exec/async_scope.hpp>
@@ -50,6 +53,7 @@ struct hash<ex_actor::NodeInfo> {
 
 namespace ex_actor::internal::network {
 using ByteBufferType = zmq::message_t;
+using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
 enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kHeartbeat, kGossip };
 
@@ -62,7 +66,6 @@ struct Identifier {
 
 struct NetworkConfig {
   std::chrono::milliseconds heartbeat_timeout = kDefaultHeartbeatTimeout;
-  std::chrono::milliseconds heartbeat_interval = kDefaultHeartbeatInterval;
   std::chrono::milliseconds gossip_interval = kDefaultGossipInterval;
 };
 
@@ -72,14 +75,40 @@ struct ClusterConfig {
   network::NetworkConfig network_config = {};
 };
 
-class PeerNodes {
-  enum class NodeState : uint8_t { kAlive = 0, kQuitting, kDead };
+struct GossipMessage {
+  NodeInfo node_info;
+  TimePoint last_seen;
+};
 
+class PeerNodes {
  public:
-  void Add(const NodeInfo& node) {
+  enum class Liveness : uint8_t { kAlive = 0, kQuitting, kDead };
+  struct NodeState {
+    Liveness liveness;
+    TimePoint last_seen;
+  };
+  void Add(const NodeInfo& node, const NodeState& state) {
     std::lock_guard lock(mutex_);
-    map_.try_emplace(node, NodeState::kAlive);
+    map_.try_emplace(node, state);
     alive_peers_ += 1;
+  }
+
+  void RefreshLastSeen(const uint32_t& node_id) {
+    std::lock_guard lock(mutex_);
+    auto& state = map_.at({.node_id = node_id});
+    state.last_seen = std::chrono::steady_clock::now();
+  }
+
+  void CheckHeartbeat(const std::chrono::milliseconds& timeout) {
+    std::lock_guard lock(mutex_);
+    for (const auto& pair : map_) {
+      const auto& state = pair.second;
+      if (state.liveness != Liveness::kDead && std::chrono::steady_clock::now() - state.last_seen >= timeout) {
+        logging::Error("Node {} is dead, try to exit", pair.first.node_id);
+        // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
+        std::quick_exit(1);
+      }
+    }
   }
 
   bool Contains(const uint32_t& node_id) {
@@ -87,20 +116,12 @@ class PeerNodes {
     return map_.contains({.node_id = node_id});
   }
 
-  void ActivateNode(const uint32_t& node_id) {
-    std::lock_guard lock(mutex_);
-    NodeInfo node {.node_id = node_id};
-    if (map_.at(node) == NodeState::kDead) {
-      map_[node] = NodeState::kAlive;
-      alive_peers_ += 1;
-    }
-  }
-
   void DeactivateNode(const uint32_t& node_id) {
-    std::lock_guard lock(mutex_);
     NodeInfo node {.node_id = node_id};
-    if (map_.at(node) == NodeState::kAlive) {
-      map_[node] = NodeState::kQuitting;
+    std::lock_guard lock(mutex_);
+    auto& state = map_.at(node);
+    if (state.liveness == Liveness::kAlive) {
+      state.liveness = Liveness::kQuitting;
       alive_peers_ -= 1;
     }
 
@@ -115,21 +136,60 @@ class PeerNodes {
   }
 
   std::vector<NodeInfo> GetNodeList() {
-    std::lock_guard lock(mutex_);
     std::vector<NodeInfo> node_list {};
     node_list.reserve(map_.size());
-    for (auto& pair : map_) {
-      if (pair.second == NodeState::kQuitting || pair.second == NodeState::kAlive) {
+    std::lock_guard lock(mutex_);
+    for (const auto& pair : map_) {
+      const auto& node = pair.first;
+      const auto& liveness = pair.second.liveness;
+      if (liveness != Liveness::kDead) {
         node_list.push_back(pair.first);
       }
     }
     return node_list;
   }
 
+  std::vector<GossipMessage> GenerateGossipMessages() {
+    std::vector<GossipMessage> messages;
+    messages.reserve(map_.size());
+    std::lock_guard lock(mutex_);
+    for (const auto& pair : map_) {
+      messages.push_back({.node_info = pair.first, .last_seen = pair.second.last_seen});
+    }
+    return messages;
+  }
+
+  std::vector<NodeInfo> GetRandomNodes(size_t size) {
+    std::vector<NodeInfo> nodes;
+    if (size == 0) {
+      return nodes;
+    }
+
+    {
+      std::lock_guard lock(mutex_);
+      nodes.reserve(map_.size());
+      size_t seen = 0;
+      for (const auto& pair : map_) {
+        const NodeInfo& node = pair.first;
+        const NodeState& state = pair.second;
+        if (state.liveness == Liveness::kDead) {
+          continue;
+        }
+        nodes.push_back(node);
+      }
+    }
+
+    // NOTE: We only call this method in the send_thread, so we don't need to hold lock here.
+    std::shuffle(nodes.begin(), nodes.end(), rng_);
+    nodes.resize(std::min(nodes.size(), size));
+    return nodes;
+  }
+
  private:
   std::unordered_map<NodeInfo, NodeState> map_;
   std::condition_variable cv_;
   std::mutex mutex_;
+  std::mt19937 rng_ {std::random_device {}()};
   uint32_t alive_peers_ = 0;
 };
 
@@ -198,11 +258,13 @@ class MessageBroker {
 
  private:
   void EstablishConnectionTo(const NodeInfo& node_info);
-  void EstablishConnections();
+  void EstablishConnections(const std::vector<NodeInfo>& node_list);
   void PushOperation(TypeErasedSendOperation* operation);
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
   void HandleReceivedMessage(zmq::multipart_t multi);
+  void SendHeartbeat(const std::vector<NodeInfo>& node_list);
+  void SendGossip(const std::vector<NodeInfo>& node_list);
   void CheckHeartbeat();
   void SendHeartbeatOrGossip();
   void HandleGossip(zmq::message_t gossip_msg);
@@ -212,7 +274,6 @@ class MessageBroker {
     ByteBufferType data;
   };
 
-  std::vector<NodeInfo> node_list_;
   uint32_t this_node_id_;
   std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
   NetworkConfig network_config_;
@@ -236,10 +297,7 @@ class MessageBroker {
   exec::async_scope async_scope_;
   bool enable_dynamic_connectivity_ = false;
 
-  using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
   TimePoint last_heartbeat_;
-  TimePoint last_gossip_;
-  std::unordered_map<uint32_t, TimePoint> last_seen_;
 };
 
 }  // namespace ex_actor::internal::network

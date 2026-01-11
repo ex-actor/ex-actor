@@ -14,13 +14,13 @@
 
 #include "ex_actor/internal/network.h"
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <functional>
 #include <optional>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <exec/async_scope.hpp>
 #include <spdlog/spdlog.h>
@@ -33,21 +33,11 @@ namespace ex_actor::internal::network {
 MessageBroker::MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
                              std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
                              NetworkConfig network_config)
-    : node_list_(std::move(node_list)),
-      this_node_id_(this_node_id),
+    : this_node_id_(this_node_id),
       request_handler_(std::move(request_handler)),
       network_config_(network_config),
-      last_heartbeat_(std::chrono::steady_clock::now()),
-      last_gossip_(std::chrono::steady_clock::now()) {
-  EstablishConnections();
-
-  auto start_time_point = std::chrono::steady_clock::now();
-  for (const auto& node : node_list_) {
-    if (node.node_id != this_node_id_) {
-      last_seen_.emplace(node.node_id, start_time_point);
-      peer_nodes_.Insert(node, true);
-    }
-  }
+      last_heartbeat_(std::chrono::steady_clock::now()) {
+  EstablishConnections(node_list);
   send_thread_ = std::jthread([this](const std::stop_token& stop_token) { SendProcessLoop(stop_token); });
   recv_thread_ = std::jthread([this](const std::stop_token& stop_token) { ReceiveProcessLoop(stop_token); });
 }
@@ -58,16 +48,13 @@ MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
       request_handler_(std::move(request_handler)),
       network_config_(cluster_config.network_config),
       last_heartbeat_(std::chrono::steady_clock::now()),
-      last_gossip_(std::chrono::steady_clock::now()),
       enable_dynamic_connectivity_(true) {
   auto this_node = cluster_config.this_node;
   EXA_THROW_CHECK(!this_node.address.empty())
       << "Local address not found in node list, this_node_id: " << this_node_id_;
-
   recv_socket_.bind(this_node.address);
   recv_socket_.set(zmq::sockopt::linger, 0);
   logging::Info("Node {}'s recv socket bound to {}", this_node_id_, this_node.address);
-
   EstablishConnectionTo(cluster_config.contact_node);
 
   send_thread_ = std::jthread([this](const std::stop_token& stop_token) { SendProcessLoop(stop_token); });
@@ -83,11 +70,9 @@ MessageBroker::~MessageBroker() {
 void MessageBroker::ClusterAlignedStop() {
   // tell all other nodes: I'm going to quit
   logging::Info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_id_);
-  if (enable_dynamic_connectivity_) {
-    node_list_ = peer_nodes_.GetNodeList();
-  }
+  const auto node_list = peer_nodes_.GetNodeList();
 
-  for (const auto& node : node_list_) {
+  for (const auto& node : node_list) {
     if (node.node_id != this_node_id_) {
       auto sender = SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kQuit) | ex::then([](auto empty) {});
       async_scope_.spawn(std::move(sender));
@@ -116,14 +101,13 @@ void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
   send_socket.connect(node_address);
   logging::Info("Node {} added a send socket, connected to node {} at {}", this_node_id_, node_id, node_address);
 
-  last_seen_.emplace(node_id, std::chrono::steady_clock::now());
-  peer_nodes_.Insert(node_info, true);
+  peer_nodes_.Add(node_info, {.liveness = PeerNodes::Liveness::kAlive, .last_seen = std::chrono::steady_clock::now()});
 }
 
-void MessageBroker::EstablishConnections() {
+void MessageBroker::EstablishConnections(const std::vector<NodeInfo>& node_list) {
   // Bind router socket to this node's address
   bool found_local_address = false;
-  for (const auto& node : node_list_) {
+  for (const auto& node : node_list) {
     if (node.node_id == this_node_id_) {
       recv_socket_.bind(node.address);
       // Setting linger to 0 instructs the socket to discard any unsent messages immediately and return control to the
@@ -138,15 +122,9 @@ void MessageBroker::EstablishConnections() {
   EXA_THROW_CHECK(found_local_address) << "Local address not found in node list, this_node_id: " << this_node_id_;
 
   // Connect router socket to all other nodes (mesh topology)
-  for (const auto& node : node_list_) {
+  for (const auto& node : node_list) {
     if (node.node_id != this_node_id_) {
-      bool inserted = node_id_to_send_socket_.Insert(node.node_id, zmq::socket_t(context_, zmq::socket_type::dealer));
-      EXA_THROW_CHECK(inserted) << "Node " << node.node_id << " already has a send socket";
-      auto& send_socket = node_id_to_send_socket_.At(node.node_id);
-      send_socket.set(zmq::sockopt::linger, 0);
-      send_socket.connect(node.address);
-      logging::Info("Node {} added a send socket, connected to node {} at {}", this_node_id_, node.node_id,
-                    node.address);
+      EstablishConnectionTo(node);
     }
   }
 }
@@ -213,10 +191,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
       EXA_THROW_CHECK(multi.send(send_socket));
       any_item_pulled = true;
     }
-    if (enable_dynamic_connectivity_) {
-      SendGossip();
-    }
-    SendHeartbeat();
+    SendHeartbeatOrGossip();
     if (!any_item_pulled) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -247,7 +222,10 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
 
   auto identifier = internal::serde::Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
   // all received messages will update the last seen time;
-  last_seen_[identifier.request_node_id] = std::chrono::steady_clock::now();
+  // For responses, the peer is response_node_id.
+  uint32_t peer_node_id =
+      (identifier.request_node_id == this_node_id_) ? identifier.response_node_id : identifier.request_node_id;
+  peer_nodes_.RefreshLastSeen(peer_node_id);
 
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
@@ -281,66 +259,48 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   }
 }
 
-void MessageBroker::CheckHeartbeat() {
-  for (const auto& node : node_list_) {
-    if (node.node_id != this_node_id_ &&
-        std::chrono::steady_clock::now() - last_seen_[node.node_id] >= network_config_.heartbeat_timeout) {
-      logging::Error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
-      // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
-      std::quick_exit(1);
-    }
+void MessageBroker::CheckHeartbeat() { peer_nodes_.CheckHeartbeat(network_config_.heartbeat_timeout); }
+
+void MessageBroker::SendHeartbeat(const std::vector<NodeInfo>& node_list) {
+  for (const auto& node : node_list) {
+    auto heartbeat =
+        SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kHeartbeat) | ex::then([](auto&& null) {});
+    last_heartbeat_ = std::chrono::steady_clock::now();
+    logging::Info("[Heartbeat] node {} send heartbeat to  node {}", this_node_id_, node.node_id);
+    async_scope_.spawn(std::move(heartbeat));
   }
 }
 
-void MessageBroker::SendHeartbeat() {
-  if (!stopped_.load() && std::chrono::steady_clock::now() - last_heartbeat_ >= network_config_.heartbeat_interval) {
-    for (const auto& node : node_list_) {
-      if (node.node_id != this_node_id_) {
-        auto heartbeat =
-            SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kHeartbeat) | ex::then([](auto&& null) {});
-        last_heartbeat_ = std::chrono::steady_clock::now();
-        async_scope_.spawn(std::move(heartbeat));
-      }
-    }
+void MessageBroker::SendGossip(const std::vector<NodeInfo>& node_list) {
+  for (const auto& node : node_list) {
+    auto serialized_node_list = serde::Serialize(serde::GossipNodeList {node_list});
+    serde::BufferWriter writer {ByteBufferType(serialized_node_list.size())};
+    writer.CopyFrom(serialized_node_list.data(), serialized_node_list.size());
+    // TODO: reuse the node_list above, so that we don't need to hold the lock again;
+    auto gossip = SendRequest(node.node_id, std::move(writer).MoveBufferOut(), MessageFlag::kGossip) |
+                  ex::then([](auto&& null) {});
+    last_heartbeat_ = std::chrono::steady_clock::now();
+    logging::Info("[Gossip] node {} send gossip to  node {}", this_node_id_, node.node_id);
+    async_scope_.spawn(std::move(gossip));
   }
-}
-
-bool MessageBroker::CheckNode(uint32_t node_id) {
-  return std::ranges::find_if(node_list_, [node_id](auto& element) { return element.node_id == node_id; }) !=
-         node_list_.end();
-}
-
-// TODO: Funky
-size_t MessageBroker::NextContactNode() {
-  contact_node_index_ += 1;
-  contact_node_index_ %= node_list_.size();
-  return contact_node_index_;
 }
 
 // TODO: The gossip logic need the send/recv thread to  serialize/deserialize node_list, which seems not a
 // good idea.
 
-void MessageBroker::SendGossip() {
-  if (node_list_.size() == 1) {
-    return;
-  }
-
-  if (!stopped_.load() && std::chrono::steady_clock::now() - last_gossip_ >= network_config_.gossip_interval) {
-    auto serialized_node_list = serde::Serialize(serde::GossipNodeList {node_list_});
-    serde::BufferWriter writer {network::ByteBufferType(serialized_node_list.size())};
-    writer.CopyFrom(serialized_node_list.data(), serialized_node_list.size());
-    // TODO: Funky
-    auto contact_node = node_list_.at(NextContactNode());
-    if (contact_node.node_id == this_node_id_) {
-      contact_node = node_list_.at(NextContactNode());
+void MessageBroker::SendHeartbeatOrGossip() {
+  if (!stopped_.load() && std::chrono::steady_clock::now() - last_heartbeat_ >= network_config_.gossip_interval) {
+    const auto node_list = peer_nodes_.GetNodeList();
+    if (enable_dynamic_connectivity_) {
+      const auto nodes = peer_nodes_.GetRandomNodes(2);
+      SendGossip(nodes);
+    } else {
+      SendHeartbeat(node_list);
     }
-    auto gossip = SendRequest(contact_node.node_id, std::move(writer).MoveBufferOut(), MessageFlag::kGossip) |
-                  ex::then([](auto&& null) {});
-    last_gossip_ = std::chrono::steady_clock::now();
-    logging::Info("[Gossip] node {} send gossip to  node {}", this_node_id_, contact_node.node_id);
-    async_scope_.spawn(std::move(gossip));
   }
 }
+
+bool MessageBroker::CheckNode(uint32_t node_id) { return peer_nodes_.Contains(node_id); }
 
 void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
   auto nodes = serde::Deserialize<serde::GossipNodeList>(gossip_msg.data<uint8_t>(), gossip_msg.size()).node_list;
@@ -349,19 +309,10 @@ void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
       continue;
     }
 
-    if (!peer_nodes_.Contains(node)) {
-      peer_nodes_.Insert(node, true);
-      // We only read/modify last_seen_ in the recv thread, so it's safe here.
-      last_seen_.try_emplace(node.node_id, std::chrono::steady_clock::now());
-      bool inserted = node_id_to_send_socket_.Insert(node.node_id, zmq::socket_t(context_, zmq::socket_type::dealer));
-      if (inserted) {
-        auto& send_socket = node_id_to_send_socket_.At(node.node_id);
-        send_socket.set(zmq::sockopt::linger, 0);
-        send_socket.connect(node.address);
-        logging::Info("[Gossip] Node {} have found node {}, connected it at {}", this_node_id_, node.node_id,
-                      node.address);
-      }
+    if (!peer_nodes_.Contains(node.node_id)) {
+      EstablishConnectionTo(node);
     }
+    peer_nodes_.RefreshLastSeen(node.node_id);
   }
 }
 }  // namespace ex_actor::internal::network

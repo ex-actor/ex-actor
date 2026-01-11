@@ -197,6 +197,9 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   zmq::message_t data_bytes = multi.pop();
 
   auto identifier = internal::serde::Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
+  // all received messages will update the last seen time;
+  last_seen_[identifier.request_node_id] = std::chrono::steady_clock::now();
+
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
     logging::Info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
@@ -204,8 +207,6 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
     return;
   }
 
-  // Request, response and heartbeat will update the last seen time;
-  last_seen_[identifier.request_node_id] = std::chrono::steady_clock::now();
   if (identifier.flag == MessageFlag::kHeartbeat) {
     return;
   }

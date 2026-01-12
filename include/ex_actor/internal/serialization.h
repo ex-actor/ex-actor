@@ -98,8 +98,8 @@ struct ActorLookUpRequest {
   std::string actor_name;
 };
 
-struct GossipNodeList {
-  std::vector<NodeInfo> node_list;
+struct GossipMessages {
+  std::vector<network::GossipMessage> messages;
 };
 
 template <auto kFn>

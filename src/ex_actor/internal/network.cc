@@ -44,7 +44,8 @@ MessageBroker::MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node
 
 MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
                              std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler)
-    : this_node_id_(cluster_config.this_node.node_id),
+    : this_node_(cluster_config.this_node),
+      this_node_id_(cluster_config.this_node.node_id),
       request_handler_(std::move(request_handler)),
       network_config_(cluster_config.network_config),
       last_heartbeat_(std::chrono::steady_clock::now()),
@@ -225,7 +226,7 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   // For responses, the peer is response_node_id.
   uint32_t peer_node_id =
       (identifier.request_node_id == this_node_id_) ? identifier.response_node_id : identifier.request_node_id;
-  peer_nodes_.RefreshLastSeen(peer_node_id);
+  peer_nodes_.RefreshLastSeen(peer_node_id, std::chrono::steady_clock::now());
 
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
@@ -259,8 +260,6 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   }
 }
 
-void MessageBroker::CheckHeartbeat() { peer_nodes_.CheckHeartbeat(network_config_.heartbeat_timeout); }
-
 void MessageBroker::SendHeartbeat(const std::vector<NodeInfo>& node_list) {
   for (const auto& node : node_list) {
     auto heartbeat =
@@ -273,7 +272,9 @@ void MessageBroker::SendHeartbeat(const std::vector<NodeInfo>& node_list) {
 
 void MessageBroker::SendGossip(const std::vector<NodeInfo>& node_list) {
   for (const auto& node : node_list) {
-    auto serialized_node_list = serde::Serialize(serde::GossipNodeList {node_list});
+    auto messages = peer_nodes_.GenerateGossipMessages();
+    messages.emplace_back(this_node_, std::chrono::steady_clock::now());
+    auto serialized_node_list = serde::Serialize(serde::GossipMessages {messages});
     serde::BufferWriter writer {ByteBufferType(serialized_node_list.size())};
     writer.CopyFrom(serialized_node_list.data(), serialized_node_list.size());
     // TODO: reuse the node_list above, so that we don't need to hold the lock again;
@@ -285,6 +286,8 @@ void MessageBroker::SendGossip(const std::vector<NodeInfo>& node_list) {
   }
 }
 
+void MessageBroker::CheckHeartbeat() { peer_nodes_.CheckHeartbeat(network_config_.heartbeat_timeout); }
+
 // TODO: The gossip logic need the send/recv thread to  serialize/deserialize node_list, which seems not a
 // good idea.
 
@@ -292,7 +295,8 @@ void MessageBroker::SendHeartbeatOrGossip() {
   if (!stopped_.load() && std::chrono::steady_clock::now() - last_heartbeat_ >= network_config_.gossip_interval) {
     const auto node_list = peer_nodes_.GetNodeList();
     if (enable_dynamic_connectivity_) {
-      const auto nodes = peer_nodes_.GetRandomNodes(2);
+      // TODO: The size of the peers should be configurable
+      const auto nodes = peer_nodes_.GetRandomPeers(2);
       SendGossip(nodes);
     } else {
       SendHeartbeat(node_list);
@@ -303,16 +307,18 @@ void MessageBroker::SendHeartbeatOrGossip() {
 bool MessageBroker::CheckNode(uint32_t node_id) { return peer_nodes_.Contains(node_id); }
 
 void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
-  auto nodes = serde::Deserialize<serde::GossipNodeList>(gossip_msg.data<uint8_t>(), gossip_msg.size()).node_list;
-  for (auto& node : nodes) {
+  const auto messages =
+      serde::Deserialize<serde::GossipMessages>(gossip_msg.data<uint8_t>(), gossip_msg.size()).messages;
+  for (const auto& msg : messages) {
+    const auto& node = msg.node_info;
+    const auto& last_seen = msg.last_seen;
     if (node.node_id == this_node_id_) {
       continue;
     }
-
     if (!peer_nodes_.Contains(node.node_id)) {
       EstablishConnectionTo(node);
     }
-    peer_nodes_.RefreshLastSeen(node.node_id);
+    peer_nodes_.RefreshLastSeen(node.node_id, last_seen);
   }
 }
 }  // namespace ex_actor::internal::network

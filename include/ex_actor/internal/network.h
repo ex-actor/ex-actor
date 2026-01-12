@@ -93,10 +93,10 @@ class PeerNodes {
     alive_peers_ += 1;
   }
 
-  void RefreshLastSeen(const uint32_t& node_id) {
+  void RefreshLastSeen(const uint32_t& node_id, TimePoint last_seen) {
     std::lock_guard lock(mutex_);
     auto& state = map_.at({.node_id = node_id});
-    state.last_seen = std::chrono::steady_clock::now();
+    state.last_seen = max(last_seen, state.last_seen);
   }
 
   void CheckHeartbeat(const std::chrono::milliseconds& timeout) {
@@ -159,7 +159,7 @@ class PeerNodes {
     return messages;
   }
 
-  std::vector<NodeInfo> GetRandomNodes(size_t size) {
+  std::vector<NodeInfo> GetRandomPeers(size_t size) {
     std::vector<NodeInfo> nodes;
     if (size == 0) {
       return nodes;
@@ -275,6 +275,7 @@ class MessageBroker {
   };
 
   uint32_t this_node_id_;
+  NodeInfo this_node_ {};
   std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
   NetworkConfig network_config_;
   std::atomic_uint64_t send_request_id_counter_ = 0;

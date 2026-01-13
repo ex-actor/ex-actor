@@ -252,44 +252,35 @@ void AssignGlobalDefaultRegistry(std::unique_ptr<ex_actor::ActorRegistry> regist
 
 bool IsGlobalDefaultRegistryInitialized() { return global_default_registry != nullptr; }
 
-/*
- * ThreadLocalCleanupSentinel: A thread_local object used for automatic cleanup.
- *
- * Problem: The MPSC_queue uses thread_local storage (MPSC_thread_hook). During program exit,
- * thread_local destructors run BEFORE atexit handlers (in glibc). So using atexit for cleanup
- * causes use-after-free: the MPSC_queue's thread_local data is freed, then atexit calls
- * Shutdown() which tries to use the freed data.
- *
- * Solution: Thread_local objects are destroyed in reverse order of construction within a thread.
- * The MPSC_queue's thread_local Hook is constructed during ActorRegistry construction (when
- * the first message queue is used). If we create our cleanup sentinel AFTER the ActorRegistry
- * is constructed, our destructor runs BEFORE the MPSC_queue's thread_local destructor.
- *
- * Construction order:
- *   1. MPSC_queue's thread_local Hook (during ActorRegistry ctor -> Actor ctor -> mailbox init)
- *   2. ThreadLocalCleanupSentinel (after ActorRegistry is fully constructed, during Init())
- *
- * Destruction order (reverse):
- *   1. ThreadLocalCleanupSentinel destructor -> calls Shutdown()
- *   2. MPSC_queue's thread_local Hook destructor (registry already shut down, no issue)
- */
-struct ThreadLocalCleanupSentinel {
-  ~ThreadLocalCleanupSentinel() {
-    if (IsGlobalDefaultRegistryInitialized()) {
+static void RegisterAtExitCleanup() {
+  static bool at_exit_cleanup_registered = false;
+
+  if (at_exit_cleanup_registered) {
+    return;
+  }
+  at_exit_cleanup_registered = true;
+  /*
+  According to the cpp reference:
+
+  The functions may be called concurrently with the destruction of the objects with static storage duration and with
+  each other, maintaining the guarantee that if registration of A was sequenced-before the registration of B, then the
+  call to B is sequenced-before the call to A, same applies to the sequencing between static object constructors and
+  calls to atexit.
+
+  So as long as user calls Init() inside main, this cleanup function should be called before the destruction of other
+  global variables.
+  */
+  std::atexit([]() {
+    if (internal::IsGlobalDefaultRegistryInitialized()) {
       Shutdown();
     }
-  }
-};
-
-// Must be called AFTER ActorRegistry is constructed to ensure correct destruction order
-void RegisterThreadLocalCleanup() {
-  // Static thread_local ensures one instance per thread, initialized on first call
-  static thread_local ThreadLocalCleanupSentinel sentinel;
-  // Force sentinel construction by using it (prevent optimization from removing it)
-  (void)sentinel;
+  });
 }
 
-void SetupGlobalHandlers() { logging::InstallFallbackExceptionHandler(); }
+void SetupGlobalHandlers() {
+  logging::InstallFallbackExceptionHandler();
+  RegisterAtExitCleanup();
+}
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
@@ -299,8 +290,6 @@ void Init(uint32_t thread_pool_size) {
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   internal::SetupGlobalHandlers();
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size);
-  // Register cleanup AFTER ActorRegistry construction to ensure correct thread_local destruction order
-  internal::RegisterThreadLocalCleanup();
 }
 
 void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
@@ -311,8 +300,6 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   internal::SetupGlobalHandlers();
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, this_node_id, cluster_node_info);
-  // Register cleanup AFTER ActorRegistry construction to ensure correct thread_local destruction order
-  internal::RegisterThreadLocalCleanup();
 }
 
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }

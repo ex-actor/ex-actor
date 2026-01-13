@@ -587,7 +587,7 @@ class MPSC_queue {
   }
 
   DAKING_ALWAYS_INLINE void Deallocate(Node* node) noexcept {
-    node->next_.store(Get_thread_local_node_list(), std::memory_order_relaxed);
+    node->next_ = Get_thread_local_node_list();
     Get_thread_local_node_list() = node;
     if (++Get_thread_local_node_size() >= thread_local_capacity) [[unlikely]] {
       global_chunk_stack_.Push(Get_thread_local_node_list());

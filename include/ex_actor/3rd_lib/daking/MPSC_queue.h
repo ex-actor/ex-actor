@@ -67,7 +67,7 @@ SOFTWARE.
 #include <unordered_map>
 #include <utility>
 
-namespace daking {
+namespace ex_actor::embedded_3rd::daking {
 /*
              SC                MP
      [tail]->[]->[]->[]->[]->[head]

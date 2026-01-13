@@ -555,10 +555,14 @@ class MPSC_queue {
     return global_manager_instance_ ? Reserve_global_external(chunk_count) : false;
   }
 
+  DAKING_ALWAYS_INLINE static void this_thread_available_atexit() { Get_thread_hook(); }
+  // ↑↓Actually they are same, but I prefer to have some sweet dreams that my queue has a wide audience.
+  DAKING_ALWAYS_INLINE static void touch_thread_local() { Get_thread_hook(); }
+
  private:
   DAKING_ALWAYS_INLINE static Manager& Get_global_manager() noexcept { return *global_manager_instance_; }
 
-  DAKING_ALWAYS_INLINE Hook& Get_thread_hook() {
+  DAKING_ALWAYS_INLINE static Hook& Get_thread_hook() {
     static thread_local Hook thread_hook;
     return thread_hook;
   }

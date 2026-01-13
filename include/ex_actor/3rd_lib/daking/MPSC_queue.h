@@ -58,6 +58,7 @@ SOFTWARE.
 #endif  // !DAKING_ALWAYS_INLINE
 
 #include <atomic>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -66,7 +67,7 @@ SOFTWARE.
 #include <unordered_map>
 #include <utility>
 
-namespace ex_actor::embedded_3rd::daking {
+namespace daking {
 /*
              SC                MP
      [tail]->[]->[]->[]->[]->[head]
@@ -192,52 +193,65 @@ struct MPSC_chunk_stack {
 template <typename Queue>
 struct MPSC_thread_hook {
   using size_type = typename Queue::size_type;
-  using Manager = typename Queue::Manager;
+  using Thread_local_pair = typename Queue::Thread_local_pair;
   using Node = MPSC_node<Queue>;
 
-  MPSC_thread_hook(std::thread::id tid, Node** node, size_type* size) : tid_(tid) {
+  MPSC_thread_hook() : tid_(std::this_thread::get_id()) {
     std::lock_guard<std::mutex> guard(Queue::global_mutex_);
-    Manager* global_manager = Queue::global_manager_;
     // Only being called after global_manager is not a nullptr.
-    global_manager->Register(tid_, node, size);
+    pair_ = Queue::Get_global_manager().Register(tid_);
   }
 
   ~MPSC_thread_hook() {
+    // If this is consumer hook, release the queue tail to help destructor thread.
+    std::atomic_thread_fence(std::memory_order_release);
     std::lock_guard<std::mutex> guard(Queue::global_mutex_);
-    Manager* global_manager = Queue::global_manager_;
-    if (global_manager) {
-      global_manager->Unregister(tid_);
-    } else {
-      Queue::thread_local_node_list_ = nullptr;
-      Queue::thread_local_node_count_ = 0;
-    }
+    Queue::Get_global_manager().Unregister(tid_);
   }
 
+  DAKING_ALWAYS_INLINE Node*& Node_list() noexcept { return pair_->first; }
+
+  DAKING_ALWAYS_INLINE size_type& Node_size() noexcept { return pair_->second; }
+
   std::thread::id tid_;
+  Thread_local_pair* pair_;
 };
 
-template <typename Queue, typename Alloc>
-struct MPSC_manager : public std::allocator_traits<Alloc>::template rebind_alloc<detail::MPSC_node<Queue>>,
+// If allocator is stateless, there is no data race.
+// But if it has stateful member: construct/destroy, you should protect these two functions by yourself,
+// and other functions are protected by daking.
+template <typename Queue, typename ThreadLocalPair, typename Alloc>
+struct MPSC_manager : public std::allocator<ThreadLocalPair>,
+                      public std::allocator_traits<Alloc>::template rebind_alloc<detail::MPSC_node<Queue>>,
                       public std::allocator_traits<Alloc>::template rebind_alloc<detail::MPSC_page<Queue>> {
   using size_type = typename Queue::size_type;
   using Node = MPSC_node<Queue>;
   using Page = MPSC_page<Queue>;
-  using Thread_local_pair = std::pair<Node**, size_type*>;
-  using Thread_local_manager =
-      std::unordered_map<std::thread::id, Thread_local_pair, std::hash<std::thread::id>, std::equal_to<std::thread::id>,
-                         typename std::allocator_traits<Alloc>::template rebind_alloc<
-                             std::pair<const std::thread::id, Thread_local_pair>>>;
+  using Thread_local_pair = ThreadLocalPair;
+  using Thread_local_manager = std::unordered_map<std::thread::id, Thread_local_pair*>;
+  using Alloc_pair = std::allocator<Thread_local_pair>;  // Should not be managed by CustomAllocator
+  using Altraits_pair = std::allocator_traits<Alloc_pair>;
   using Alloc_node = typename std::allocator_traits<Alloc>::template rebind_alloc<Node>;
   using Altraits_node = std::allocator_traits<Alloc_node>;
   using Alloc_page = typename std::allocator_traits<Alloc>::template rebind_alloc<Page>;
   using Altraits_page = std::allocator_traits<Alloc_page>;
 
-  MPSC_manager(const Alloc& alloc) : Alloc_node(alloc), Alloc_page(alloc) {}
+  MPSC_manager(const Alloc& alloc) : Alloc_pair(), Alloc_node(alloc), Alloc_page(alloc) {}
+
   ~MPSC_manager() {
-    for (auto& [tid, pair] : Get_global_thread_local_manager()) {
-      auto [ptr, size] = pair;
-      *ptr = nullptr;
-      *size = 0;
+    /* Already locked */
+    for (auto [tid, pair_ptr] : global_thread_local_manager_) {
+      Altraits_pair::destroy(*this, pair_ptr);
+      Altraits_pair::deallocate(*this, pair_ptr, 1);
+    }
+  }
+
+  void Reset() {
+    /* Already locked */
+    for (auto& [tid, pair_ptr] : global_thread_local_manager_) {
+      auto& [node, size] = *pair_ptr;
+      node = nullptr;
+      size = 0;
     }
     while (global_page_list_) {
       Altraits_node::deallocate(*this, global_page_list_->node_, global_page_list_->count_);
@@ -248,6 +262,7 @@ struct MPSC_manager : public std::allocator_traits<Alloc>::template rebind_alloc
   }
 
   void Reserve(size_type count) {
+    /* Already locked */
     Node* new_nodes = Altraits_node::allocate(*this, count);
     Page* new_page = Altraits_page::allocate(*this, 1);
     Altraits_page::construct(*this, new_page, new_nodes, count, global_page_list_);
@@ -267,39 +282,41 @@ struct MPSC_manager : public std::allocator_traits<Alloc>::template rebind_alloc
     global_node_count_.store(global_node_count_ + count, std::memory_order_release);
   }
 
-  DAKING_ALWAYS_INLINE void Register(std::thread::id tid, Node** node, size_type* size) {
-    // Already locked
-    auto& global_thread_local_manager = Get_global_thread_local_manager();
-    if (!global_thread_local_manager.count(tid)) {
-      global_thread_local_manager[tid] = {node, size};
+  DAKING_ALWAYS_INLINE Thread_local_pair* Register(std::thread::id tid) {
+    /* Already locked */
+    if (!global_thread_local_manager_.count(tid)) {
+      Thread_local_pair* new_pair = Altraits_pair::allocate(*this, 1);
+      Altraits_pair::construct(*this, new_pair, nullptr, 0);
+      global_thread_local_manager_[tid] = new_pair;
     }
+    return global_thread_local_manager_[tid];
   }
 
   DAKING_ALWAYS_INLINE void Unregister(std::thread::id tid) {
-    // Already locked
-    auto& global_thread_local_manager = Get_global_thread_local_manager();
-    if (global_thread_local_manager.count(tid)) {
-      global_thread_local_manager.erase(tid);
+    /* Already locked */
+    if (global_thread_local_manager_.count(tid)) {
+      Altraits_pair::deallocate(*this, global_thread_local_manager_[tid], 1);
+      global_thread_local_manager_.erase(tid);
     }
   }
 
   DAKING_ALWAYS_INLINE size_type Node_count() noexcept { return global_node_count_.load(std::memory_order_acquire); }
 
-  DAKING_ALWAYS_INLINE Thread_local_manager& Get_global_thread_local_manager() {
-    static Thread_local_manager global_thread_local_manager(static_cast<const Alloc_node&>(*this));
-    return global_thread_local_manager;
+  DAKING_ALWAYS_INLINE static MPSC_manager* Create_global_manager(const Alloc& alloc) {
+    static MPSC_manager global_manager(alloc);
+    return &global_manager;
   }
 
   Page* global_page_list_ = nullptr;
   std::atomic<size_type> global_node_count_ = 0;
+  Thread_local_manager global_thread_local_manager_;
 };
 }  // namespace detail
 
 template <typename Ty, std::size_t ThreadLocalCapacity = 256,
           std::size_t Align = 64, /* std::hardware_destructive_interference_size */
           typename Alloc = std::allocator<Ty>>
-class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::template rebind_alloc<
-                       detail::MPSC_manager<MPSC_queue<Ty, ThreadLocalCapacity, Align, Alloc>, Alloc>> {
+class MPSC_queue {
  public:
   static_assert(std::is_object_v<Ty>, "Ty must be object.");
   static_assert((ThreadLocalCapacity & (ThreadLocalCapacity - 1)) == 0, "ThreadLocalCapacity must be a power of 2.");
@@ -319,7 +336,8 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
   using Page = detail::MPSC_page<MPSC_queue>;
   using Chunk_stack = detail::MPSC_chunk_stack<MPSC_queue>;
   using Hook = detail::MPSC_thread_hook<MPSC_queue>;
-  using Manager = detail::MPSC_manager<MPSC_queue, Alloc>;
+  using Thread_local_pair = std::pair<Node*, size_type>;
+  using Manager = detail::MPSC_manager<MPSC_queue, Thread_local_pair, Alloc>;
   using Alloc_manager = typename std::allocator_traits<allocator_type>::template rebind_alloc<Manager>;
   using Altraits_manager = std::allocator_traits<Alloc_manager>;
   using Alloc_node = typename Manager::Alloc_node;
@@ -340,20 +358,26 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
   friend Altraits_page;
 
  public:
-  MPSC_queue(const allocator_type& alloc = allocator_type())
-      : Alloc_manager(alloc) /* Alloc<Ty> -> Alloc<Manager>, which means Alloc should have a template constructor */ {
+  MPSC_queue() noexcept(noexcept(Alloc())) : MPSC_queue(Alloc()) {}
+
+  MPSC_queue(const Alloc& alloc) {
+    /* Alloc<Ty> -> Alloc<...>, which means Alloc should have a template constructor */
     global_instance_count_++;
-    Try_create_global_manager(alloc);
-    Initial();
+    Initial(alloc);
   }
 
-  explicit MPSC_queue(size_type initial_global_chunk_count, const allocator_type& alloc = allocator_type())
-      : MPSC_queue(alloc) {
+  explicit MPSC_queue(size_type initial_global_chunk_count, const Alloc& alloc = Alloc()) : MPSC_queue(alloc) {
     reserve_global_chunk(initial_global_chunk_count);
   }
 
   ~MPSC_queue() {
-    /* Warning: If queue is not empty, the value in left nodes will not be destructed! */
+    Node* next = tail_->next_.load(std::memory_order_acquire);
+    while (next) {
+      Altraits_node::destroy(Get_global_manager(), std::addressof(next->value_));
+      Deallocate(std::exchange(tail_, next));
+      next = tail_->next_.load(std::memory_order_acquire);
+    }
+
     if (--global_instance_count_ == 0) {
       // only the last instance free the global resource
       std::lock_guard<std::mutex> lock(global_mutex_);
@@ -371,10 +395,8 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
 
   template <typename... Args>
   DAKING_ALWAYS_INLINE void emplace(Args&&... args) {
-    static thread_local Hook thread_hook(std::this_thread::get_id(), &thread_local_node_list_,
-                                         &thread_local_node_count_);
     Node* new_node = Allocate();
-    Altraits_node::construct(Get_manager(), std::addressof(new_node->value_), std::forward<Args>(args)...);
+    Altraits_node::construct(Get_global_manager(), std::addressof(new_node->value_), std::forward<Args>(args)...);
 
     Node* old_head = head_.exchange(new_node, std::memory_order_acq_rel);
     old_head->next_.store(new_node, std::memory_order_release);
@@ -387,15 +409,13 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
   DAKING_ALWAYS_INLINE void enqueue_bulk(const_reference value, size_type n) {
     // N times thread_local operation, One time CAS operation.
     // So it is more efficient than N times enqueue.
-    static thread_local Hook thread_hook(std::this_thread::get_id(), &thread_local_node_list_,
-                                         &thread_local_node_count_);
 
     Node* first_new_node = Allocate();
     Node* prev_node = first_new_node;
-    Altraits_node::construct(Get_manager(), std::addressof(first_new_node->value_), value);
+    Altraits_node::construct(Get_global_manager(), std::addressof(first_new_node->value_), value);
     for (size_type i = 1; i < n; i++) {
       Node* new_node = Allocate();
-      Altraits_node::construct(Get_manager(), std::addressof(new_node->value_), value);
+      Altraits_node::construct(Get_global_manager(), std::addressof(new_node->value_), value);
       prev_node->next_.store(new_node, std::memory_order_relaxed);
       prev_node = new_node;
     }
@@ -410,16 +430,14 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
                   "Iterator must be at least input iterator.");
     static_assert(std::is_same_v<typename std::iterator_traits<InputIt>::value_type, value_type>,
                   "The value type of iterator must be same as MPSC_queue::value_type.");
-    static thread_local Hook thread_hook(std::this_thread::get_id(), &thread_local_node_list_,
-                                         &thread_local_node_count_);
 
     Node* first_new_node = Allocate();
     Node* prev_node = first_new_node;
-    Altraits_node::construct(Get_manager(), std::addressof(first_new_node->value_), *it);
+    Altraits_node::construct(Get_global_manager(), std::addressof(first_new_node->value_), *it);
     ++it;
     for (size_type i = 1; i < n; i++) {
       Node* new_node = Allocate();
-      Altraits_node::construct(Get_manager(), std::addressof(new_node->value_), *it);
+      Altraits_node::construct(Get_global_manager(), std::addressof(new_node->value_), *it);
       prev_node->next_.store(new_node, std::memory_order_relaxed);
       prev_node = new_node;
       ++it;
@@ -440,13 +458,11 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
   DAKING_ALWAYS_INLINE bool try_dequeue(T& value) noexcept(std::is_nothrow_assignable_v<T&, value_type&&> &&
                                                            std::is_nothrow_destructible_v<value_type>) {
     static_assert(std::is_assignable_v<T&, value_type&&>);
-    static thread_local Hook thread_hook(std::this_thread::get_id(), &thread_local_node_list_,
-                                         &thread_local_node_count_);
 
     Node* next = tail_->next_.load(std::memory_order_acquire);
     if (next) [[likely]] {
       value = std::move(next->value_);
-      Altraits_node::destroy(Get_manager(), std::addressof(next->value_));
+      Altraits_node::destroy(Get_global_manager(), std::addressof(next->value_));
       Deallocate(std::exchange(tail_, next));
       return true;
     } else {
@@ -532,17 +548,27 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
   DAKING_ALWAYS_INLINE allocator_type get_allocator() noexcept { return allocator_type(*this); }
 
   DAKING_ALWAYS_INLINE static size_type global_node_size_apprx() noexcept {
-    return global_manager_ ? global_manager_->Node_count() : 0;
+    return global_manager_instance_ ? Get_global_manager().Node_count() : 0;
   }
 
   DAKING_ALWAYS_INLINE static bool reserve_global_chunk(size_type chunk_count) {
-    return global_manager_ ? Reserve_global_external(chunk_count) : false;
+    return global_manager_instance_ ? Reserve_global_external(chunk_count) : false;
   }
 
  private:
-  DAKING_ALWAYS_INLINE void Initial() {
-    static thread_local Hook thread_hook(std::this_thread::get_id(), &thread_local_node_list_,
-                                         &thread_local_node_count_);
+  DAKING_ALWAYS_INLINE static Manager& Get_global_manager() noexcept { return *global_manager_instance_; }
+
+  DAKING_ALWAYS_INLINE Hook& Get_thread_hook() {
+    static thread_local Hook thread_hook;
+    return thread_hook;
+  }
+
+  DAKING_ALWAYS_INLINE Node*& Get_thread_local_node_list() noexcept { return Get_thread_hook().Node_list(); }
+
+  DAKING_ALWAYS_INLINE size_type& Get_thread_local_node_size() noexcept { return Get_thread_hook().Node_size(); }
+
+  DAKING_ALWAYS_INLINE void Initial(const Alloc& alloc) {
+    global_manager_instance_ = Manager::Create_global_manager(alloc);  // single instance
 
     Node* dummy = Allocate();
     tail_ = dummy;
@@ -550,62 +576,39 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
   }
 
   DAKING_ALWAYS_INLINE Node* Allocate() {
-    static thread_local Hook thread_hook(std::this_thread::get_id(), &thread_local_node_list_,
-                                         &thread_local_node_count_);
-    if (!thread_local_node_list_) [[unlikely]] {
-      while (!global_chunk_stack_.Try_pop(thread_local_node_list_)) {
+    if (!Get_thread_local_node_list()) [[unlikely]] {
+      while (!global_chunk_stack_.Try_pop(Get_thread_local_node_list())) {
         Reserve_global_internal();
       }
     }
-    Node* res = std::exchange(thread_local_node_list_, thread_local_node_list_->next_);
+    Node* res = std::exchange(Get_thread_local_node_list(), Get_thread_local_node_list()->next_);
     res->next_.store(nullptr, std::memory_order_relaxed);
     return res;
   }
 
   DAKING_ALWAYS_INLINE void Deallocate(Node* node) noexcept {
-    static thread_local Hook thread_hook(std::this_thread::get_id(), &thread_local_node_list_,
-                                         &thread_local_node_count_);
-
-    node->next_ = thread_local_node_list_;
-    thread_local_node_list_ = node;
-    if (++thread_local_node_count_ >= thread_local_capacity) [[unlikely]] {
-      global_chunk_stack_.Push(thread_local_node_list_);
-      thread_local_node_list_ = nullptr;
-      thread_local_node_count_ = 0;
-    }
-  }
-
-  DAKING_ALWAYS_INLINE DAKING_NO_TSAN
-      // If allocator is stateless, there is no data race.
-      // But if it has stateful member: construct/destroy, you should protect these two functions by yourself,
-      // and other functions are protected by daking.
-      Manager&
-      Get_manager() noexcept {
-    return *global_manager_;
-  }
-
-  DAKING_ALWAYS_INLINE void Try_create_global_manager(const allocator_type& alloc) noexcept {
-    std::lock_guard<std::mutex> lock(global_mutex_);
-    if (!global_manager_) {
-      Manager* manager = Altraits_manager::allocate(*this, 1);
-      Altraits_manager::construct(*this, manager, alloc);
-      global_manager_ = manager;
+    node->next_.store(Get_thread_local_node_list(), std::memory_order_relaxed);
+    Get_thread_local_node_list() = node;
+    if (++Get_thread_local_node_size() >= thread_local_capacity) [[unlikely]] {
+      global_chunk_stack_.Push(Get_thread_local_node_list());
+      Get_thread_local_node_list() = nullptr;
+      Get_thread_local_node_size() = 0;
     }
   }
 
   DAKING_ALWAYS_INLINE static bool Reserve_global_external(size_type chunk_count) {
-    size_type global_node_count = global_manager_->Node_count();
+    size_type global_node_count = Get_global_manager().Node_count();
     if (global_node_count / thread_local_capacity >= chunk_count) {
       return false;
     }
     std::lock_guard<std::mutex> lock(global_mutex_);
-    global_node_count = global_manager_->Node_count();
+    global_node_count = Get_global_manager().Node_count();
     if (global_node_count / thread_local_capacity >= chunk_count) {
       return false;
     }
 
     size_type count = (chunk_count - global_node_count / thread_local_capacity) * thread_local_capacity;
-    global_manager_->Reserve(count);
+    Get_global_manager().Reserve(count);
     return true;
   }
 
@@ -616,14 +619,13 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
       return;
     }
 
-    global_manager_->Reserve(std::max(thread_local_capacity, global_manager_->Node_count()));
+    Get_global_manager().Reserve(std::max(thread_local_capacity, Get_global_manager().Node_count()));
   }
 
   DAKING_ALWAYS_INLINE void Free_global() {
     /* Already locked */
     global_chunk_stack_.Reset();
-    Altraits_manager::destroy(*this, global_manager_);
-    Altraits_manager::deallocate(*this, std::exchange(global_manager_, nullptr), 1);
+    Get_global_manager().Reset();
   }
 
   /* Global LockFree*/
@@ -632,16 +634,12 @@ class MPSC_queue : /* CRTP for EBO */ private std::allocator_traits<Alloc>::temp
 
   /* Global Mutex*/
   inline static std::mutex global_mutex_ {};
-  inline static Manager* global_manager_ = nullptr;
-
-  /* ThreadLocal*/
-  inline thread_local static Node* thread_local_node_list_ = nullptr;
-  inline thread_local static size_type thread_local_node_count_ = 0;
+  inline static Manager* global_manager_instance_ = nullptr;
 
   /* MPSC */
   alignas(align) std::atomic<Node*> head_;
   alignas(align) Node* tail_;
 };
-}  // namespace ex_actor::embedded_3rd::daking
+}  // namespace daking
 
 #endif  // !DAKING_MPSC_QUEUE_HPP

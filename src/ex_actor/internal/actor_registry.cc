@@ -260,15 +260,14 @@ static void RegisterAtExitCleanup() {
   }
   at_exit_cleanup_registered = true;
   /*
-  According to the cpp reference:
+  According to the C++ standard, atexit handlers and static destructors are interleaved
+  based on their registration/construction order. If atexit handler A is registered, then
+  static object B is constructed, then on exit: B is destroyed BEFORE A is called.
 
-  The functions may be called concurrently with the destruction of the objects with static storage duration and with
-  each other, maintaining the guarantee that if registration of A was sequenced-before the registration of B, then the
-  call to B is sequenced-before the call to A, same applies to the sequencing between static object constructors and
-  calls to atexit.
-
-  So as long as user calls Init() inside main, this cleanup function should be called before the destruction of other
-  global variables.
+  IMPORTANT: This is why Init() must create the ActorRegistry BEFORE calling this function.
+  The ActorRegistry construction creates an MPSC_queue which initializes a function-local
+  static MPSC_manager. By creating the registry first, we ensure the atexit handler runs
+  BEFORE the MPSC_manager is destroyed, avoiding use-after-free in worker threads.
   */
   std::atexit([]() {
     if (internal::IsGlobalDefaultRegistryInitialized()) {
@@ -288,8 +287,12 @@ void Init(uint32_t thread_pool_size) {
   internal::logging::Info("Initializing ex_actor in single-node mode with default scheduler, thread_pool_size={}",
                           thread_pool_size);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  internal::SetupGlobalHandlers();
+  // IMPORTANT: Create the registry BEFORE registering the atexit handler.
+  // This ensures the MPSC_manager static (created during ActorRegistry construction)
+  // is destroyed AFTER the atexit handler runs, not before.
+  // C++ destroys statics/calls atexit handlers in reverse order of construction/registration.
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size);
+  internal::SetupGlobalHandlers();
 }
 
 void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
@@ -298,8 +301,10 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
       "total_nodes={}",
       thread_pool_size, this_node_id, cluster_node_info.size());
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  internal::SetupGlobalHandlers();
+  // IMPORTANT: Create the registry BEFORE registering the atexit handler.
+  // See comment in the other Init() overload for explanation.
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, this_node_id, cluster_node_info);
+  internal::SetupGlobalHandlers();
 }
 
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }

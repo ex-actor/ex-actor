@@ -33,18 +33,8 @@
 
 namespace ex_actor::internal {
 struct ActorMessage {
-  enum class Type : uint8_t {
-    kMethodCall = 0,
-    kDestroy = 1,
-  };
   virtual ~ActorMessage() = default;
   virtual void Execute() = 0;
-  virtual Type GetType() const = 0;
-};
-
-struct DestroyMessage : ActorMessage {
-  void Execute() override { throw std::runtime_error("DestroyMessage should not be executed"); }
-  Type GetType() const override { return Type::kDestroy; }
 };
 
 class TypeErasedActor {
@@ -133,7 +123,6 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
       // so it's safe to push `this`.
       actor->PushMessage(this);
     }
-    Type GetType() const override { return Type::kMethodCall; }
   };
 
   struct ActorMessageSubmissionSender : ex::sender_t {
@@ -191,19 +180,20 @@ class Actor : public TypeErasedActor {
 
   ~Actor() override = default;
 
+  /// Async destroy the actor, if there are still messages in the mailbox, they might not be processed.
   exec::task<void> AsyncDestroy() override {
-    if (destroy_message_pushed_.load(std::memory_order_acquire)) {
-      co_return co_await async_scope_.on_empty();
+    bool expected = false;
+    bool changed = pending_to_be_destroyed_.compare_exchange_strong(expected, true, std::memory_order_release,
+                                                                    std::memory_order_acquire);
+    if (!changed) {
+      co_return;
     }
-    auto destroy_msg = std::make_unique<DestroyMessage>();
-    PushMessage(destroy_msg.get());
+    pending_message_count_.fetch_add(1, std::memory_order_release);
+    TryActivate();
     co_await async_scope_.on_empty();
   }
 
   void PushMessage(ActorMessage* task) override {
-    if (task->GetType() == ActorMessage::Type::kDestroy) [[unlikely]] {
-      destroy_message_pushed_.store(true, std::memory_order_release);
-    }
     mailbox_.Push(task);
     pending_message_count_.fetch_add(1, std::memory_order_release);
     TryActivate();
@@ -218,7 +208,7 @@ class Actor : public TypeErasedActor {
   std::unique_ptr<UserClass> user_class_instance_;
   exec::async_scope async_scope_;
   std::atomic_bool activated_ = false;
-  std::atomic_bool destroy_message_pushed_ = false;
+  std::atomic_bool pending_to_be_destroyed_ = false;
 
   // push self to the executor
   void TryActivate() {
@@ -235,22 +225,31 @@ class Actor : public TypeErasedActor {
   void PullMailboxAndRun() override {
     if (user_class_instance_ == nullptr) [[unlikely]] {
       // already destroyed
+      size_t remaining = pending_message_count_.load(std::memory_order_acquire);
+      logging::Warn("{} is already destroyed, but triggered again, it has {} messages remaining", Description(),
+                    remaining);
+      return;
+    }
+
+    if (pending_to_be_destroyed_.load(std::memory_order_acquire)) [[unlikely]] {
+      user_class_instance_.reset();
+      activated_.store(false, std::memory_order_release);
+      size_t remaining = pending_message_count_.fetch_sub(1, std::memory_order_acq_rel) - 1;
+      if (remaining > 0) {
+        logging::Warn("{} is destroyed but still has {} messages remaining", Description(), remaining);
+      }
       return;
     }
 
     size_t message_executed = 0;
     while (auto optional_msg = mailbox_.TryPop()) {
-      auto* msg = optional_msg.value();
-      if (msg->GetType() == ActorMessage::Type::kDestroy) [[unlikely]] {
-        user_class_instance_.reset();
-        return;
-      }
-      msg->Execute();
+      optional_msg.value()->Execute();
       message_executed++;
       if (message_executed >= actor_config_.max_message_executed_per_activation) [[unlikely]] {
         break;
       }
     }
+
     pending_message_count_.fetch_sub(message_executed, std::memory_order_release);
 
     // use seq_cst to prevent reordering activated_.store() and pending_message_count_.load()
@@ -260,6 +259,11 @@ class Actor : public TypeErasedActor {
     if (pending_message_count_.load(std::memory_order_acquire) > 0) {
       TryActivate();
     }
+  }
+
+  std::string Description() {
+    return fmt_lib::format("Actor {}(type:{},name:{})", (void*)this, typeid(UserClass).name(),
+                           actor_config_.actor_name.value_or("null"));
   }
 };  // class Actor
 

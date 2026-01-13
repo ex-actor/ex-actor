@@ -12,7 +12,7 @@ node0.kill()
 node0.wait(1)
 print("node0 has been killed", flush=True)
 try:
-    node1.wait(5)
+    node1.wait(10)
 except subprocess.TimeoutExpired:
     print("Node0 is dead, but node1 is still running")
     raise

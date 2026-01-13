@@ -640,6 +640,6 @@ class MPSC_queue {
   alignas(align) std::atomic<Node*> head_;
   alignas(align) Node* tail_;
 };
-}  // namespace daking
+}  // namespace ex_actor::embedded_3rd::daking
 
 #endif  // !DAKING_MPSC_QUEUE_HPP

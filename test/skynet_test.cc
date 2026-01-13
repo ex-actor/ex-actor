@@ -89,6 +89,4 @@ TEST(SkynetTest, ActorRegistryCanBeInvokeInsideActorMethods) {
 
   logging::Info("Result: {} ms", result);
   logging::Info("Time: {} ms", duration);
-
-  ex_actor::Shutdown();
 }

@@ -42,6 +42,5 @@ int main(int /*argc*/, char** argv) {
   ex_actor::Init(shared_pool->GetScheduler(), this_node_id, cluster_node_info);
   ex_actor::HoldResource(shared_pool);
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
-  ex_actor::Shutdown();
   logging::Info("main exit, node id: {}", this_node_id);
 }

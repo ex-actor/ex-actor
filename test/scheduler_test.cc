@@ -122,7 +122,5 @@ TEST(SchedulerTest, TestResourceHolder) {
     EXPECT_NE(thread_id1, thread_id2);
   };
   ex::sync_wait(coroutine());
-  // The resource holder ensures that shared_pool1, shared_pool2, and union_pool
-  // outlive the registry (they're released in Shutdown() after registry destruction)
-  ex_actor::Shutdown();
+  // not shutdown here, intentionally, to test the resource holder
 }

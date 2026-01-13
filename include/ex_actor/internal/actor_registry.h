@@ -306,6 +306,7 @@ ActorRegistry& GetGlobalDefaultRegistry();
 void AssignGlobalDefaultRegistry(std::unique_ptr<ActorRegistry> registry);
 bool IsGlobalDefaultRegistryInitialized();
 void SetupGlobalHandlers();
+void RegisterThreadLocalCleanup();
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
@@ -313,24 +314,26 @@ using ex_actor::internal::ActorRegistry;
 
 /**
  * @brief Init the global default registry in single-node mode, use the default work-sharing thread pool as the
- * scheduler. Not thread-safe.
+ * scheduler. Not thread-safe. Must be called at main thread.
  */
 void Init(uint32_t thread_pool_size);
 
 /**
- * @brief Init the global default registry in single-node mode, use specified scheduler. Not thread-safe.
+ * @brief Init the global default registry in single-node mode, use specified scheduler. Not thread-safe. Must be called
+ * at main thread.
  */
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler);
 
 /**
  * @brief Init the global default registry in distributed mode, use the default work-sharing thread pool as the
- * scheduler. Not thread-safe.
+ * scheduler. Not thread-safe. Must be called at main thread.
  */
 void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 
 /**
- * @brief Init the global default registry in distributed mode, use specified scheduler. Not thread-safe.
+ * @brief Init the global default registry in distributed mode, use specified scheduler. Not thread-safe. Must be called
+ * at main thread.
  */
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
@@ -343,7 +346,8 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
 void HoldResource(std::shared_ptr<void> resource);
 
 /**
- * @brief Shutdown the global default registry. Will also be called automatically when `main` exits. Not thread-safe.
+ * @brief Shutdown the global default registry. Will be called automatically when main thread exits
+ * (via thread_local destructor). Can also be called explicitly. Not thread-safe.
  */
 void Shutdown();
 
@@ -403,6 +407,8 @@ void Init(Scheduler scheduler) {
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   internal::SetupGlobalHandlers();
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
+  // Register cleanup AFTER ActorRegistry construction to ensure correct thread_local destruction order
+  internal::RegisterThreadLocalCleanup();
 }
 
 template <ex::scheduler Scheduler>
@@ -413,5 +419,7 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   internal::SetupGlobalHandlers();
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), this_node_id, cluster_node_info));
+  // Register cleanup AFTER ActorRegistry construction to ensure correct thread_local destruction order
+  internal::RegisterThreadLocalCleanup();
 }
 }  // namespace ex_actor

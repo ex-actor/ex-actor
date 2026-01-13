@@ -33,18 +33,8 @@
 
 namespace ex_actor::internal {
 struct ActorMessage {
-  enum class Type : uint8_t {
-    kMethodCall = 0,
-    kDestroy = 1,
-  };
   virtual ~ActorMessage() = default;
   virtual void Execute() = 0;
-  virtual Type GetType() const = 0;
-};
-
-struct DestroyMessage : ActorMessage {
-  void Execute() override { throw std::runtime_error("DestroyMessage should not be executed"); }
-  Type GetType() const override { return Type::kDestroy; }
 };
 
 class TypeErasedActor {
@@ -133,7 +123,6 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
       // so it's safe to push `this`.
       actor->PushMessage(this);
     }
-    Type GetType() const override { return Type::kMethodCall; }
   };
 
   struct ActorMessageSubmissionSender : ex::sender_t {
@@ -193,7 +182,12 @@ class Actor : public TypeErasedActor {
 
   /// Async destroy the actor, if there are still messages in the mailbox, they might not be processed.
   exec::task<void> AsyncDestroy() override {
-    pending_to_be_destroyed_.store(true, std::memory_order_release);
+    bool expected = false;
+    bool changed = pending_to_be_destroyed_.compare_exchange_strong(expected, true, std::memory_order_release,
+                                                                    std::memory_order_acquire);
+    if (!changed) {
+      co_return;
+    }
     pending_message_count_.fetch_add(1, std::memory_order_release);
     TryActivate();
     co_await async_scope_.on_empty();

@@ -43,6 +43,10 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
     children.push_back(co_await std::move(future));
   }
 
+  // Use async_scope to spawn all child tasks in parallel and collect results
+  // This avoids the when_all limitation with many senders in newer stdexec versions
+  exec::async_scope child_scope;
+
   auto make_child_sender = [&children, verbose, level](int index) {
     // test ephemeral stacks
     return children.at(index).Send<&SkynetActor::Process>(level - 1, false) | ex::then([verbose, index](uint64_t res) {
@@ -51,17 +55,21 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
            });
   };
 
-  auto all = ex::when_all(make_child_sender(0), make_child_sender(1), make_child_sender(2), make_child_sender(3),
-                          make_child_sender(4), make_child_sender(5), make_child_sender(6), make_child_sender(7),
-                          make_child_sender(8), make_child_sender(9));
+  using ResultFutureType = decltype(child_scope.spawn_future(make_child_sender(0)));
+  std::vector<ResultFutureType> result_futures;
+  result_futures.reserve(10);
 
-  auto sum_sender = std::move(all) | ex::then([](uint64_t r0, uint64_t r1, uint64_t r2, uint64_t r3, uint64_t r4,
-                                                 uint64_t r5, uint64_t r6, uint64_t r7, uint64_t r8, uint64_t r9) {
-                      return r0 + r1 + r2 + r3 + r4 + r5 + r6 + r7 + r8 + r9;
-                    });
+  for (int i = 0; i < 10; ++i) {
+    result_futures.push_back(child_scope.spawn_future(make_child_sender(i)));
+  }
+
+  co_await child_scope.on_empty();
 
   if (verbose) std::cout << "DEBUG: Awaiting children for level " << level << std::endl;
-  uint64_t sum = co_await std::move(sum_sender);
+  uint64_t sum = 0;
+  for (auto& future : result_futures) {
+    sum += co_await std::move(future);
+  }
 
   for (auto& child : children) {
     co_await ex_actor::DestroyActor(child);

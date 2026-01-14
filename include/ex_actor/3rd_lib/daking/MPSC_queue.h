@@ -400,6 +400,9 @@ class MPSC_queue {
 
     Node* old_head = head_.exchange(new_node, std::memory_order_acq_rel);
     old_head->next_.store(new_node, std::memory_order_release);
+#if DAKING_HAS_CXX20_OR_ABOVE
+    old_head->next_.notify_one();
+#endif
   }
 
   DAKING_ALWAYS_INLINE void enqueue(const_reference value) { emplace(value); }
@@ -421,6 +424,9 @@ class MPSC_queue {
     }
     Node* old_head = head_.exchange(prev_node, std::memory_order_acq_rel);
     old_head->next_.store(first_new_node, std::memory_order_release);
+#if DAKING_HAS_CXX20_OR_ABOVE
+    old_head->next_.notify_one();
+#endif
   }
 
   template <typename InputIt>
@@ -444,6 +450,9 @@ class MPSC_queue {
     }
     Node* old_head = head_.exchange(prev_node, std::memory_order_acq_rel);
     old_head->next_.store(first_new_node, std::memory_order_release);
+#if DAKING_HAS_CXX20_OR_ABOVE
+    old_head->next_.notify_one();
+#endif
   }
 
   template <typename ForwardIt,
@@ -545,8 +554,6 @@ class MPSC_queue {
 
   DAKING_ALWAYS_INLINE bool empty() const noexcept { return tail_->next_.load(std::memory_order_acquire) == nullptr; }
 
-  DAKING_ALWAYS_INLINE allocator_type get_allocator() noexcept { return allocator_type(*this); }
-
   DAKING_ALWAYS_INLINE static size_type global_node_size_apprx() noexcept {
     return global_manager_instance_ ? Get_global_manager().Node_count() : 0;
   }
@@ -555,14 +562,10 @@ class MPSC_queue {
     return global_manager_instance_ ? Reserve_global_external(chunk_count) : false;
   }
 
-  DAKING_ALWAYS_INLINE static void this_thread_available_atexit() { Get_thread_hook(); }
-  // ↑↓Actually they are same, but I prefer to have some sweet dreams that my queue has a wide audience.
-  DAKING_ALWAYS_INLINE static void touch_thread_local() { Get_thread_hook(); }
-
  private:
   DAKING_ALWAYS_INLINE static Manager& Get_global_manager() noexcept { return *global_manager_instance_; }
 
-  DAKING_ALWAYS_INLINE static Hook& Get_thread_hook() {
+  DAKING_ALWAYS_INLINE Hook& Get_thread_hook() {
     static thread_local Hook thread_hook;
     return thread_hook;
   }
@@ -572,7 +575,10 @@ class MPSC_queue {
   DAKING_ALWAYS_INLINE size_type& Get_thread_local_node_size() noexcept { return Get_thread_hook().Node_size(); }
 
   DAKING_ALWAYS_INLINE void Initial(const Alloc& alloc) {
-    global_manager_instance_ = Manager::Create_global_manager(alloc);  // single instance
+    {
+      std::lock_guard<std::mutex> guard(global_mutex_);
+      global_manager_instance_ = Manager::Create_global_manager(alloc);  // single instance
+    }
 
     Node* dummy = Allocate();
     tail_ = dummy;

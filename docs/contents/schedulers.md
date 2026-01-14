@@ -20,14 +20,14 @@ int main() {
   // pass the scheduler to the ex_actor::Init function
   ex_actor::Init(thread_pool.GetScheduler());
   
-  // IMPORTANT: shutdown the runtime before your execution resource is destroyed
+  // caution: shutdown the runtime before your execution resource is destroyed
   // or the program will crash or hang forever, because we are still using your execution resource.
   ex_actor::Shutdown();
 }
 ```
 <!-- doc test end -->
 
-Another way is to make your execution resource an `unique_ptr` or `shared_ptr`, and use `ex_actor::HoldResource` to hold it, then we're able to control its lifecycle, and you don't need to call `ex_actor::Shutdown` explicitly anymore.
+If you want ex_actor to control the lifecycle of your execution resource, you can use `ex_actor::HoldResource` to hold it, the resource will be released when calling `ex_actor::Shutdown()`.
 
 <!-- doc test start -->
 ```cpp
@@ -38,6 +38,10 @@ int main() {
   auto thread_pool = std::make_unique<ex_actor::WorkSharingThreadPool>(/*thread_count=*/10);
   ex_actor::Init(thread_pool->GetScheduler());
   ex_actor::HoldResource(std::move(thread_pool));
+
+  // do some work...
+
+  ex_actor::Shutdown(); // the thread_pool will be destroyed here
 }
 ```
 <!-- doc test end -->

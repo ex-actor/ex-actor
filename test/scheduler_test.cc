@@ -122,5 +122,5 @@ TEST(SchedulerTest, TestResourceHolder) {
     EXPECT_NE(thread_id1, thread_id2);
   };
   ex::sync_wait(coroutine());
-  // not shutdown here, intentionally, to test the resource holder
+  ex_actor::Shutdown();
 }

@@ -69,7 +69,10 @@ int main(int argc, char** argv) {
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
   ex_actor::Init(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
+
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
+
+  ex_actor::Shutdown();
 }
 ```
 <!-- doc test end -->

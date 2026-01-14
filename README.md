@@ -55,6 +55,8 @@ exec::task<void> MainCoroutine() {
   // 2. Call it! It returns a `std::execution::task`.
   int res = co_await actor.Send<&Counter::Add>(1);
   assert(res == 1);
+
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }
@@ -99,6 +101,8 @@ exec::task<void> MainCoroutine() {
   ex_actor::ActorRef<Father> father = co_await ex_actor::Spawn<Father>();
   std::string res = co_await father.Send<&Father::SpawnChildAndPing>();
   assert(res == "Where is my child? Dad, I'm here!");
+
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }

@@ -62,6 +62,8 @@ exec::task<void> MainCoroutine() {
   // A shorter way
   res = co_await actor.Send<&Counter::Add>(1);
   assert(res == 2);
+
+  ex_actor::Shutdown();
 }
 
 
@@ -122,6 +124,8 @@ exec::task<void> MainCoroutine() {
   // unwrap the result for you, so you don't need to `co_await` twice.
   std::string res = co_await father.Send<&Father::SpawnChildAndPing>();
   assert(res == "Where is my child? Dad, I'm here!");
+
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }
@@ -170,6 +174,8 @@ exec::task<void> MainCoroutine() {
   // 2. call through the proxy actor.
   std::string res = co_await proxy.Send<&Proxy::ProxyPing>();
   assert(res == "Hi from Proxy");
+
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }
@@ -218,6 +224,8 @@ exec::task<void> MainCoroutine() {
   // you must wait for all task done before destroying the scope,
   // or an exception will be thrown.
   co_await scope.on_empty();
+
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }
@@ -293,6 +301,8 @@ exec::task<void> MainCoroutine() {
     int value = co_await std::move(futures[i]);
     assert(value == 3);
   }
+
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }
@@ -334,6 +344,8 @@ int main() {
 
   auto [res1] = stdexec::sync_wait(std::move(task1)).value();
   assert(res1 == 2);
+
+  ex_actor::Shutdown();
 }
 ```
 <!-- doc test end -->
@@ -387,6 +399,8 @@ exec::task<void> MainCoroutine() {
   scope.spawn(proxy.Send<&Proxy::SomeMethod>());
   scope.spawn(proxy.Send<&Proxy::AnotherMethod>());
   co_await scope.on_empty();
+
+  ex_actor::Shutdown();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }

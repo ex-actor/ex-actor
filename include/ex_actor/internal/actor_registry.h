@@ -305,7 +305,7 @@ namespace ex_actor::internal {
 ActorRegistry& GetGlobalDefaultRegistry();
 void AssignGlobalDefaultRegistry(std::unique_ptr<ActorRegistry> registry);
 bool IsGlobalDefaultRegistryInitialized();
-void SetupGlobalHandlers(bool install_thread_exit_hook);
+void SetupGlobalHandlers();
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
@@ -314,34 +314,26 @@ using ex_actor::internal::ActorRegistry;
 /**
  * @brief Init the global default registry in single-node mode, use the default work-sharing thread pool as the
  * scheduler. Not thread-safe.
- * @param auto_shutdown_on_thread_exit Whether to install a thread exit hook to automatically shutdown the runtime when
- * **this thread** exits(might not be the main thread if you call Init in another thread). If set to false, you need to
- * call ex_actor::Shutdown explicitly before main() exits, or the program will crash or hang forever.
  */
-void Init(uint32_t thread_pool_size, bool auto_shutdown_on_thread_exit = true);
+void Init(uint32_t thread_pool_size);
 
 /**
  * @brief Init the global default registry in single-node mode, use specified scheduler. Not thread-safe.
- * @param auto_shutdown_on_thread_exit See the comment in the first Init() overload.
  */
 template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler, bool auto_shutdown_on_thread_exit = true);
+void Init(Scheduler scheduler);
 
 /**
  * @brief Init the global default registry in distributed mode, use the default work-sharing thread pool as the
  * scheduler. Not thread-safe.
- * @param auto_shutdown_on_thread_exit See the comment in the first Init() overload.
  */
-void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-          bool auto_shutdown_on_thread_exit = true);
+void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 
 /**
  * @brief Init the global default registry in distributed mode, use specified scheduler. Not thread-safe.
- * @param auto_shutdown_on_thread_exit See the comment in the first Init() overload.
  */
 template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-          bool auto_shutdown_on_thread_exit = true);
+void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 
 /**
  * @brief Ask ex_actor to hold a resource, the resource won't be released until runtime is shut down.
@@ -406,21 +398,24 @@ void ConfigureLogging(const logging::LogConfig& config = {});
 
 namespace ex_actor {
 template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler, bool auto_shutdown_on_thread_exit) {
+void Init(Scheduler scheduler) {
   internal::logging::Info("Initializing ex_actor in single-node mode with custom scheduler.");
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
+  // IMPORTANT: Create the registry BEFORE registering the atexit handler.
+  // See comment in actor_registry.cc Init() for explanation.
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
-  internal::SetupGlobalHandlers(auto_shutdown_on_thread_exit);
+  internal::SetupGlobalHandlers();
 }
 
 template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-          bool auto_shutdown_on_thread_exit) {
+void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
   internal::logging::Info(
       "Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}, total_nodes={}", this_node_id,
       cluster_node_info.size());
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
+  // IMPORTANT: Create the registry BEFORE registering the atexit handler.
+  // See comment in actor_registry.cc Init() for explanation.
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), this_node_id, cluster_node_info));
-  internal::SetupGlobalHandlers(auto_shutdown_on_thread_exit);
+  internal::SetupGlobalHandlers();
 }
 }  // namespace ex_actor

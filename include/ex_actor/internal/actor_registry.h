@@ -343,7 +343,7 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
 void HoldResource(std::shared_ptr<void> resource);
 
 /**
- * @brief Shutdown the global default registry. Will also be called automatically when `main` exits. Not thread-safe.
+ * @brief Shutdown the global default registry. Must be called explicitly before `main` exits. Not thread-safe.
  */
 void Shutdown();
 
@@ -401,8 +401,6 @@ template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler) {
   internal::logging::Info("Initializing ex_actor in single-node mode with custom scheduler.");
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  // IMPORTANT: Create the registry BEFORE registering the atexit handler.
-  // See comment in actor_registry.cc Init() for explanation.
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
   internal::SetupGlobalHandlers();
 }
@@ -413,8 +411,6 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
       "Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}, total_nodes={}", this_node_id,
       cluster_node_info.size());
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  // IMPORTANT: Create the registry BEFORE registering the atexit handler.
-  // See comment in actor_registry.cc Init() for explanation.
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), this_node_id, cluster_node_info));
   internal::SetupGlobalHandlers();
 }

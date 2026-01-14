@@ -111,7 +111,7 @@ class Semaphore {
 namespace ex_actor::internal::util {
 
 template <class T>
-struct LinearizableUnboundedQueue {
+struct LinearizableUnboundedMpscQueue {
  public:
   void Push(T value) { queue_.enqueue(std::move(value)); }
 

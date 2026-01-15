@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
-#include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/common_structs.h"
 
 namespace ex = ex_actor::ex;
 

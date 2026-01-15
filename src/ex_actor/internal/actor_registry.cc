@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <thread>
 
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/remote_handler_registry.h"
@@ -194,11 +195,7 @@ exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(
   }
 }
 
-bool ActorRegistryBackend::CheckNode(uint32_t node_id) {
-  auto node_list = message_broker_->GetNodeList();
-  return std::ranges::find_if(node_list, [node_id](auto& element) { return element.node_id == node_id; }) !=
-         node_list.end();
-}
+bool ActorRegistryBackend::CheckNode(uint32_t node_id) { return message_broker_->CheckNode(node_id); }
 
 // ----------------------ActorRegistry--------------------------
 ActorRegistry::~ActorRegistry() {
@@ -346,6 +343,7 @@ bool WaitNode(uint32_t node_id, std::chrono::milliseconds timeout) {
     if (global_default_registry->WaitNode(node_id)) {
       return true;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds {1});
   }
   return false;
 }

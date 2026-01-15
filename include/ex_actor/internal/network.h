@@ -29,11 +29,11 @@
 
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
-#include <oneapi/tbb/partitioner.h>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
 #include "ex_actor/internal/constants.h"
+#include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
@@ -55,7 +55,12 @@ namespace ex_actor::internal::network {
 using ByteBufferType = zmq::message_t;
 using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
-enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kHeartbeat, kGossip };
+inline uint64_t GetTimeMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kGossip };
 
 struct Identifier {
   uint32_t request_node_id;
@@ -77,7 +82,7 @@ struct ClusterConfig {
 
 struct GossipMessage {
   NodeInfo node_info;
-  TimePoint last_seen;
+  uint64_t last_seen;
 };
 
 class PeerNodes {
@@ -85,7 +90,7 @@ class PeerNodes {
   enum class Liveness : uint8_t { kAlive = 0, kQuitting, kDead };
   struct NodeState {
     Liveness liveness;
-    TimePoint last_seen;
+    uint64_t last_seen;
   };
   void Add(const NodeInfo& node, const NodeState& state) {
     std::lock_guard lock(mutex_);
@@ -93,17 +98,20 @@ class PeerNodes {
     alive_peers_ += 1;
   }
 
-  void RefreshLastSeen(const uint32_t& node_id, TimePoint last_seen) {
+  void RefreshLastSeen(const uint32_t& node_id, uint64_t last_seen) {
     std::lock_guard lock(mutex_);
-    auto& state = map_.at({.node_id = node_id});
-    state.last_seen = max(last_seen, state.last_seen);
+    NodeInfo node {.node_id = node_id};
+    EXA_THROW_CHECK(map_.contains(node)) << "Can't find node " << node_id << "in the peer nodes";
+    auto& state = map_.at(node);
+    state.last_seen = std::max(last_seen, state.last_seen);
   }
 
   void CheckHeartbeat(const std::chrono::milliseconds& timeout) {
     std::lock_guard lock(mutex_);
     for (const auto& pair : map_) {
       const auto& state = pair.second;
-      if (state.liveness != Liveness::kDead && std::chrono::steady_clock::now() - state.last_seen >= timeout) {
+      if (state.liveness == Liveness::kDead &&
+          GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
         logging::Error("Node {} is dead, try to exit", pair.first.node_id);
         // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
         std::quick_exit(1);
@@ -149,7 +157,7 @@ class PeerNodes {
     return node_list;
   }
 
-  std::vector<GossipMessage> GenerateGossipMessages() {
+  std::vector<GossipMessage> GenerateGossipMessage() {
     std::vector<GossipMessage> messages;
     messages.reserve(map_.size());
     std::lock_guard lock(mutex_);
@@ -258,15 +266,14 @@ class MessageBroker {
 
  private:
   void EstablishConnectionTo(const NodeInfo& node_info);
-  void EstablishConnections(const std::vector<NodeInfo>& node_list);
+  void FindContactNode(const std::vector<NodeInfo>& node_list);
   void PushOperation(TypeErasedSendOperation* operation);
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
   void HandleReceivedMessage(zmq::multipart_t multi);
-  void SendHeartbeat(const std::vector<NodeInfo>& node_list);
-  void SendGossip(const std::vector<NodeInfo>& node_list);
   void CheckHeartbeat();
-  void SendHeartbeatOrGossip();
+  void SendGossip();
+  void SendNodeInfoToContactNode(const NodeInfo& contact_node);
   void HandleGossip(zmq::message_t gossip_msg);
 
   struct ReplyOperation {
@@ -274,7 +281,6 @@ class MessageBroker {
     ByteBufferType data;
   };
 
-  uint32_t this_node_id_;
   NodeInfo this_node_ {};
   std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
   NetworkConfig network_config_;
@@ -296,7 +302,6 @@ class MessageBroker {
   std::atomic_bool stopped_ = false;
   PeerNodes peer_nodes_;
   exec::async_scope async_scope_;
-  bool enable_dynamic_connectivity_ = false;
 
   TimePoint last_heartbeat_;
 };

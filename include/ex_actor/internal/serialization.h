@@ -98,7 +98,7 @@ struct ActorLookUpRequest {
   std::string actor_name;
 };
 
-struct GossipMessages {
+struct GossipMessage {
   std::vector<network::GossipMessage> messages;
 };
 

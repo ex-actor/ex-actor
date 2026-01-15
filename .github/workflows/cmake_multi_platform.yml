@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   build_and_test:
-    name: ${{ matrix.toolchain.os }}+${{ matrix.toolchain.compiler.cc }}
+    # os + compiler + cxxflags
+    name: ${{ matrix.toolchain.os }}+${{ matrix.toolchain.compiler.cc }}${{ matrix.toolchain.cxxflags && format('({0})', matrix.toolchain.cxxflags) || '' }}
     runs-on: ${{ matrix.toolchain.os }}
 
     strategy:

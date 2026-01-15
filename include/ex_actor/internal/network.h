@@ -137,9 +137,9 @@ class MessageBroker {
   util::LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
   zmq::socket_t recv_socket_ {context_, zmq::socket_type::dealer};
 
-  util::LinearizableUnboundedQueue<TypeErasedSendOperation*> pending_send_operations_;
+  util::LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;
   util::LockGuardedMap<uint64_t, TypeErasedSendOperation*> send_request_id_to_operation_;
-  util::LinearizableUnboundedQueue<ReplyOperation> pending_reply_operations_;
+  util::LinearizableUnboundedMpscQueue<ReplyOperation> pending_reply_operations_;
   util::LockGuardedMap<uint64_t, Identifier> received_request_id_to_identifier_;
 
   std::jthread send_thread_;

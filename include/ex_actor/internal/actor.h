@@ -203,7 +203,7 @@ class Actor : public TypeErasedActor {
 
  private:
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
-  util::LinearizableUnboundedQueue<ActorMessage*> mailbox_;
+  util::LinearizableUnboundedMpscQueue<ActorMessage*> mailbox_;
   std::atomic_size_t pending_message_count_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
   exec::async_scope async_scope_;

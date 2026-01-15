@@ -12,6 +12,7 @@ cc_library(
     srcs = glob(["src/**/*.cc"]),
     hdrs = glob(["include/**/*.h"]),
     includes = ["include"],
+    linkopts = ["-latomic"],
     deps = [
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/capnp:capnpc",
@@ -43,6 +44,7 @@ cmake(
     },
     generate_args = ["-GNinja"],
     lib_source = ":all_srcs",
+    linkopts = ["-latomic"],
     out_static_libs = [
         "libex_actor.a",
         "libreflectcpp.a",

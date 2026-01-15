@@ -97,6 +97,10 @@ target_link_libraries(
   cppzmq-static
   spdlog::spdlog
 )
+# Link libatomic for 128-bit atomic operations (required by MPSC_queue's Tagged_ptr)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  target_link_libraries(ex_actor PUBLIC atomic)
+endif()
 # to suppress subobject linkage warnings in stdexec
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
   target_compile_options(ex_actor INTERFACE -Wno-subobject-linkage)

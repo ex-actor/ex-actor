@@ -24,6 +24,8 @@ TEST(NetworkTest, MessageBrokerTest) {
             message_broker.ReplyRequest(received_request_id, std::move(data));
           });
       uint32_t to_node_id = (node_id + 1) % node_list.size();
+      // Waitting all the nodes find its contact node
+      std::this_thread::sleep_for(std::chrono::milliseconds {800});
       exec::async_scope scope;
       for (int i = 0; i < 5; ++i) {
         scope.spawn(message_broker.SendRequest(to_node_id, ByteBufferType(std::to_string(node_id))) |

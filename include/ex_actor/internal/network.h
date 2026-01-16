@@ -56,7 +56,7 @@ using ByteBufferType = zmq::message_t;
 using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
 inline uint64_t GetTimeMs() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
       .count();
 }
 
@@ -94,7 +94,8 @@ class PeerNodes {
   };
   void Add(const NodeInfo& node, const NodeState& state) {
     std::lock_guard lock(mutex_);
-    map_.try_emplace(node, state);
+    auto inserted = map_.try_emplace(node, state);
+    EXA_THROW_CHECK(inserted.second) << "The node already exists";
     alive_peers_ += 1;
   }
 
@@ -110,13 +111,14 @@ class PeerNodes {
     std::lock_guard lock(mutex_);
     for (const auto& pair : map_) {
       const auto& state = pair.second;
-      if (state.liveness == Liveness::kDead &&
+      if (state.liveness == Liveness::kAlive &&
           GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
         logging::Error("Node {} is dead, try to exit", pair.first.node_id);
         // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
         std::quick_exit(1);
       }
     }
+    auto time = std::chrono::steady_clock::now();
   }
 
   bool Contains(const uint32_t& node_id) {
@@ -143,7 +145,7 @@ class PeerNodes {
     cv_.wait(lock, [this]() { return alive_peers_ == 0; });
   }
 
-  std::vector<NodeInfo> GetNodeList() {
+  std::vector<NodeInfo> GetNonDeadNodeList() {
     std::vector<NodeInfo> node_list {};
     node_list.reserve(map_.size());
     std::lock_guard lock(mutex_);
@@ -162,7 +164,9 @@ class PeerNodes {
     messages.reserve(map_.size());
     std::lock_guard lock(mutex_);
     for (const auto& pair : map_) {
-      messages.push_back({.node_info = pair.first, .last_seen = pair.second.last_seen});
+      if (pair.second.liveness == Liveness::kAlive) {
+        messages.push_back({.node_info = pair.first, .last_seen = pair.second.last_seen});
+      }
     }
     return messages;
   }
@@ -178,12 +182,10 @@ class PeerNodes {
       nodes.reserve(map_.size());
       size_t seen = 0;
       for (const auto& pair : map_) {
-        const NodeInfo& node = pair.first;
-        const NodeState& state = pair.second;
-        if (state.liveness == Liveness::kDead) {
-          continue;
+        // NOTE: We should not send gossip messages to quitting nodes.
+        if (pair.second.liveness == Liveness::kAlive) {
+          nodes.push_back(pair.first);
         }
-        nodes.push_back(node);
       }
     }
 
@@ -273,7 +275,7 @@ class MessageBroker {
   void HandleReceivedMessage(zmq::multipart_t multi);
   void CheckHeartbeat();
   void SendGossip();
-  void SendNodeInfoToContactNode(const NodeInfo& contact_node);
+  void SendFirstGossipMessage(const NodeInfo& contact_node);
   void HandleGossip(zmq::message_t gossip_msg);
 
   struct ReplyOperation {

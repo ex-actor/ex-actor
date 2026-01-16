@@ -2,6 +2,7 @@
 #include <cstdint>
 
 #include "ex_actor/api.h"
+#include "ex_actor/internal/actor_registry.h"
 
 int main(int /*argc*/, char* argv[]) {
   uint32_t node_id = std::atoi(argv[1]);
@@ -24,5 +25,6 @@ int main(int /*argc*/, char* argv[]) {
   }
 
   assert(result);
+  ex_actor::Shutdown();
   return 0;
 }

@@ -23,7 +23,9 @@
 #include <functional>
 #include <mutex>
 #include <random>
+#include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -45,6 +47,7 @@ struct NodeInfo {
 }  // namespace ex_actor
 
 namespace std {
+// The current implementation can not reuse the same node_id for different address
 template <>
 struct hash<ex_actor::NodeInfo> {
   size_t operator()(const ex_actor::NodeInfo& k) const noexcept { return hash<uint32_t> {}(k.node_id); }
@@ -87,33 +90,39 @@ struct GossipMessage {
 
 class PeerNodes {
  public:
-  enum class Liveness : uint8_t { kAlive = 0, kQuitting, kDead };
+  enum class Liveness : uint8_t { kAlive = 0, kConnectting, kQuitting, kDead };
   struct NodeState {
     Liveness liveness;
     uint64_t last_seen;
+    std::string address;
   };
-  void Add(const NodeInfo& node, const NodeState& state) {
+  void Add(const uint32_t& node_id, const NodeState& state) {
     std::lock_guard lock(mutex_);
-    auto inserted = map_.try_emplace(node, state);
-    EXA_THROW_CHECK(inserted.second) << "The node already exists";
+    auto [iter, inserted] = id_to_state_.try_emplace(node_id, state);
+    if (!inserted) {
+      iter->second.address = state.address;
+      iter->second.liveness = Liveness::kAlive;
+      iter->second.last_seen = GetTimeMs();
+    }
     alive_peers_ += 1;
   }
 
-  void RefreshLastSeen(const uint32_t& node_id, uint64_t last_seen) {
+  void RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
     std::lock_guard lock(mutex_);
-    NodeInfo node {.node_id = node_id};
-    EXA_THROW_CHECK(map_.contains(node)) << "Can't find node " << node_id << "in the peer nodes";
-    auto& state = map_.at(node);
-    state.last_seen = std::max(last_seen, state.last_seen);
+    auto [iter, inserted] = id_to_state_.try_emplace(
+        node_id, NodeState {.liveness = Liveness::kConnectting, .last_seen = last_seen, .address = {}});
+    if (!inserted) {
+      iter->second.last_seen = std::max(iter->second.last_seen, last_seen);
+    }
   }
 
   void CheckHeartbeat(const std::chrono::milliseconds& timeout) {
     std::lock_guard lock(mutex_);
-    for (const auto& pair : map_) {
+    for (const auto& pair : id_to_state_) {
       const auto& state = pair.second;
       if (state.liveness == Liveness::kAlive &&
           GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
-        logging::Error("Node {} is dead, try to exit", pair.first.node_id);
+        logging::Error("Node {} is dead, try to exit", pair.first);
         // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
         std::quick_exit(1);
       }
@@ -121,15 +130,18 @@ class PeerNodes {
     auto time = std::chrono::steady_clock::now();
   }
 
-  bool Contains(const uint32_t& node_id) {
-    std::lock_guard lock(mutex_);
-    return map_.contains({.node_id = node_id});
+  bool Connected(const uint32_t& node_id) {
+    std::unique_lock lock(mutex_);
+    if (id_to_state_.contains(node_id)) {
+      auto liveness = id_to_state_.at(node_id).liveness;
+      return liveness != Liveness::kDead && liveness != Liveness::kConnectting;
+    }
+    return false;
   }
 
   void DeactivateNode(const uint32_t& node_id) {
-    NodeInfo node {.node_id = node_id};
     std::lock_guard lock(mutex_);
-    auto& state = map_.at(node);
+    auto& state = id_to_state_.at(node_id);
     if (state.liveness == Liveness::kAlive) {
       state.liveness = Liveness::kQuitting;
       alive_peers_ -= 1;
@@ -145,27 +157,39 @@ class PeerNodes {
     cv_.wait(lock, [this]() { return alive_peers_ == 0; });
   }
 
-  std::vector<NodeInfo> GetNonDeadNodeList() {
+  std::vector<NodeInfo> GetHealthyNodeList() {
     std::vector<NodeInfo> node_list {};
-    node_list.reserve(map_.size());
+    node_list.reserve(id_to_state_.size());
     std::lock_guard lock(mutex_);
-    for (const auto& pair : map_) {
+    for (const auto& pair : id_to_state_) {
       const auto& node = pair.first;
       const auto& liveness = pair.second.liveness;
-      if (liveness != Liveness::kDead) {
-        node_list.push_back(pair.first);
+      if (liveness != Liveness::kDead && liveness != Liveness::kConnectting) {
+        node_list.emplace_back(pair.first, pair.second.address);
       }
     }
     return node_list;
   }
 
+  void PrintAllNodesState(uint32_t this_node_id) {
+    std::vector<NodeInfo> node_list {};
+    node_list.reserve(id_to_state_.size());
+    std::lock_guard lock(mutex_);
+    logging::Info("[PeerNodes] This node {} is going to exit", this_node_id);
+    for (const auto& pair : id_to_state_) {
+      logging::Info("[PeerNodes] Node {}, address {}, state {} ", pair.first, pair.second.address,
+                    static_cast<uint8_t>(pair.second.liveness));
+    }
+  }
+
   std::vector<GossipMessage> GenerateGossipMessage() {
     std::vector<GossipMessage> messages;
-    messages.reserve(map_.size());
+    messages.reserve(id_to_state_.size());
     std::lock_guard lock(mutex_);
-    for (const auto& pair : map_) {
+    for (const auto& pair : id_to_state_) {
       if (pair.second.liveness == Liveness::kAlive) {
-        messages.push_back({.node_info = pair.first, .last_seen = pair.second.last_seen});
+        messages.push_back(
+            {.node_info = {.node_id = pair.first, .address = pair.second.address}, .last_seen = pair.second.last_seen});
       }
     }
     return messages;
@@ -179,12 +203,12 @@ class PeerNodes {
 
     {
       std::lock_guard lock(mutex_);
-      nodes.reserve(map_.size());
+      nodes.reserve(id_to_state_.size());
       size_t seen = 0;
-      for (const auto& pair : map_) {
+      for (const auto& pair : id_to_state_) {
         // NOTE: We should not send gossip messages to quitting nodes.
         if (pair.second.liveness == Liveness::kAlive) {
-          nodes.push_back(pair.first);
+          nodes.emplace_back(pair.first, pair.second.address);
         }
       }
     }
@@ -196,7 +220,7 @@ class PeerNodes {
   }
 
  private:
-  std::unordered_map<NodeInfo, NodeState> map_;
+  std::unordered_map<uint32_t, NodeState> id_to_state_;
   std::condition_variable cv_;
   std::mutex mutex_;
   std::mt19937 rng_ {std::random_device {}()};
@@ -268,7 +292,7 @@ class MessageBroker {
 
  private:
   void EstablishConnectionTo(const NodeInfo& node_info);
-  void FindContactNode(const std::vector<NodeInfo>& node_list);
+  void EstablishConnection(const std::vector<NodeInfo>& node_list);
   void PushOperation(TypeErasedSendOperation* operation);
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
@@ -283,6 +307,28 @@ class MessageBroker {
     ByteBufferType data;
   };
 
+  template <typename Operation>
+  class DeferedOperations {
+   public:
+    void Add(const uint32_t& node_id, Operation operation) {
+      std::lock_guard lock {mutex_};
+      map_[node_id].push_back(std::move(operation));
+    }
+
+    std::vector<Operation> TryMoveOut(const uint32_t& node_id) {
+      std::lock_guard lock {mutex_};
+      auto it = map_.find(node_id);
+      if (it == map_.end()) return {};
+      auto operations = std::move(it->second);
+      map_.erase(it);
+      return operations;
+    }
+
+   private:
+    std::unordered_map<uint32_t, std::vector<Operation>> map_;
+    std::mutex mutex_;
+  };
+
   NodeInfo this_node_ {};
   std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
   NetworkConfig network_config_;
@@ -292,6 +338,8 @@ class MessageBroker {
 
   zmq::context_t context_ {/*io_threads_=*/1};
   util::LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
+  DeferedOperations<ReplyOperation> node_id_to_pending_replies_;
+  DeferedOperations<TypeErasedSendOperation*> node_id_to_pending_request_;
   zmq::socket_t recv_socket_ {context_, zmq::socket_type::dealer};
 
   util::LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;

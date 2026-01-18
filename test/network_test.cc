@@ -20,12 +20,14 @@ TEST(NetworkTest, MessageBrokerTest) {
       ex_actor::internal::util::SetThreadName("node_" + std::to_string(node_id));
       ex_actor::internal::network::MessageBroker message_broker(
           node_list,
-          /*this_node_id=*/node_id, [&message_broker](uint64_t received_request_id, ByteBufferType data) {
+          /*this_node_id=*/node_id,
+          [&message_broker](uint64_t received_request_id, ByteBufferType data) {
             message_broker.ReplyRequest(received_request_id, std::move(data));
-          });
+          },
+          ex_actor::NetworkConfig {.gossip_interval = std::chrono::milliseconds {100}});
       uint32_t to_node_id = (node_id + 1) % node_list.size();
       // Waitting all the nodes find its contact node
-      std::this_thread::sleep_for(std::chrono::milliseconds {800});
+      std::this_thread::sleep_for(std::chrono::milliseconds {200});
       exec::async_scope scope;
       for (int i = 0; i < 5; ++i) {
         scope.spawn(message_broker.SendRequest(to_node_id, ByteBufferType(std::to_string(node_id))) |

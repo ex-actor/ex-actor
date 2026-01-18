@@ -17,7 +17,7 @@ ex_actor_test(stress_test)
 ex_actor_test(shuffle_merge_test TIMEOUT 10)
 ex_actor_test(complex_api_test)
 ex_actor_test(distributed_test TIMEOUT 10)
-ex_actor_test(network_test TIMEOUT 15)
+ex_actor_test(network_test TIMEOUT 10)
 ex_actor_test(skynet_test TIMEOUT 10)
 ex_actor_test(logging_test)
 

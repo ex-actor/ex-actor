@@ -26,7 +26,7 @@ TEST(NetworkTest, MessageBrokerTest) {
           },
           ex_actor::NetworkConfig {.gossip_interval = std::chrono::milliseconds {100}});
       uint32_t to_node_id = (node_id + 1) % node_list.size();
-      // Waitting all the nodes find its contact node
+      // Waiting all the nodes find its contact node
       std::this_thread::sleep_for(std::chrono::milliseconds {200});
       exec::async_scope scope;
       for (int i = 0; i < 5; ++i) {

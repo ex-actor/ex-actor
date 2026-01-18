@@ -90,7 +90,7 @@ struct GossipMessage {
 
 class PeerNodes {
  public:
-  enum class Liveness : uint8_t { kAlive = 0, kConnectting, kQuitting, kDead };
+  enum class Liveness : uint8_t { kAlive = 0, kConnecting, kQuitting, kDead };
   struct NodeState {
     Liveness liveness;
     uint64_t last_seen;
@@ -110,7 +110,7 @@ class PeerNodes {
   void RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
     std::lock_guard lock(mutex_);
     auto [iter, inserted] = id_to_state_.try_emplace(
-        node_id, NodeState {.liveness = Liveness::kConnectting, .last_seen = last_seen, .address = {}});
+        node_id, NodeState {.liveness = Liveness::kConnecting, .last_seen = last_seen, .address = {}});
     if (!inserted) {
       iter->second.last_seen = std::max(iter->second.last_seen, last_seen);
     }
@@ -134,7 +134,7 @@ class PeerNodes {
     std::unique_lock lock(mutex_);
     if (id_to_state_.contains(node_id)) {
       auto liveness = id_to_state_.at(node_id).liveness;
-      return liveness != Liveness::kDead && liveness != Liveness::kConnectting;
+      return liveness != Liveness::kDead && liveness != Liveness::kConnecting;
     }
     return false;
   }
@@ -164,7 +164,7 @@ class PeerNodes {
     for (const auto& pair : id_to_state_) {
       const auto& node = pair.first;
       const auto& liveness = pair.second.liveness;
-      if (liveness != Liveness::kDead && liveness != Liveness::kConnectting) {
+      if (liveness != Liveness::kDead && liveness != Liveness::kConnecting) {
         node_list.emplace_back(pair.first, pair.second.address);
       }
     }
@@ -308,7 +308,7 @@ class MessageBroker {
   };
 
   template <typename Operation>
-  class DeferedOperations {
+  class DeferredOperations {
    public:
     void Add(const uint32_t& node_id, Operation operation) {
       std::lock_guard lock {mutex_};
@@ -338,8 +338,8 @@ class MessageBroker {
 
   zmq::context_t context_ {/*io_threads_=*/1};
   util::LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
-  DeferedOperations<ReplyOperation> node_id_to_pending_replies_;
-  DeferedOperations<TypeErasedSendOperation*> node_id_to_pending_request_;
+  DeferredOperations<ReplyOperation> node_id_to_pending_replies_;
+  DeferredOperations<TypeErasedSendOperation*> node_id_to_pending_request_;
   zmq::socket_t recv_socket_ {context_, zmq::socket_type::dealer};
 
   util::LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;

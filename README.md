@@ -149,3 +149,13 @@ founded in 2018, a technology-driven investment management firm with a focus on 
 In the process of engineering our trading system, we discovered that no existing actor framework on the market could meet our specific requirements. Consequently, we built one from the ground up.
 
 While this framework has some successful applications internally, we believe there are more valuable use cases in the community which can make it more mature. So we open-source ex_actor, look forward to building it together with you!
+
+## Standing on the Shoulders of Giants
+
+* [stdexec](https://github.com/NVIDIA/stdexec) - Early implementation of std::execution in C++20.
+* [daking::MPSC_queue](https://github.com/dakingffo/MPSC_queue) - A high-performance lock-free MPSC queue.
+* [moodycamel::ConcurrentQueue](https://github.com/cameron314/concurrentqueue) - An industrial-strength MPMC queue.
+* [ZeroMQ](https://zeromq.org/) - An open-source universal messaging library.
+* [reflect-cpp](https://github.com/getml/reflect-cpp) - A reflection-based C++20 serialization library.
+* [Cap'n Proto](https://capnproto.org/) - An insanely fast data interchange format.
+* [spdlog](https://github.com/gabime/spdlog) - A sophisticated C++ logging library.

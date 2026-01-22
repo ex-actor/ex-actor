@@ -16,9 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include <exec/async_scope.hpp>
@@ -42,7 +40,6 @@ class TypeErasedActor {
   explicit TypeErasedActor(ActorConfig actor_config) : actor_config_(std::move(actor_config)) {}
   virtual ~TypeErasedActor() = default;
   virtual void PushMessage(ActorMessage* task) = 0;
-  virtual void* GetUserClassAddress() = 0;
   virtual exec::task<void> AsyncDestroy() = 0;
 
   template <auto kMethod, class... Args>
@@ -56,6 +53,7 @@ class TypeErasedActor {
   virtual void PullMailboxAndRun() = 0;
 
  protected:
+  void* cached_user_class_instance_address_ = nullptr;
   ActorConfig actor_config_;
 };
 
@@ -165,6 +163,7 @@ class Actor : public TypeErasedActor {
     } else {
       user_class_instance_ = std::make_unique<UserClass>(std::move(args)...);
     }
+    cached_user_class_instance_address_ = user_class_instance_.get();
   }
 
   template <typename... Args>
@@ -198,8 +197,6 @@ class Actor : public TypeErasedActor {
     pending_message_count_.fetch_add(1, std::memory_order_release);
     TryActivate();
   }
-
-  void* GetUserClassAddress() override { return user_class_instance_.get(); }
 
  private:
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
@@ -280,7 +277,8 @@ ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::tuple<Args...> arg
   constexpr bool kIsNested = ex::sender<ReturnType>;
   auto start = ex::schedule(StdExecSchedulerForActorMessageSubmission(this));
 
-  auto* user_class_instance = static_cast<UserClass*>(GetUserClassAddress());
+  EXA_THROW_CHECK(cached_user_class_instance_address_ != nullptr);
+  auto* user_class_instance = static_cast<UserClass*>(cached_user_class_instance_address_);
 
   if constexpr (kIsNested) {
     return std::move(start) | ex::let_value([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {

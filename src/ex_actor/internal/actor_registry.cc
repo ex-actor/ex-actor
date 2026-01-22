@@ -17,8 +17,8 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
-#include <thread>
 
+#include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/remote_handler_registry.h"
 
@@ -34,6 +34,21 @@ ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorSchedu
       message_broker_(message_broker) {
   InitRandomNumGenerator();
   ValidateNodeInfo(cluster_node_info);
+}
+
+ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
+                                           const network::ClusterConfig& cluster_config,
+                                           network::MessageBroker* message_broker)
+    : is_distributed_mode_(true),
+      enable_dynamic_connectivity_(true),
+      scheduler_(std::move(scheduler)),
+      this_node_id_(cluster_config.this_node.node_id),
+      message_broker_(message_broker) {
+  InitRandomNumGenerator();
+  if (!cluster_config.contact_node.address.empty()) {
+    EXA_THROW_CHECK(cluster_config.this_node.node_id != cluster_config.contact_node.node_id)
+        << "Duplicate node id:" << cluster_config.this_node.node_id;
+  }
 }
 
 exec::task<void> ActorRegistryBackend::AsyncDestroyAllActors() {
@@ -195,7 +210,9 @@ exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(
   }
 }
 
-bool ActorRegistryBackend::CheckNode(uint32_t node_id) { return message_broker_->CheckNode(node_id); }
+exec::task<bool> ActorRegistryBackend::WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
+  co_return co_await message_broker_->WaitNodeAlive(node_id, timeout);
+}
 
 // ----------------------ActorRegistry--------------------------
 ActorRegistry::~ActorRegistry() {
@@ -237,11 +254,32 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
       backend_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &backend_actor_,
                          message_broker_.get()) {}
 
-// TODO: Improve this
-bool ActorRegistry::WaitNode(uint32_t node_id) {
-  auto query = backend_actor_ref_.Send<&ActorRegistryBackend::CheckNode>(node_id);
-  auto [result] = stdexec::sync_wait(std::move(query)).value();
-  return result;
+ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
+                             const network::ClusterConfig& cluster_config)
+    : is_distributed_mode_(),
+      this_node_id_(cluster_config.this_node.node_id),
+      default_work_sharing_thread_pool_(thread_pool_size),
+      scheduler_(scheduler != nullptr ? std::move(scheduler)
+                                      : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
+                                            default_work_sharing_thread_pool_.GetScheduler())),
+      message_broker_([&cluster_config, this]() -> std::unique_ptr<network::MessageBroker> {
+        return std::make_unique<network::MessageBroker>(
+            cluster_config,
+            /*request_handler=*/
+            [this](uint64_t received_request_id, network::ByteBufferType data) {
+              auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
+                  received_request_id, std::move(data));
+              async_scope_.spawn(std::move(task));
+            });
+      }()),
+
+      backend_actor_(scheduler_->Clone(), ActorConfig {.node_id = this_node_id_}, scheduler_->Clone(), cluster_config,
+                     message_broker_.get()),
+      backend_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &backend_actor_,
+                         message_broker_.get()) {}
+
+exec::task<bool> ActorRegistry::WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
+  co_return co_await backend_actor_ref_.Send<&ActorRegistryBackend::WaitNodeAlive>(node_id, timeout);
 }
 
 }  // namespace ex_actor::internal
@@ -317,8 +355,6 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
   internal::SetupGlobalHandlers();
 }
 
-void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
-
 void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
   auto this_node_id = cluster_config.this_node.node_id;
   internal::logging::Info(
@@ -326,26 +362,13 @@ void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
       thread_pool_size, cluster_config.this_node.node_id);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   internal::SetupGlobalHandlers();
-  std::vector<NodeInfo> cluster_node_info = {cluster_config.this_node};
-  if (!cluster_config.contact_node.address.empty()) {
-    cluster_node_info.push_back(cluster_config.contact_node);
-  }
-  // TODO: Pass the gossip_interval and  heartbeat_config to the constructor
-  global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, this_node_id, cluster_node_info);
+  global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, cluster_config);
 }
 
-// exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {}
+void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
 
-// TODO: The current implementation is for testing only.
-bool WaitNode(uint32_t node_id, std::chrono::milliseconds timeout) {
-  auto start_time = std::chrono::steady_clock::now();
-  while (std::chrono::steady_clock::now() - start_time < timeout) {
-    if (global_default_registry->WaitNode(node_id)) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds {1});
-  }
-  return false;
+exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
+  co_return co_await global_default_registry->WaitNodeAlive(node_id, timeout);
 }
 
 void Shutdown() {

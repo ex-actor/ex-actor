@@ -28,10 +28,11 @@
 
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/serialization.h"
+#include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal::network {
 
-MessageBroker::MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
+MessageBroker::MessageBroker(const std::vector<NodeInfo>& node_list, uint32_t this_node_id,
                              std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
                              NetworkConfig network_config)
     : this_node_({.node_id = this_node_id}),
@@ -119,6 +120,8 @@ void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
   for (auto* request : pending_requests) {
     pending_send_operations_.Push(request);
   }
+
+  peer_nodes_.NotifyWaiters(node_id);
 }
 
 void MessageBroker::EstablishConnection(const std::vector<NodeInfo>& node_list) {
@@ -228,7 +231,8 @@ void MessageBroker::ReceiveProcessLoop(const std::stop_token& stop_token) {
   recv_socket_.set(zmq::sockopt::rcvtimeo, 100);
 
   while (!stop_token.stop_requested()) {
-    CheckHeartbeat();
+    peer_nodes_.CheckNodeHeartbeat(network_config_.heartbeat_timeout);
+    peer_nodes_.ExpireWaiters();
     zmq::multipart_t multi;
     if (!multi.recv(recv_socket_)) {
       continue;
@@ -280,8 +284,6 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   }
 }
 
-void MessageBroker::CheckHeartbeat() { peer_nodes_.CheckHeartbeat(network_config_.heartbeat_timeout); }
-
 // TODO: The gossip logic need the send/recv thread to  serialize/deserialize node_list, which seems not a
 // good idea.
 
@@ -307,8 +309,6 @@ void MessageBroker::SendGossip() {
   }
 }
 
-bool MessageBroker::CheckNode(uint32_t node_id) { return peer_nodes_.Connected(node_id); }
-
 void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
   const auto messages =
       serde::Deserialize<serde::GossipMessage>(gossip_msg.data<uint8_t>(), gossip_msg.size()).messages;
@@ -325,6 +325,18 @@ void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
     }
     peer_nodes_.RefreshLastSeen(node.node_id, last_seen);
   }
+}
+
+bool MessageBroker::CheckNodeConnected(const uint32_t node_id) { return peer_nodes_.Connected(node_id); }
+
+exec::task<bool> MessageBroker::WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
+  auto waiter = peer_nodes_.TryRegisterWaiter(node_id, timeout);
+  if (waiter == nullptr) {
+    co_return true;
+  }
+
+  co_await waiter->sem.OnDrained();
+  co_return peer_nodes_.Connected(node_id);
 }
 
 }  // namespace ex_actor::internal::network

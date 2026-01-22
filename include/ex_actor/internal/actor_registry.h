@@ -15,6 +15,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -44,6 +45,9 @@ class ActorRegistryBackend {
   explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint32_t this_node_id,
                                 const std::vector<NodeInfo>& cluster_node_info, network::MessageBroker* message_broker);
 
+  explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
+                                const network::ClusterConfig& cluster_config, network::MessageBroker* message_broker);
+
   exec::task<void> AsyncDestroyAllActors();
 
   /**
@@ -64,7 +68,11 @@ class ActorRegistryBackend {
                     "Class can't be created by given args and create function");
     }
     if (is_distributed_mode_) {
-      EXA_THROW_CHECK(node_id_to_address_.contains(config.node_id)) << "Invalid node id: " << config.node_id;
+      if (enable_dynamic_connectivity_) {
+        EXA_THROW_CHECK(message_broker_->CheckNodeConnected(config.node_id)) << "Can't find node " << config.node_id;
+      } else {
+        EXA_THROW_CHECK(node_id_to_address_.contains(config.node_id)) << "Invalid node id: " << config.node_id;
+      }
     }
 
     // local actor, create directly
@@ -174,10 +182,11 @@ class ActorRegistryBackend {
   }
 
   exec::task<void> HandleNetworkRequest(uint64_t received_request_id, network::ByteBufferType request_buffer);
-  bool CheckNode(uint32_t node_id);
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
 
  private:
   bool is_distributed_mode_ = false;
+  bool enable_dynamic_connectivity_ = false;
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   uint32_t this_node_id_ = 0;
@@ -224,6 +233,9 @@ class ActorRegistry {
                          const std::vector<NodeInfo>& cluster_node_info, network::NetworkConfig network_config = {})
       : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, this_node_id, cluster_node_info, network_config) {}
 
+  explicit ActorRegistry(uint32_t thread_pool_size, const network::ClusterConfig& cluster_config)
+      : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, cluster_config) {}
+
   /**
    * @brief Construct in distributed mode, use specified scheduler.
    */
@@ -232,6 +244,12 @@ class ActorRegistry {
                          network::NetworkConfig network_config = {})
       : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler), this_node_id,
                       cluster_node_info, network_config) {}
+
+  template <ex::scheduler Scheduler>
+  explicit ActorRegistry(Scheduler scheduler, const network::ClusterConfig& cluster_config,
+                         network::NetworkConfig network_config = {})
+      : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler),
+                      cluster_config, network_config) {}
 
   ~ActorRegistry();
 
@@ -290,7 +308,7 @@ class ActorRegistry {
     return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(node_id, name));
   }
 
-  bool WaitNode(uint32_t node_id);
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
 
  private:
   bool is_distributed_mode_;
@@ -305,6 +323,9 @@ class ActorRegistry {
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                          uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
                          network::NetworkConfig network_config = {});
+
+  explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
+                         const network::ClusterConfig& cluster_config);
 };
 
 }  // namespace ex_actor::internal
@@ -347,7 +368,8 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
 
 void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config);
 
-bool WaitNode(uint32_t node_id, std::chrono::milliseconds timeout);
+exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
+
 /**
  * @brief Ask ex_actor to hold a resource, the resource won't be released until runtime is shut down.
  * Often used to hold an execution resource when using custom scheduler. This API is not thread-safe.

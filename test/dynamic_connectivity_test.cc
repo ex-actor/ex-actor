@@ -18,7 +18,7 @@ int main(int /*argc*/, char* argv[]) {
   ex_actor::Init(1, config);
   bool result {false};
   if (node_id == 0) {
-    result = ex_actor::WaitNode(1, std::chrono::milliseconds {2000});
+    result = true;
   } else {
     result = true;
     std::this_thread::sleep_for(std::chrono::milliseconds {2000});

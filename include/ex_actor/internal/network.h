@@ -88,6 +88,12 @@ struct GossipMessage {
   uint64_t last_seen;
 };
 
+struct Waiter {
+  explicit Waiter(TimePoint deadline) : sem(1), deadline(deadline) {}
+  ex_actor::util::Semaphore sem;
+  TimePoint deadline;
+};
+
 class PeerNodes {
  public:
   enum class Liveness : uint8_t { kAlive = 0, kConnecting, kQuitting, kDead };
@@ -96,9 +102,9 @@ class PeerNodes {
     uint64_t last_seen;
     std::string address;
   };
-  void Add(const uint32_t& node_id, const NodeState& state) {
+  void Add(const uint32_t node_id, const NodeState& state) {
     std::lock_guard lock(mutex_);
-    auto [iter, inserted] = id_to_state_.try_emplace(node_id, state);
+    auto [iter, inserted] = node_id_to_state_.try_emplace(node_id, state);
     if (!inserted) {
       iter->second.address = state.address;
       iter->second.liveness = Liveness::kAlive;
@@ -107,18 +113,18 @@ class PeerNodes {
     alive_peers_ += 1;
   }
 
-  void RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
+  void RefreshLastSeen(const uint32_t node_id, const uint64_t last_seen) {
     std::lock_guard lock(mutex_);
-    auto [iter, inserted] = id_to_state_.try_emplace(
+    auto [iter, inserted] = node_id_to_state_.try_emplace(
         node_id, NodeState {.liveness = Liveness::kConnecting, .last_seen = last_seen, .address = {}});
     if (!inserted) {
       iter->second.last_seen = std::max(iter->second.last_seen, last_seen);
     }
   }
 
-  void CheckHeartbeat(const std::chrono::milliseconds& timeout) {
+  void CheckNodeHeartbeat(const std::chrono::milliseconds& timeout) {
     std::lock_guard lock(mutex_);
-    for (const auto& pair : id_to_state_) {
+    for (const auto& pair : node_id_to_state_) {
       const auto& state = pair.second;
       if (state.liveness == Liveness::kAlive &&
           GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
@@ -127,21 +133,25 @@ class PeerNodes {
         std::quick_exit(1);
       }
     }
-    auto time = std::chrono::steady_clock::now();
   }
 
-  bool Connected(const uint32_t& node_id) {
-    std::unique_lock lock(mutex_);
-    if (id_to_state_.contains(node_id)) {
-      auto liveness = id_to_state_.at(node_id).liveness;
+  bool Connected(const uint32_t node_id) {
+    std::lock_guard lock(mutex_);
+    if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
+      auto liveness = iter->second.liveness;
       return liveness != Liveness::kDead && liveness != Liveness::kConnecting;
     }
     return false;
   }
 
-  void DeactivateNode(const uint32_t& node_id) {
+  bool Contains(const uint32_t node_id) {
     std::lock_guard lock(mutex_);
-    auto& state = id_to_state_.at(node_id);
+    return node_id_to_state_.contains(node_id);
+  }
+
+  void DeactivateNode(const uint32_t node_id) {
+    std::lock_guard lock(mutex_);
+    auto& state = node_id_to_state_.at(node_id);
     if (state.liveness == Liveness::kAlive) {
       state.liveness = Liveness::kQuitting;
       alive_peers_ -= 1;
@@ -159,9 +169,9 @@ class PeerNodes {
 
   std::vector<NodeInfo> GetHealthyNodeList() {
     std::vector<NodeInfo> node_list {};
-    node_list.reserve(id_to_state_.size());
+    node_list.reserve(node_id_to_state_.size());
     std::lock_guard lock(mutex_);
-    for (const auto& pair : id_to_state_) {
+    for (const auto& pair : node_id_to_state_) {
       const auto& node = pair.first;
       const auto& liveness = pair.second.liveness;
       if (liveness != Liveness::kDead && liveness != Liveness::kConnecting) {
@@ -171,12 +181,12 @@ class PeerNodes {
     return node_list;
   }
 
-  void PrintAllNodesState(uint32_t this_node_id) {
+  void PrintAllNodesState(const uint32_t this_node_id) {
     std::vector<NodeInfo> node_list {};
-    node_list.reserve(id_to_state_.size());
+    node_list.reserve(node_id_to_state_.size());
     std::lock_guard lock(mutex_);
     logging::Info("[PeerNodes] This node {} is going to exit", this_node_id);
-    for (const auto& pair : id_to_state_) {
+    for (const auto& pair : node_id_to_state_) {
       logging::Info("[PeerNodes] Node {}, address {}, state {} ", pair.first, pair.second.address,
                     static_cast<uint8_t>(pair.second.liveness));
     }
@@ -184,9 +194,9 @@ class PeerNodes {
 
   std::vector<GossipMessage> GenerateGossipMessage() {
     std::vector<GossipMessage> messages;
-    messages.reserve(id_to_state_.size());
+    messages.reserve(node_id_to_state_.size());
     std::lock_guard lock(mutex_);
-    for (const auto& pair : id_to_state_) {
+    for (const auto& pair : node_id_to_state_) {
       if (pair.second.liveness == Liveness::kAlive) {
         messages.push_back(
             {.node_info = {.node_id = pair.first, .address = pair.second.address}, .last_seen = pair.second.last_seen});
@@ -195,7 +205,7 @@ class PeerNodes {
     return messages;
   }
 
-  std::vector<NodeInfo> GetRandomPeers(size_t size) {
+  std::vector<NodeInfo> GetRandomPeers(const size_t size) {
     std::vector<NodeInfo> nodes;
     if (size == 0) {
       return nodes;
@@ -203,9 +213,9 @@ class PeerNodes {
 
     {
       std::lock_guard lock(mutex_);
-      nodes.reserve(id_to_state_.size());
+      nodes.reserve(node_id_to_state_.size());
       size_t seen = 0;
-      for (const auto& pair : id_to_state_) {
+      for (const auto& pair : node_id_to_state_) {
         // NOTE: We should not send gossip messages to quitting nodes.
         if (pair.second.liveness == Liveness::kAlive) {
           nodes.emplace_back(pair.first, pair.second.address);
@@ -219,8 +229,64 @@ class PeerNodes {
     return nodes;
   }
 
+  std::shared_ptr<Waiter> TryRegisterWaiter(uint32_t node_id, std::chrono::milliseconds timeout) {
+    std::lock_guard lock(mutex_);
+    if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
+      auto liveness = iter->second.liveness;
+      if (liveness != Liveness::kDead && liveness != Liveness::kConnecting) {
+        return nullptr;
+      }
+    }
+    auto waiter = std::make_shared<Waiter>(std::chrono::steady_clock::now() + timeout);
+    node_id_to_waiters_[node_id].push_back(std::move(waiter));
+
+    return waiter;
+  }
+
+  void NotifyWaiters(uint32_t node_id) {
+    std::vector<std::shared_ptr<Waiter>> waiters;
+
+    {
+      std::lock_guard lock(mutex_);
+      auto it = node_id_to_waiters_.find(node_id);
+      if (it == node_id_to_waiters_.end()) {
+        return;
+      }
+      waiters = std::move(it->second);
+      node_id_to_waiters_.erase(it);
+    }
+
+    for (auto& waiter : waiters) {
+      waiter->sem.Acquire(1);
+    }
+  }
+
+  void ExpireWaiters() {
+    std::vector<std::shared_ptr<Waiter>> expired;
+
+    {
+      std::lock_guard lock(mutex_);
+      auto now = std::chrono::steady_clock::now();
+      for (auto& pair : node_id_to_waiters_) {
+        auto& vec = pair.second;
+        std::erase_if(vec, [&](auto& waiter) {
+          if (waiter->deadline <= std::chrono::steady_clock::now()) {
+            expired.push_back(waiter);
+            return true;
+          }
+          return false;
+        });
+      }
+    }
+
+    for (auto& waiter : expired) {
+      waiter->sem.Acquire(1);
+    }
+  }
+
  private:
-  std::unordered_map<uint32_t, NodeState> id_to_state_;
+  std::unordered_map<uint32_t, NodeState> node_id_to_state_;
+  std::unordered_map<uint32_t, std::vector<std::shared_ptr<Waiter>>> node_id_to_waiters_;
   std::condition_variable cv_;
   std::mutex mutex_;
   std::mt19937 rng_ {std::random_device {}()};
@@ -229,7 +295,7 @@ class PeerNodes {
 
 class MessageBroker {
  public:
-  explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
+  explicit MessageBroker(const std::vector<NodeInfo>& node_list, uint32_t this_node_id,
                          std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
                          NetworkConfig network_config = {});
   explicit MessageBroker(const ClusterConfig& cluster_config,
@@ -288,7 +354,9 @@ class MessageBroker {
 
   void ReplyRequest(uint64_t received_request_id, ByteBufferType data);
 
-  bool CheckNode(uint32_t node_id);
+  bool CheckNodeConnected(uint32_t node_id);
+
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
 
  private:
   void EstablishConnectionTo(const NodeInfo& node_info);
@@ -297,7 +365,6 @@ class MessageBroker {
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
   void HandleReceivedMessage(zmq::multipart_t multi);
-  void CheckHeartbeat();
   void SendGossip();
   void SendFirstGossipMessage(const NodeInfo& contact_node);
   void HandleGossip(zmq::message_t gossip_msg);

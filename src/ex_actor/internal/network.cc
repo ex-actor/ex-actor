@@ -338,7 +338,7 @@ void MessageBroker::EstablishConnection(const std::vector<NodeInfo>& node_list) 
     return;
   }
 
-  EXA_THROW_CHECK(this_node_.address.size() > 0)
+  EXA_THROW_CHECK(!this_node_.address.empty())
       << "Local address not found in node list, this_node_id: " << this_node_.node_id;
   EstablishConnectionTo(contact_node);
 }

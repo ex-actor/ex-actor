@@ -238,7 +238,7 @@ class PeerNodes {
       }
     }
     auto waiter = std::make_shared<Waiter>(std::chrono::steady_clock::now() + timeout);
-    node_id_to_waiters_[node_id].push_back(std::move(waiter));
+    node_id_to_waiters_[node_id].push_back(waiter);
 
     return waiter;
   }

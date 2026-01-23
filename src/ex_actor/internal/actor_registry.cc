@@ -356,7 +356,6 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
 }
 
 void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
-  auto this_node_id = cluster_config.this_node.node_id;
   internal::logging::Info(
       "Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}, this_node_id={}, ",
       thread_pool_size, cluster_config.this_node.node_id);

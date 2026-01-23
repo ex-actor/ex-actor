@@ -85,7 +85,6 @@ void MessageBroker::ClusterAlignedStop() {
   // NOTE: If current node receive gossip message and add a new node to the peer_nodes_, this thread will get stuck.
   // This will stop gossip
   stopped_.store(true);
-  peer_nodes_.PrintAllNodesState(this_node_.node_id);
   peer_nodes_.WaitAllNodesExit();
   ex::sync_wait(async_scope_.on_empty());
   logging::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.",

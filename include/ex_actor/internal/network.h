@@ -122,19 +122,6 @@ class PeerNodes {
     }
   }
 
-  void CheckNodeHeartbeat(const std::chrono::milliseconds& timeout) {
-    std::lock_guard lock(mutex_);
-    for (const auto& pair : node_id_to_state_) {
-      const auto& state = pair.second;
-      if (state.liveness == Liveness::kAlive &&
-          GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
-        logging::Error("Node {} is dead, try to exit", pair.first);
-        // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
-        std::quick_exit(1);
-      }
-    }
-  }
-
   bool Connected(const uint32_t node_id) {
     std::lock_guard lock(mutex_);
     if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
@@ -261,17 +248,43 @@ class PeerNodes {
     }
   }
 
-  void ExpireWaiters() {
+  void NotifyAllWaiters() {
+    std::vector<std::shared_ptr<Waiter>> waiters {};
+    {
+      std::lock_guard lock(mutex_);
+      waiters.reserve(node_id_to_waiters_.size() * 2);
+      for (auto& pair : node_id_to_waiters_) {
+        for (auto& waiter : pair.second) {
+          waiters.push_back(std::move(waiter));
+        }
+      }
+      waiters.clear();
+    }
+
+    for (auto& waiter : waiters) {
+      waiter->sem.Acquire(1);
+    }
+  }
+
+  void CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds timeout) {
     std::vector<std::shared_ptr<Waiter>> expired;
 
     {
       std::lock_guard lock(mutex_);
-      auto now = std::chrono::steady_clock::now();
+      for (const auto& pair : node_id_to_state_) {
+        const auto& state = pair.second;
+        if (state.liveness == Liveness::kAlive &&
+            GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
+          logging::Error("Node {} is dead, try to exit", pair.first);
+          // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
+          std::quick_exit(1);
+        }
+      }
       for (auto& pair : node_id_to_waiters_) {
         auto& vec = pair.second;
         std::erase_if(vec, [&](auto& waiter) {
           if (waiter->deadline <= std::chrono::steady_clock::now()) {
-            expired.push_back(waiter);
+            expired.push_back(std::move(waiter));
             return true;
           }
           return false;

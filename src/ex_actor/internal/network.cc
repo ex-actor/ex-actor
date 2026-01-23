@@ -230,8 +230,7 @@ void MessageBroker::ReceiveProcessLoop(const std::stop_token& stop_token) {
   recv_socket_.set(zmq::sockopt::rcvtimeo, 100);
 
   while (!stop_token.stop_requested()) {
-    peer_nodes_.CheckNodeHeartbeat(network_config_.heartbeat_timeout);
-    peer_nodes_.ExpireWaiters();
+    peer_nodes_.CheckHeartbeatAndExpireWaiters(network_config_.heartbeat_timeout);
     zmq::multipart_t multi;
     if (!multi.recv(recv_socket_)) {
       continue;

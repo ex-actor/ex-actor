@@ -79,13 +79,13 @@ struct NetworkConfig {
 
 struct ClusterConfig {
   NodeInfo this_node;
-  NodeInfo contact_node = {};
-  network::NetworkConfig network_config = {};
+  NodeInfo contact_node {};
+  network::NetworkConfig network_config {};
 };
 
 struct GossipMessage {
   NodeInfo node_info;
-  uint64_t last_seen;
+  uint64_t last_seen {};
 };
 
 struct Waiter {
@@ -102,200 +102,20 @@ class PeerNodes {
     uint64_t last_seen;
     std::string address;
   };
-  void Add(const uint32_t node_id, const NodeState& state) {
-    std::lock_guard lock(mutex_);
-    auto [iter, inserted] = node_id_to_state_.try_emplace(node_id, state);
-    if (!inserted) {
-      iter->second.address = state.address;
-      iter->second.liveness = Liveness::kAlive;
-      iter->second.last_seen = GetTimeMs();
-    }
-    alive_peers_ += 1;
-  }
-
-  void RefreshLastSeen(const uint32_t node_id, const uint64_t last_seen) {
-    std::lock_guard lock(mutex_);
-    auto [iter, inserted] = node_id_to_state_.try_emplace(
-        node_id, NodeState {.liveness = Liveness::kConnecting, .last_seen = last_seen, .address = {}});
-    if (!inserted) {
-      iter->second.last_seen = std::max(iter->second.last_seen, last_seen);
-    }
-  }
-
-  bool Connected(const uint32_t node_id) {
-    std::lock_guard lock(mutex_);
-    if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
-      auto liveness = iter->second.liveness;
-      return liveness != Liveness::kDead && liveness != Liveness::kConnecting;
-    }
-    return false;
-  }
-
-  bool Contains(const uint32_t node_id) {
-    std::lock_guard lock(mutex_);
-    return node_id_to_state_.contains(node_id);
-  }
-
-  void DeactivateNode(const uint32_t node_id) {
-    std::lock_guard lock(mutex_);
-    auto& state = node_id_to_state_.at(node_id);
-    if (state.liveness == Liveness::kAlive) {
-      state.liveness = Liveness::kQuitting;
-      alive_peers_ -= 1;
-    }
-
-    if (alive_peers_ == 0) {
-      cv_.notify_all();
-    }
-  }
-
-  void WaitAllNodesExit() {
-    std::unique_lock lock(mutex_);
-    cv_.wait(lock, [this]() { return alive_peers_ == 0; });
-  }
-
-  std::vector<NodeInfo> GetHealthyNodeList() {
-    std::vector<NodeInfo> node_list {};
-    node_list.reserve(node_id_to_state_.size());
-    std::lock_guard lock(mutex_);
-    for (const auto& pair : node_id_to_state_) {
-      const auto& node = pair.first;
-      const auto& liveness = pair.second.liveness;
-      if (liveness != Liveness::kDead && liveness != Liveness::kConnecting) {
-        node_list.emplace_back(pair.first, pair.second.address);
-      }
-    }
-    return node_list;
-  }
-
-  void PrintAllNodesState(const uint32_t this_node_id) {
-    std::vector<NodeInfo> node_list {};
-    node_list.reserve(node_id_to_state_.size());
-    std::lock_guard lock(mutex_);
-    logging::Info("[PeerNodes] This node {} is going to exit", this_node_id);
-    for (const auto& pair : node_id_to_state_) {
-      logging::Info("[PeerNodes] Node {}, address {}, state {} ", pair.first, pair.second.address,
-                    static_cast<uint8_t>(pair.second.liveness));
-    }
-  }
-
-  std::vector<GossipMessage> GenerateGossipMessage() {
-    std::vector<GossipMessage> messages;
-    messages.reserve(node_id_to_state_.size());
-    std::lock_guard lock(mutex_);
-    for (const auto& pair : node_id_to_state_) {
-      if (pair.second.liveness == Liveness::kAlive) {
-        messages.push_back(
-            {.node_info = {.node_id = pair.first, .address = pair.second.address}, .last_seen = pair.second.last_seen});
-      }
-    }
-    return messages;
-  }
-
-  std::vector<NodeInfo> GetRandomPeers(const size_t size) {
-    std::vector<NodeInfo> nodes;
-    if (size == 0) {
-      return nodes;
-    }
-
-    {
-      std::lock_guard lock(mutex_);
-      nodes.reserve(node_id_to_state_.size());
-      size_t seen = 0;
-      for (const auto& pair : node_id_to_state_) {
-        // NOTE: We should not send gossip messages to quitting nodes.
-        if (pair.second.liveness == Liveness::kAlive) {
-          nodes.emplace_back(pair.first, pair.second.address);
-        }
-      }
-    }
-
-    // NOTE: We only call this method in the send_thread, so we don't need to hold lock here.
-    std::shuffle(nodes.begin(), nodes.end(), rng_);
-    nodes.resize(std::min(nodes.size(), size));
-    return nodes;
-  }
-
-  std::shared_ptr<Waiter> TryRegisterWaiter(uint32_t node_id, std::chrono::milliseconds timeout) {
-    std::lock_guard lock(mutex_);
-    if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
-      auto liveness = iter->second.liveness;
-      if (liveness != Liveness::kDead && liveness != Liveness::kConnecting) {
-        return nullptr;
-      }
-    }
-    auto waiter = std::make_shared<Waiter>(std::chrono::steady_clock::now() + timeout);
-    node_id_to_waiters_[node_id].push_back(waiter);
-
-    return waiter;
-  }
-
-  void NotifyWaiters(uint32_t node_id) {
-    std::vector<std::shared_ptr<Waiter>> waiters;
-
-    {
-      std::lock_guard lock(mutex_);
-      auto it = node_id_to_waiters_.find(node_id);
-      if (it == node_id_to_waiters_.end()) {
-        return;
-      }
-      waiters = std::move(it->second);
-      node_id_to_waiters_.erase(it);
-    }
-
-    for (auto& waiter : waiters) {
-      waiter->sem.Acquire(1);
-    }
-  }
-
-  void NotifyAllWaiters() {
-    std::vector<std::shared_ptr<Waiter>> waiters {};
-    {
-      std::lock_guard lock(mutex_);
-      waiters.reserve(node_id_to_waiters_.size() * 2);
-      for (auto& pair : node_id_to_waiters_) {
-        for (auto& waiter : pair.second) {
-          waiters.push_back(std::move(waiter));
-        }
-      }
-      waiters.clear();
-    }
-
-    for (auto& waiter : waiters) {
-      waiter->sem.Acquire(1);
-    }
-  }
-
-  void CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds timeout) {
-    std::vector<std::shared_ptr<Waiter>> expired;
-
-    {
-      std::lock_guard lock(mutex_);
-      for (const auto& pair : node_id_to_state_) {
-        const auto& state = pair.second;
-        if (state.liveness == Liveness::kAlive &&
-            GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
-          logging::Error("Node {} is dead, try to exit", pair.first);
-          // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
-          std::quick_exit(1);
-        }
-      }
-      for (auto& pair : node_id_to_waiters_) {
-        auto& vec = pair.second;
-        std::erase_if(vec, [&](auto& waiter) {
-          if (waiter->deadline <= std::chrono::steady_clock::now()) {
-            expired.push_back(std::move(waiter));
-            return true;
-          }
-          return false;
-        });
-      }
-    }
-
-    for (auto& waiter : expired) {
-      waiter->sem.Acquire(1);
-    }
-  }
+  void Add(uint32_t node_id, const NodeState& state);
+  void RefreshLastSeen(uint32_t node_id, uint64_t last_seen);
+  bool Connected(uint32_t node_id);
+  bool Contains(uint32_t node_id);
+  void DeactivateNode(uint32_t node_id);
+  void WaitAllNodesExit();
+  std::vector<NodeInfo> GetHealthyNodeList();
+  void PrintAllNodesState(uint32_t this_node_id);
+  std::vector<GossipMessage> GenerateGossipMessage();
+  std::vector<NodeInfo> GetRandomPeers(size_t size);
+  std::shared_ptr<Waiter> TryRegisterWaiter(uint32_t node_id, std::chrono::milliseconds timeout);
+  void NotifyWaiters(uint32_t node_id);
+  void NotifyAllWaiters();
+  void CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds timeout);
 
  private:
   std::unordered_map<uint32_t, NodeState> node_id_to_state_;

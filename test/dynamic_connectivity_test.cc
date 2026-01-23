@@ -23,14 +23,14 @@ int main(int argc, char* argv[]) {
   bool result = false;
   if (node_id == 0) {
     auto [alive] = ex_actor::ex::sync_wait(ex_actor::WaitNodeAlive(1, std::chrono::milliseconds {3000})).value();
-    std::cout << std::format("node 1 is {}, This node id is 0\n", alive);
+    std::cout << fmt::format("node 1 is {}, This node id is 0\n", alive);
     auto [missing] = ex_actor::ex::sync_wait(ex_actor::WaitNodeAlive(2, std::chrono::milliseconds {500})).value();
-    std::cout << std::format("node 2 is {}, This node id is 0\n", missing);
+    std::cout << fmt::format("node 2 is {}, This node id is 0\n", missing);
     result = alive && !missing;
   } else {
     auto [alive] = ex_actor::ex::sync_wait(ex_actor::WaitNodeAlive(0, std::chrono::milliseconds {3000})).value();
     std::this_thread::sleep_for(std::chrono::milliseconds {500});
-    std::cout << std::format("node 0 is {}, This node id is 1\n", alive);
+    std::cout << fmt::format("node 0 is {}, This node id is 1\n", alive);
     result = alive;
   }
   ex_actor::Shutdown();

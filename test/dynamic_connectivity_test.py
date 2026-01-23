@@ -6,6 +6,7 @@ import time
 
 bin = sys.argv[1]
 node0 = subprocess.Popen([bin, "0"])
+time.sleep(1)  # Test node0 is able to wait node1
 node1 = subprocess.Popen([bin, "1"])
 time.sleep(5)  # Make sure the subprocess will be cleaned in any case.
 if node0.poll() is None:

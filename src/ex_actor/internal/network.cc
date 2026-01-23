@@ -187,7 +187,7 @@ void PeerNodes::NotifyAllWaiters() {
         waiters.push_back(std::move(waiter));
       }
     }
-    waiters.clear();
+    node_id_to_waiters_.clear();
   }
 
   for (auto& waiter : waiters) {

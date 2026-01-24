@@ -34,11 +34,15 @@
 
 namespace ex_actor::internal {
 
-class ActorRegistryRequestProcessor {
+/**
+ * @brief An actor wrapper of the most functions of ActorRegistry. Bootstraps itself as an actor, so it can reuse the
+ * core functionality of Actors like mailboxes, schedulers, etc.
+ *
+ */
+class ActorRegistryBackend {
  public:
-  explicit ActorRegistryRequestProcessor(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint32_t this_node_id,
-                                         const std::vector<NodeInfo>& cluster_node_info,
-                                         network::MessageBroker* message_broker);
+  explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint32_t this_node_id,
+                                const std::vector<NodeInfo>& cluster_node_info, network::MessageBroker* message_broker);
 
   exec::task<void> AsyncDestroyAllActors();
 
@@ -192,6 +196,10 @@ class ActorRegistryRequestProcessor {
                                                 serde::BufferReader<network::ByteBufferType> reader);
 };
 
+/**
+ * @brief The public API of ActorRegistry. User can use this class to create and manage actors.
+ * It simply forwards everything to the backend actor.
+ */
 class ActorRegistry {
  public:
   /**
@@ -233,10 +241,10 @@ class ActorRegistry {
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
   reflect::AwaitableOf<ActorRef<UserClass>> auto CreateActor(Args... args) {
     // resolve overload ambiguity
-    constexpr exec::task<ActorRef<UserClass>> (ActorRegistryRequestProcessor::*kProcessFn)(Args...) =
-        &ActorRegistryRequestProcessor::CreateActor<UserClass, kCreateFn, Args...>;
+    constexpr exec::task<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(Args...) =
+        &ActorRegistryBackend::CreateActor<UserClass, kCreateFn, Args...>;
 
-    return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(std::move(args)...));
+    return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(std::move(args)...));
   }
 
   /**
@@ -245,16 +253,16 @@ class ActorRegistry {
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
   reflect::AwaitableOf<ActorRef<UserClass>> auto CreateActor(ActorConfig config, Args... args) {
     // resolve overload ambiguity
-    constexpr exec::task<ActorRef<UserClass>> (ActorRegistryRequestProcessor::*kProcessFn)(ActorConfig, Args...) =
-        &ActorRegistryRequestProcessor::CreateActor<UserClass, kCreateFn, Args...>;
+    constexpr exec::task<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(ActorConfig, Args...) =
+        &ActorRegistryBackend::CreateActor<UserClass, kCreateFn, Args...>;
 
-    return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(config, std::move(args)...));
+    return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(config, std::move(args)...));
   }
 
   template <class UserClass>
   reflect::AwaitableOf<void> auto DestroyActor(const ActorRef<UserClass>& actor_ref) {
     return util::WrapSenderWithInlineScheduler(
-        processor_actor_ref_.SendLocal<&ActorRegistryRequestProcessor::DestroyActor<UserClass>>(actor_ref));
+        backend_actor_ref_.SendLocal<&ActorRegistryBackend::DestroyActor<UserClass>>(actor_ref));
   }
 
   /**
@@ -263,10 +271,10 @@ class ActorRegistry {
   template <class UserClass>
   reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const std::string& name) const {
     // resolve overload ambiguity
-    constexpr std::optional<ActorRef<UserClass>> (ActorRegistryRequestProcessor::*kProcessFn)(const std::string& name)
-        const = &ActorRegistryRequestProcessor::GetActorRefByName<UserClass>;
+    constexpr std::optional<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(const std::string& name) const =
+        &ActorRegistryBackend::GetActorRefByName<UserClass>;
 
-    return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(name));
+    return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(name));
   }
 
   /**
@@ -276,11 +284,10 @@ class ActorRegistry {
   reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32_t& node_id,
                                                                                   const std::string& name) const {
     // resolve overload ambiguity
-    constexpr exec::task<std::optional<ActorRef<UserClass>>> (ActorRegistryRequestProcessor::*kProcessFn)(
-        const uint32_t& node_id, const std::string& name) const =
-        &ActorRegistryRequestProcessor::GetActorRefByName<UserClass>;
+    constexpr exec::task<std::optional<ActorRef<UserClass>>> (ActorRegistryBackend::*kProcessFn)(
+        const uint32_t& node_id, const std::string& name) const = &ActorRegistryBackend::GetActorRefByName<UserClass>;
 
-    return util::WrapSenderWithInlineScheduler(processor_actor_ref_.SendLocal<kProcessFn>(node_id, name));
+    return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(node_id, name));
   }
 
  private:
@@ -289,8 +296,8 @@ class ActorRegistry {
   WorkSharingThreadPool default_work_sharing_thread_pool_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   std::unique_ptr<network::MessageBroker> message_broker_;
-  Actor<ActorRegistryRequestProcessor> processor_actor_;
-  ActorRef<ActorRegistryRequestProcessor> processor_actor_ref_;
+  Actor<ActorRegistryBackend> backend_actor_;
+  ActorRef<ActorRegistryBackend> backend_actor_ref_;
   exec::async_scope async_scope_;
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,

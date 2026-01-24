@@ -92,9 +92,15 @@ struct Waiter {
   explicit Waiter(TimePoint deadline) : sem(1), deadline(deadline) {}
   ex_actor::util::Semaphore sem;
   TimePoint deadline;
+  std::atomic_bool arrive = false;
 };
 
-class PeerNodes {
+inline uint64_t GetTimeMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+class NodeInfoManager {
  public:
   enum class Liveness : uint8_t { kAlive = 0, kConnecting, kQuitting, kDead };
   struct NodeState {
@@ -112,7 +118,7 @@ class PeerNodes {
   void PrintAllNodesState(uint32_t this_node_id);
   std::vector<GossipMessage> GenerateGossipMessage();
   std::vector<NodeInfo> GetRandomPeers(size_t size);
-  std::shared_ptr<Waiter> TryRegisterWaiter(uint32_t node_id, std::chrono::milliseconds timeout);
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
   void NotifyWaiters(uint32_t node_id);
   void NotifyAllWaiters();
   void CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds timeout);
@@ -250,7 +256,7 @@ class MessageBroker {
   std::jthread send_thread_;
   std::jthread recv_thread_;
   std::atomic_bool stopped_ = false;
-  PeerNodes peer_nodes_;
+  NodeInfoManager node_mngr_;
   exec::async_scope async_scope_;
 
   TimePoint last_heartbeat_;

@@ -18,6 +18,8 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -32,7 +34,7 @@
 
 namespace ex_actor::internal::network {
 
-void PeerNodes::Add(uint32_t node_id, const NodeState& state) {
+void NodeInfoManager::Add(uint32_t node_id, const NodeState& state) {
   std::lock_guard lock(mutex_);
   auto [iter, inserted] = node_id_to_state_.try_emplace(node_id, state);
   if (!inserted) {
@@ -43,7 +45,7 @@ void PeerNodes::Add(uint32_t node_id, const NodeState& state) {
   alive_peers_ += 1;
 }
 
-void PeerNodes::RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
+void NodeInfoManager::RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
   std::lock_guard lock(mutex_);
   auto [iter, inserted] = node_id_to_state_.try_emplace(
       node_id, NodeState {.liveness = Liveness::kConnecting, .last_seen = last_seen, .address = {}});
@@ -52,7 +54,7 @@ void PeerNodes::RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
   }
 }
 
-bool PeerNodes::Connected(uint32_t node_id) {
+bool NodeInfoManager::Connected(uint32_t node_id) {
   std::lock_guard lock(mutex_);
   if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
     auto liveness = iter->second.liveness;
@@ -61,12 +63,12 @@ bool PeerNodes::Connected(uint32_t node_id) {
   return false;
 }
 
-bool PeerNodes::Contains(uint32_t node_id) {
+bool NodeInfoManager::Contains(uint32_t node_id) {
   std::lock_guard lock(mutex_);
   return node_id_to_state_.contains(node_id);
 }
 
-void PeerNodes::DeactivateNode(uint32_t node_id) {
+void NodeInfoManager::DeactivateNode(uint32_t node_id) {
   std::lock_guard lock(mutex_);
   auto& state = node_id_to_state_.at(node_id);
   if (state.liveness == Liveness::kAlive) {
@@ -79,12 +81,12 @@ void PeerNodes::DeactivateNode(uint32_t node_id) {
   }
 }
 
-void PeerNodes::WaitAllNodesExit() {
+void NodeInfoManager::WaitAllNodesExit() {
   std::unique_lock lock(mutex_);
   cv_.wait(lock, [this]() { return alive_peers_ == 0; });
 }
 
-std::vector<NodeInfo> PeerNodes::GetHealthyNodeList() {
+std::vector<NodeInfo> NodeInfoManager::GetHealthyNodeList() {
   std::vector<NodeInfo> node_list {};
   node_list.reserve(node_id_to_state_.size());
   std::lock_guard lock(mutex_);
@@ -97,18 +99,18 @@ std::vector<NodeInfo> PeerNodes::GetHealthyNodeList() {
   return node_list;
 }
 
-void PeerNodes::PrintAllNodesState(uint32_t this_node_id) {
+void NodeInfoManager::PrintAllNodesState(uint32_t this_node_id) {
   std::vector<NodeInfo> node_list {};
   node_list.reserve(node_id_to_state_.size());
   std::lock_guard lock(mutex_);
-  logging::Info("[PeerNodes] This node {} is going to exit", this_node_id);
+  logging::Info("[PeerNodes] This node {}", this_node_id);
   for (const auto& pair : node_id_to_state_) {
     logging::Info("[PeerNodes] Node {}, address {}, state {} ", pair.first, pair.second.address,
                   static_cast<uint8_t>(pair.second.liveness));
   }
 }
 
-std::vector<GossipMessage> PeerNodes::GenerateGossipMessage() {
+std::vector<GossipMessage> NodeInfoManager::GenerateGossipMessage() {
   std::vector<GossipMessage> messages;
   messages.reserve(node_id_to_state_.size());
   std::lock_guard lock(mutex_);
@@ -121,7 +123,7 @@ std::vector<GossipMessage> PeerNodes::GenerateGossipMessage() {
   return messages;
 }
 
-std::vector<NodeInfo> PeerNodes::GetRandomPeers(size_t size) {
+std::vector<NodeInfo> NodeInfoManager::GetRandomPeers(size_t size) {
   std::vector<NodeInfo> nodes;
   if (size == 0) {
     return nodes;
@@ -132,34 +134,38 @@ std::vector<NodeInfo> PeerNodes::GetRandomPeers(size_t size) {
     nodes.reserve(node_id_to_state_.size());
     size_t seen = 0;
     for (const auto& pair : node_id_to_state_) {
-      // NOTE: We should not send gossip messages to quitting nodes.
+      // We should not send gossip messages to quitting nodes.
       if (pair.second.liveness == Liveness::kAlive) {
         nodes.emplace_back(pair.first, pair.second.address);
       }
     }
   }
 
-  // NOTE: We only call this method in the send_thread, so we don't need to hold lock here.
+  // We only call this method in the send_thread, so we don't need to hold lock here.
   std::shuffle(nodes.begin(), nodes.end(), rng_);
   nodes.resize(std::min(nodes.size(), size));
   return nodes;
 }
 
-std::shared_ptr<Waiter> PeerNodes::TryRegisterWaiter(uint32_t node_id, std::chrono::milliseconds timeout) {
-  std::lock_guard lock(mutex_);
-  if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
-    auto liveness = iter->second.liveness;
-    if (liveness != Liveness::kDead && liveness != Liveness::kConnecting) {
-      return nullptr;
+exec::task<bool> NodeInfoManager::WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
+  std::shared_ptr<Waiter> waiter;
+  {
+    std::lock_guard lock(mutex_);
+    if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
+      auto liveness = iter->second.liveness;
+      if (liveness != Liveness::kDead && liveness != Liveness::kConnecting) {
+        co_return true;
+      }
     }
+    waiter = std::make_shared<Waiter>(std::chrono::steady_clock::now() + timeout);
+    node_id_to_waiters_[node_id].push_back(waiter);
   }
-  auto waiter = std::make_shared<Waiter>(std::chrono::steady_clock::now() + timeout);
-  node_id_to_waiters_[node_id].push_back(waiter);
 
-  return waiter;
+  co_await waiter->sem.OnDrained();
+  co_return waiter->arrive.load(std::memory_order_relaxed);
 }
 
-void PeerNodes::NotifyWaiters(uint32_t node_id) {
+void NodeInfoManager::NotifyWaiters(uint32_t node_id) {
   std::vector<std::shared_ptr<Waiter>> waiters;
 
   {
@@ -173,11 +179,12 @@ void PeerNodes::NotifyWaiters(uint32_t node_id) {
   }
 
   for (auto& waiter : waiters) {
+    waiter->arrive.store(true, std::memory_order_relaxed);
     waiter->sem.Acquire(1);
   }
 }
 
-void PeerNodes::NotifyAllWaiters() {
+void NodeInfoManager::NotifyAllWaiters() {
   std::vector<std::shared_ptr<Waiter>> waiters {};
   {
     std::lock_guard lock(mutex_);
@@ -191,11 +198,12 @@ void PeerNodes::NotifyAllWaiters() {
   }
 
   for (auto& waiter : waiters) {
+    waiter->arrive.store(true, std::memory_order_relaxed);
     waiter->sem.Acquire(1);
   }
 }
 
-void PeerNodes::CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds timeout) {
+void NodeInfoManager::CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds timeout) {
   std::vector<std::shared_ptr<Waiter>> expired;
 
   {
@@ -259,7 +267,7 @@ MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
 }
 
 MessageBroker::~MessageBroker() {
-  if (!stopped_.load()) {
+  if (!stopped_.load(std::memory_order_relaxed)) {
     ClusterAlignedStop();
   }
 }
@@ -267,7 +275,7 @@ MessageBroker::~MessageBroker() {
 void MessageBroker::ClusterAlignedStop() {
   // tell all other nodes: I'm going to quit
   logging::Info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_.node_id);
-  const auto node_list = peer_nodes_.GetHealthyNodeList();
+  const auto node_list = node_mngr_.GetHealthyNodeList();
 
   for (const auto& node : node_list) {
     if (node.node_id != this_node_.node_id) {
@@ -276,10 +284,9 @@ void MessageBroker::ClusterAlignedStop() {
     }
   }
 
-  // NOTE: If current node receive gossip message and add a new node to the peer_nodes_, this thread will get stuck.
   // This will stop gossip
-  stopped_.store(true);
-  peer_nodes_.WaitAllNodesExit();
+  stopped_.store(true, std::memory_order_release);
+  node_mngr_.WaitAllNodesExit();
   ex::sync_wait(async_scope_.on_empty());
   logging::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.",
                 this_node_.node_id);
@@ -302,8 +309,9 @@ void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
   send_socket.connect(node_address);
   logging::Info("[Gossip] Node {} found node {}, connected to it at {}", this_node_.node_id, node_id, node_address);
 
-  peer_nodes_.Add(node_info.node_id,
-                  {.liveness = PeerNodes::Liveness::kAlive, .last_seen = GetTimeMs(), .address = node_info.address});
+  node_mngr_.Add(
+      node_info.node_id,
+      {.liveness = NodeInfoManager::Liveness::kAlive, .last_seen = GetTimeMs(), .address = node_info.address});
   auto pending_repies = node_id_to_pending_replies_.TryMoveOut(node_id);
   auto pending_requests = node_id_to_pending_request_.TryMoveOut(node_id);
   for (auto&& reply : pending_repies) {
@@ -314,7 +322,7 @@ void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
     pending_send_operations_.Push(request);
   }
 
-  peer_nodes_.NotifyWaiters(node_id);
+  node_mngr_.NotifyWaiters(node_id);
 }
 
 void MessageBroker::EstablishConnection(const std::vector<NodeInfo>& node_list) {
@@ -424,7 +432,7 @@ void MessageBroker::ReceiveProcessLoop(const std::stop_token& stop_token) {
   recv_socket_.set(zmq::sockopt::rcvtimeo, 100);
 
   while (!stop_token.stop_requested()) {
-    peer_nodes_.CheckHeartbeatAndExpireWaiters(network_config_.heartbeat_timeout);
+    node_mngr_.CheckHeartbeatAndExpireWaiters(network_config_.heartbeat_timeout);
     zmq::multipart_t multi;
     if (!multi.recv(recv_socket_)) {
       continue;
@@ -447,12 +455,12 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   // For responses, the peer is response_node_id.
   uint32_t peer_node_id =
       (identifier.request_node_id == this_node_.node_id) ? identifier.response_node_id : identifier.request_node_id;
-  peer_nodes_.RefreshLastSeen(peer_node_id, GetTimeMs());
+  node_mngr_.RefreshLastSeen(peer_node_id, GetTimeMs());
 
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
     logging::Info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
-    peer_nodes_.DeactivateNode(identifier.request_node_id);
+    node_mngr_.DeactivateNode(identifier.request_node_id);
     return;
   }
 
@@ -480,10 +488,11 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
 // good idea.
 
 void MessageBroker::SendGossip() {
-  if (!stopped_.load() && std::chrono::steady_clock::now() - last_heartbeat_ >= network_config_.gossip_interval) {
+  if (!stopped_.load(std::memory_order_relaxed) &&
+      std::chrono::steady_clock::now() - last_heartbeat_ >= network_config_.gossip_interval) {
     // TODO: The size of the peers should be configurable
-    const auto node_list = peer_nodes_.GetRandomPeers(2);
-    auto message = peer_nodes_.GenerateGossipMessage();
+    const auto node_list = node_mngr_.GetRandomPeers(2);
+    auto message = node_mngr_.GenerateGossipMessage();
     message.emplace_back(this_node_, GetTimeMs());
     auto serialized_message = serde::Serialize(serde::GossipMessage {message});
     serde::BufferWriter writer {ByteBufferType(serialized_message.size())};
@@ -511,24 +520,18 @@ void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
       continue;
     }
 
-    // NOTE: We shouldn't  add new peer node for a quitting node.
-    if (!peer_nodes_.Connected(node.node_id) && !stopped_.load()) {
+    // We shouldn't add new peer node for a quitting node.
+    if (!node_mngr_.Connected(node.node_id) && !stopped_.load(std::memory_order_relaxed)) {
       EstablishConnectionTo(node);
     }
-    peer_nodes_.RefreshLastSeen(node.node_id, last_seen);
+    node_mngr_.RefreshLastSeen(node.node_id, last_seen);
   }
 }
 
-bool MessageBroker::CheckNodeConnected(const uint32_t node_id) { return peer_nodes_.Connected(node_id); }
+bool MessageBroker::CheckNodeConnected(const uint32_t node_id) { return node_mngr_.Connected(node_id); }
 
 exec::task<bool> MessageBroker::WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
-  auto waiter = peer_nodes_.TryRegisterWaiter(node_id, timeout);
-  if (waiter == nullptr) {
-    co_return true;
-  }
-
-  co_await waiter->sem.OnDrained();
-  co_return peer_nodes_.Connected(node_id);
+  co_return co_await node_mngr_.WaitNodeAlive(node_id, timeout);
 }
 
 }  // namespace ex_actor::internal::network

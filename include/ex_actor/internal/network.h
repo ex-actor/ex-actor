@@ -42,26 +42,12 @@ namespace ex_actor {
 struct NodeInfo {
   uint32_t node_id = 0;
   std::string address;
-  friend bool operator==(const NodeInfo& lhs, const NodeInfo& rhs) { return lhs.node_id == rhs.node_id; }
 };
 }  // namespace ex_actor
-
-namespace std {
-// The current implementation can not reuse the same node_id for different address
-template <>
-struct hash<ex_actor::NodeInfo> {
-  size_t operator()(const ex_actor::NodeInfo& k) const noexcept { return hash<uint32_t> {}(k.node_id); }
-};
-}  // namespace std
 
 namespace ex_actor::internal::network {
 using ByteBufferType = zmq::message_t;
 using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
-
-inline uint64_t GetTimeMs() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-      .count();
-}
 
 enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kGossip };
 

@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <unordered_set>
 
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
@@ -40,7 +41,6 @@ ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorSchedu
                                            const network::ClusterConfig& cluster_config,
                                            network::MessageBroker* message_broker)
     : is_distributed_mode_(true),
-      enable_dynamic_connectivity_(true),
       scheduler_(std::move(scheduler)),
       this_node_id_(cluster_config.this_node.node_id),
       message_broker_(message_broker) {
@@ -114,9 +114,10 @@ uint64_t ActorRegistryBackend::GenerateRandomActorId() {
 }
 
 void ActorRegistryBackend::ValidateNodeInfo(const std::vector<NodeInfo>& cluster_node_info) {
+  std::unordered_set<uint32_t> set;
   for (const auto& node : cluster_node_info) {
-    EXA_THROW_CHECK(!node_id_to_address_.contains(node.node_id)) << "Duplicate node id: " << node.node_id;
-    node_id_to_address_[node.node_id] = node.address;
+    EXA_THROW_CHECK(!set.contains(node.node_id)) << "Duplicate node id: " << node.node_id;
+    set.insert(node.node_id);
   }
 }
 

@@ -62,17 +62,12 @@ class ActorRegistryBackend {
    * @brief Create an actor with a manually specified config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  exec::task<ActorRef<UserClass>> CreateActor(ActorConfig config, Args... args) {
+  exec::task<ActorRef<UserClass>> CreateActor(ActorConfig config,
+                                              std::chrono::milliseconds timeout = std::chrono::milliseconds {2000},
+                                              Args... args) {
     if constexpr (kCreateFn != nullptr) {
       static_assert(std::is_invocable_v<decltype(kCreateFn), Args...>,
                     "Class can't be created by given args and create function");
-    }
-    if (is_distributed_mode_) {
-      if (enable_dynamic_connectivity_) {
-        EXA_THROW_CHECK(message_broker_->CheckNodeConnected(config.node_id)) << "Can't find node " << config.node_id;
-      } else {
-        EXA_THROW_CHECK(node_id_to_address_.contains(config.node_id)) << "Invalid node id: " << config.node_id;
-      }
     }
 
     // local actor, create directly
@@ -94,6 +89,11 @@ class ActorRegistryBackend {
       EXA_THROW << "CreateActor<UserClass> can only be used to create local actor, to create remote actor, use "
                    "CreateActor<UserClass, kCreateFn> to provide a fixed signature for remote actor creation. node_id="
                 << config.node_id << ", this_node_id=" << this_node_id_ << ", actor_type=" << typeid(UserClass).name();
+    }
+
+    if (is_distributed_mode_) {
+      bool connected = co_await message_broker_->WaitNodeAlive(config.node_id, timeout);
+      EXA_THROW_CHECK(connected) << "Can't find node " << config.node_id;
     }
 
     if constexpr (kCreateFn != nullptr) {
@@ -186,11 +186,9 @@ class ActorRegistryBackend {
 
  private:
   bool is_distributed_mode_ = false;
-  bool enable_dynamic_connectivity_ = false;
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   uint32_t this_node_id_ = 0;
-  std::unordered_map<uint32_t, std::string> node_id_to_address_;
   network::MessageBroker* message_broker_ = nullptr;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;

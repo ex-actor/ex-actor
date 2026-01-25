@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -21,10 +22,13 @@
 
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/internal/constants.h"
+
 namespace ex_actor {
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
   uint32_t node_id = 0;
+  std::chrono::milliseconds remote_creation_timeout = internal::kDefaultRemoteCreateTimeout;
 
   /**
    * @brief Actor's name, should be unique within one node.

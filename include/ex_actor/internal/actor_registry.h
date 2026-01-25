@@ -62,9 +62,7 @@ class ActorRegistryBackend {
    * @brief Create an actor with a manually specified config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  exec::task<ActorRef<UserClass>> CreateActor(ActorConfig config,
-                                              std::chrono::milliseconds timeout = std::chrono::milliseconds {2000},
-                                              Args... args) {
+  exec::task<ActorRef<UserClass>> CreateActor(ActorConfig config, Args... args) {
     if constexpr (kCreateFn != nullptr) {
       static_assert(std::is_invocable_v<decltype(kCreateFn), Args...>,
                     "Class can't be created by given args and create function");
@@ -92,7 +90,7 @@ class ActorRegistryBackend {
     }
 
     if (is_distributed_mode_) {
-      bool connected = co_await message_broker_->WaitNodeAlive(config.node_id, timeout);
+      bool connected = co_await message_broker_->WaitNodeAlive(config.node_id, config.remote_creation_timeout);
       EXA_THROW_CHECK(connected) << "Can't find node " << config.node_id;
     }
 

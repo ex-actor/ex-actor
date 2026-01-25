@@ -15,6 +15,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -240,7 +241,7 @@ class LockGuardedSet {
     return set_.empty();
   }
 
-  bool Contains(T value) {
+  bool Contains(const T& value) {
     std::lock_guard lock(mutex_);
     return set_.contains(value);
   }

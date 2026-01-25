@@ -125,14 +125,13 @@ std::vector<GossipMessage> NodeInfoManager::GenerateGossipMessage() {
 
 std::vector<NodeInfo> NodeInfoManager::GetRandomPeers(size_t size) {
   std::vector<NodeInfo> nodes;
-  if (size == 0) {
-    return nodes;
-  }
 
   {
     std::lock_guard lock(mutex_);
+    if (node_id_to_state_.empty()) {
+      return nodes;
+    }
     nodes.reserve(node_id_to_state_.size());
-    size_t seen = 0;
     for (const auto& pair : node_id_to_state_) {
       // We should not send gossip messages to quitting nodes.
       if (pair.second.liveness == Liveness::kAlive) {
@@ -484,14 +483,10 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   }
 }
 
-// TODO: The gossip logic need the send/recv thread to  serialize/deserialize node_list, which seems not a
-// good idea.
-
 void MessageBroker::SendGossip() {
   if (!stopped_.load(std::memory_order_relaxed) &&
       std::chrono::steady_clock::now() - last_heartbeat_ >= network_config_.gossip_interval) {
-    // TODO: The size of the peers should be configurable
-    const auto node_list = node_mngr_.GetRandomPeers(2);
+    const auto node_list = node_mngr_.GetRandomPeers(std::max(1U, network_config_.gossip_fanout));
     auto message = node_mngr_.GenerateGossipMessage();
     message.emplace_back(this_node_, GetTimeMs());
     auto serialized_message = serde::Serialize(serde::GossipMessage {message});

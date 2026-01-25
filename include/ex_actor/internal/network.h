@@ -61,6 +61,7 @@ struct Identifier {
 struct NetworkConfig {
   std::chrono::milliseconds heartbeat_timeout = kDefaultHeartbeatTimeout;
   std::chrono::milliseconds gossip_interval = kDefaultGossipInterval;
+  uint32_t gossip_fanout;
 };
 
 struct ClusterConfig {

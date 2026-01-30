@@ -255,7 +255,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
         }
 
         ClusterConfig cluster_config {.this_node = std::move(this_node)};
-        if (this_node.node_id != contact_node.node_id) {
+        if (cluster_config.this_node.node_id != contact_node.node_id) {
           cluster_config.contact_node = std::move(contact_node);
         }
 

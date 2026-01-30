@@ -90,8 +90,7 @@ class ActorRegistryBackend {
     }
 
     if (is_distributed_mode_) {
-      bool connected = co_await message_broker_->WaitNodeAlive(config.node_id, config.remote_creation_timeout);
-      EXA_THROW_CHECK(connected) << "Can't find node " << config.node_id;
+      EXA_THROW_CHECK(message_broker_->CheckNodeConnected(config.node_id)) << "Can't find node " << config.node_id;
     }
 
     if constexpr (kCreateFn != nullptr) {

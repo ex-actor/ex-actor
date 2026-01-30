@@ -240,20 +240,45 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
         if (cluster_node_info.empty()) {
           return nullptr;
         }
+
+        NodeInfo this_node {.node_id = this_node_id_};
+        NodeInfo contact_node {.node_id = this_node_id_};
+        for (const auto& node : cluster_node_info) {
+          if (node.node_id < contact_node.node_id) {
+            contact_node.node_id = node.node_id;
+            contact_node.address = node.address;
+          }
+
+          if (node.node_id == this_node_id_) {
+            this_node.address = node.address;
+          }
+        }
+
+        ClusterConfig cluster_config {.this_node = std::move(this_node)};
+        if (this_node.node_id != contact_node.node_id) {
+          cluster_config.contact_node = std::move(contact_node);
+        }
+
         return std::make_unique<network::MessageBroker>(
-            cluster_node_info, this_node_id_,
+            cluster_config,
             /*request_handler=*/
             [this](uint64_t received_request_id, network::ByteBufferType data) {
               auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
                   received_request_id, std::move(data));
               async_scope_.spawn(std::move(task));
-            },
-            network_config);
+            });
       }()),
       backend_actor_(scheduler_->Clone(), ActorConfig {.node_id = this_node_id_}, scheduler_->Clone(), this_node_id,
                      cluster_node_info, message_broker_.get()),
       backend_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &backend_actor_,
-                         message_broker_.get()) {}
+                         message_broker_.get()) {
+  for (const auto& node : cluster_node_info) {
+    if (node.node_id != this_node_id) {
+      auto [connected] = stdexec::sync_wait(WaitNodeAlive(node.node_id, std::chrono::milliseconds {4000})).value();
+      EXA_THROW_CHECK(connected) << "Can not connect to the node " << node.node_id;
+    }
+  }
+}
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              const network::ClusterConfig& cluster_config)

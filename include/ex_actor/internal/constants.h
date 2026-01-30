@@ -19,7 +19,6 @@ namespace internal {
 constexpr size_t kEmptyActorRefHashVal = 10086;
 constexpr auto kDefaultHeartbeatTimeout = std::chrono::milliseconds(5000);
 constexpr auto kDefaultGossipInterval = std::chrono::milliseconds(500);
-constexpr auto kDefaultRemoteCreateTimeout = std::chrono::milliseconds(2000);
 
 }  // namespace internal
 }  // namespace ex_actor

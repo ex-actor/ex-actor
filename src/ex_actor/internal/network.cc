@@ -502,6 +502,7 @@ void MessageBroker::SendGossip() {
       // logging::Info("[Gossip] node {} send gossip to  node {}", this_node_.node_id, node.node_id);
       async_scope_.spawn(std::move(gossip));
     }
+    last_heartbeat_ = std::chrono::steady_clock::now();
   }
 }
 

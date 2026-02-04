@@ -170,3 +170,23 @@ TEST(BasicApiTest, LookUpNamedActor) {
   ex::sync_wait(coroutine());
   ex_actor::Shutdown();
 }
+
+struct Base {
+  virtual ~Base() = default;
+  virtual std::string Foo() = 0;
+};
+
+struct Derived : Base {
+  std::string Foo() override { return "Derived::Foo"; }
+};
+
+TEST(BasicApiTest, ActorCanBePolymorphic) {
+  auto coroutine = []() -> exec::task<void> {
+    ex_actor::Init(/*thread_pool_size=*/10);
+    ex_actor::ActorRef<Base> base = co_await ex_actor::Spawn<Derived>();
+    std::string foo_reply = co_await base.Send<&Base::Foo>();
+    EXPECT_EQ(foo_reply, "Derived::Foo");
+    ex_actor::Shutdown();
+  };
+  ex::sync_wait(coroutine());
+}

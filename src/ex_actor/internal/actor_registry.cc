@@ -305,6 +305,9 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
                          message_broker_.get()) {}
 
 exec::task<bool> ActorRegistry::WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
+  if (node_id == this_node_id_) {
+    co_return true;
+  }
   co_return co_await backend_actor_ref_.Send<&ActorRegistryBackend::WaitNodeAlive>(node_id, timeout);
 }
 

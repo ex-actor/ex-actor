@@ -95,6 +95,8 @@ class NodeInfoManager {
     uint64_t last_seen;
     std::string address;
   };
+
+  explicit NodeInfoManager(uint32_t this_node_id);
   void Add(uint32_t node_id, const NodeState& state);
   void RefreshLastSeen(uint32_t node_id, uint64_t last_seen);
   bool Connected(uint32_t node_id);
@@ -111,6 +113,7 @@ class NodeInfoManager {
   void CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds timeout);
 
  private:
+  uint32_t this_node_id_;
   std::unordered_map<uint32_t, NodeState> node_id_to_state_;
   std::unordered_map<uint32_t, std::vector<std::shared_ptr<Waiter>>> node_id_to_waiters_;
   std::condition_variable cv_;

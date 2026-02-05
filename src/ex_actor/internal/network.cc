@@ -34,6 +34,8 @@
 
 namespace ex_actor::internal::network {
 
+NodeInfoManager::NodeInfoManager(uint32_t this_node_id) : this_node_id_(this_node_id) {}
+
 void NodeInfoManager::Add(uint32_t node_id, const NodeState& state) {
   std::lock_guard lock(mutex_);
   auto [iter, inserted] = node_id_to_state_.try_emplace(node_id, state);
@@ -211,7 +213,7 @@ void NodeInfoManager::CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds t
       const auto& state = pair.second;
       if (state.liveness == Liveness::kAlive &&
           GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
-        logging::Error("Node {} is dead, try to exit", pair.first);
+        logging::Error("Node {} detects that node {} is dead, try to exit", this_node_id_, pair.first);
         // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
         std::quick_exit(1);
       }
@@ -238,6 +240,7 @@ MessageBroker::MessageBroker(const std::vector<NodeInfo>& node_list, uint32_t th
                              NetworkConfig network_config)
     : this_node_({.node_id = this_node_id}),
       request_handler_(std::move(request_handler)),
+      node_mngr_(this_node_id),
       network_config_(network_config),
       last_heartbeat_(std::chrono::steady_clock::now()) {
   EstablishConnection(node_list);
@@ -249,6 +252,7 @@ MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
                              std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler)
     : this_node_(cluster_config.this_node),
       request_handler_(std::move(request_handler)),
+      node_mngr_(cluster_config.this_node.node_id),
       network_config_(cluster_config.network_config),
       last_heartbeat_(std::chrono::steady_clock::now()) {
   EXA_THROW_CHECK(!this_node_.address.empty())
@@ -458,7 +462,8 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
 
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
-    logging::Info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
+    logging::Info("[Cluster Aligned Stop] Node {} detects node {} is going to quit", this_node_.node_id,
+                  identifier.request_node_id);
     node_mngr_.DeactivateNode(identifier.request_node_id);
     return;
   }

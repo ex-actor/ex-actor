@@ -55,6 +55,29 @@ class ActorRef {
 
   friend rfl::Reflector<ActorRef<UserClass>>;
 
+  template <class U>
+  friend class ActorRef;
+
+  // Converting constructor from ActorRef<U> where U* is convertible to UserClass*
+  template <class U>
+    requires std::is_convertible_v<U*, UserClass*>
+  // NOLINTNEXTLINE(google-explicit-constructor) - implicit conversion is intentional for polymorphism support
+  ActorRef(const ActorRef<U>& other)
+      : is_empty_(other.is_empty_),
+        this_node_id_(other.this_node_id_),
+        node_id_(other.node_id_),
+        actor_id_(other.actor_id_),
+        type_erased_actor_(other.type_erased_actor_),
+        message_broker_(other.message_broker_) {}
+
+  // Converting assignment operator - delegates to converting constructor
+  template <class U>
+    requires std::is_convertible_v<U*, UserClass*>
+  ActorRef& operator=(const ActorRef<U>& other) {
+    *this = ActorRef(other);
+    return *this;
+  }
+
   /**
    * @brief Send message to an actor. Returns a coroutine carrying the result.
    * @note This method requires your args and return value can be serialized by reflect-cpp, if you met compile errors

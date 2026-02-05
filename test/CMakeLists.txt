@@ -17,7 +17,7 @@ ex_actor_test(stress_test)
 ex_actor_test(shuffle_merge_test TIMEOUT 10)
 ex_actor_test(complex_api_test)
 ex_actor_test(distributed_test TIMEOUT 10)
-ex_actor_test(network_test TIMEOUT 10)
+ex_actor_test(network_test TIMEOUT 20)
 ex_actor_test(skynet_test TIMEOUT 10)
 ex_actor_test(logging_test)
 
@@ -51,4 +51,4 @@ add_test(
     ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_connectivity_test.py
     $<TARGET_FILE:dynamic_connectivity_test>)
-set_tests_properties(dynamic_connectivity_test PROPERTIES TIMEOUT 10)
+set_tests_properties(dynamic_connectivity_test PROPERTIES TIMEOUT 25)

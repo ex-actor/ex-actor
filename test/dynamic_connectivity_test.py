@@ -25,10 +25,14 @@ def check_nodes(node_list):
             raise RuntimeError("There's error in the cluster")
 
 
-if __name__ == "__main__":
-    bin = sys.argv[1]
+def star_test(bin):
     cluster_size = 8
     node_list = []
     for node_id in range(cluster_size):
         node_list.append(subprocess.Popen([bin, str(cluster_size), str(node_id)]))
     check_nodes(node_list)
+
+
+if __name__ == "__main__":
+    bin = sys.argv[1]
+    star_test(bin)

@@ -92,15 +92,15 @@ TEST(NetworkTest, MessageBrokerBasicTest) {
                                                  {.node_id = 1, .address = "tcp://127.0.0.1:5202"},
                                                  {.node_id = 2, .address = "tcp://127.0.0.1:5203"}};
 
-    auto node_main = [](const std::vector<ex_actor::NodeInfo>& node_list, uint32_t node_id) {
+    auto node_main = [&node_list](uint32_t node_id) {
       ex_actor::internal::util::SetThreadName("node_" + std::to_string(node_id));
+      ex_actor::ClusterConfig config {.network_config {.gossip_interval = std::chrono::milliseconds {50}}};
+      config.this_node = node_list.at(node_id);
+      config.contact_node = node_list.at((node_id + node_list.size() - 1) % node_list.size());
       ex_actor::internal::network::MessageBroker message_broker(
-          node_list,
-          /*this_node_id=*/node_id,
-          [&message_broker](uint64_t received_request_id, ByteBufferType data) {
+          config, [&message_broker](uint64_t received_request_id, ByteBufferType data) {
             message_broker.ReplyRequest(received_request_id, std::move(data));
-          },
-          ex_actor::NetworkConfig {.gossip_interval = std::chrono::milliseconds {50}});
+          });
       uint32_t to_node_id = (node_id + 1) % node_list.size();
       // Waiting all the nodes find its contact node
       std::this_thread::sleep_for(std::chrono::milliseconds {500});
@@ -115,9 +115,9 @@ TEST(NetworkTest, MessageBrokerBasicTest) {
       }
       stdexec::sync_wait(scope.on_empty());
     };
-    std::jthread node_0(node_main, node_list, 0);
-    std::jthread node_1(node_main, node_list, 1);
-    std::jthread node_2(node_main, node_list, 2);
+    std::jthread node_0(node_main, 0);
+    std::jthread node_1(node_main, 1);
+    std::jthread node_2(node_main, 2);
   };
 
   for (int i = 0; i < 10; ++i) {

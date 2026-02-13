@@ -235,19 +235,6 @@ void NodeInfoManager::CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds t
   }
 }
 
-MessageBroker::MessageBroker(const std::vector<NodeInfo>& node_list, uint32_t this_node_id,
-                             std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
-                             NetworkConfig network_config)
-    : this_node_({.node_id = this_node_id}),
-      request_handler_(std::move(request_handler)),
-      node_mngr_(this_node_id),
-      network_config_(network_config),
-      last_heartbeat_(std::chrono::steady_clock::now()) {
-  EstablishConnection(node_list);
-  send_thread_ = std::jthread([this](const std::stop_token& stop_token) { SendProcessLoop(stop_token); });
-  recv_thread_ = std::jthread([this](const std::stop_token& stop_token) { ReceiveProcessLoop(stop_token); });
-}
-
 MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
                              std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler)
     : this_node_(cluster_config.this_node),

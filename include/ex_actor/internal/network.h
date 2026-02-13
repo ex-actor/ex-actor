@@ -124,9 +124,6 @@ class NodeInfoManager {
 
 class MessageBroker {
  public:
-  explicit MessageBroker(const std::vector<NodeInfo>& node_list, uint32_t this_node_id,
-                         std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
-                         NetworkConfig network_config = {});
   explicit MessageBroker(const ClusterConfig& cluster_config,
                          std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler);
 

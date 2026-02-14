@@ -15,6 +15,7 @@
 #pragma once
 
 #include <thread>
+#include <limits>
 
 #include <exec/static_thread_pool.hpp>
 
@@ -66,7 +67,7 @@ class WorkSharingThreadPoolBase {
     }
 
     void start() noexcept {
-      uint32_t priority = UINT32_MAX;
+      size_t priority = std::numeric_limits<size_t>::max();
       if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
                                    internal::util::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
         auto env = stdexec::get_env(receiver);
@@ -105,7 +106,7 @@ class WorkSharingThreadPoolBase {
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
-  void EnqueueOperation(TypeEasedOperation* operation, uint32_t priority = 0) {
+  void EnqueueOperation(TypeEasedOperation* operation, size_t priority = std::numeric_limits<size_t>::max()) {
     if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
                                  internal::util::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
       queue_.Push(operation, priority);

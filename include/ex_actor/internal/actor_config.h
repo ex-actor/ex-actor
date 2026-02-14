@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <limits>
 
 #include <stdexec/execution.hpp>
 
@@ -52,15 +53,15 @@ struct ActorConfig {
   // used in SchedulerUnion
   size_t scheduler_index = 0;
   // used in PriorityThreadPool
-  uint32_t priority = UINT32_MAX;
+  size_t priority = std::numeric_limits<size_t>::max();
 };
 
 struct get_priority_t {
-  constexpr uint32_t operator()(const auto& prop) const noexcept {
+  constexpr size_t operator()(const auto& prop) const noexcept {
     if constexpr (requires { prop.query(get_priority_t {}); }) {
       return prop.query(get_priority_t {});
     } else {
-      return UINT32_MAX;
+      return std::numeric_limits<size_t>::max();
     }
   }
   constexpr auto query(stdexec::forwarding_query_t) const noexcept -> bool { return true; }

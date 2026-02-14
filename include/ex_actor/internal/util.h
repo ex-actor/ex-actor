@@ -130,7 +130,7 @@ struct LinearizableUnboundedMpscQueue {
 template <class T>
 class UnboundedBlockingPriorityQueue {
  public:
-  void Push(T value, uint32_t priority) {
+  void Push(T value, size_t priority) {
     std::lock_guard lock(mutex_);
     queue_.push({std::move(value), priority});
     cv_.notify_one();
@@ -150,7 +150,7 @@ class UnboundedBlockingPriorityQueue {
  private:
   struct Element {
     T value;
-    uint32_t priority;
+    size_t priority;
     friend bool operator<(const Element& lhs, const Element& rhs) { return lhs.priority > rhs.priority; }
   };
   std::priority_queue<Element> queue_;

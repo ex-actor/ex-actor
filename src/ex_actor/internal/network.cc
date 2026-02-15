@@ -242,14 +242,17 @@ MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
       node_mngr_(cluster_config.this_node.node_id),
       network_config_(cluster_config.network_config),
       last_heartbeat_(std::chrono::steady_clock::now()) {
-  EXA_THROW_CHECK(!this_node_.address.empty())
-      << "Local address not found in node list, this_node_id: " << this_node_.node_id;
-  recv_socket_.bind(this_node_.address);
-  recv_socket_.set(zmq::sockopt::linger, 0);
-  logging::Info("Node {}'s recv socket bound to {}", this_node_.node_id, this_node_.address);
+  if (!this_node_.address.empty()) {
+    recv_socket_.bind(this_node_.address);
+    recv_socket_.set(zmq::sockopt::linger, 0);
+    logging::Info("Node {}'s recv socket bound to {}", this_node_.node_id, this_node_.address);
 
-  if (!cluster_config.contact_node.address.empty()) {
-    EstablishConnectionTo(cluster_config.contact_node);
+    if (!cluster_config.contact_node.address.empty()) {
+      EXA_THROW_CHECK(this_node_.address != cluster_config.contact_node.address &&
+                      this_node_.node_id != cluster_config.contact_node.node_id)
+          << "The local node has the same node ID or address as the contact node.";
+      EstablishConnectionTo(cluster_config.contact_node);
+    }
   }
 
   send_thread_ = std::jthread([this](const std::stop_token& stop_token) { SendProcessLoop(stop_token); });

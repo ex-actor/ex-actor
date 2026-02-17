@@ -56,9 +56,12 @@ void NodeInfoManager::RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
   }
 }
 
-bool NodeInfoManager::Connected(uint32_t node_id) {
+bool NodeInfoManager::Connected(uint32_t node_id, const std::string& address) {
   std::lock_guard lock(mutex_);
   if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
+    if (!address.empty() && !iter->second.address.empty() && address != iter->second.address) {
+      EXA_THROW << "Nodes with the same node ID but different addresses exist in the cluster.";
+    }
     auto liveness = iter->second.liveness;
     return liveness != Liveness::kDead && liveness != Liveness::kConnecting;
   }
@@ -512,7 +515,7 @@ void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
     }
 
     // We shouldn't add new peer node for a quitting node.
-    if (!node_mngr_.Connected(node.node_id) && !stopped_.load(std::memory_order_relaxed)) {
+    if (!node_mngr_.Connected(node.node_id, node.address) && !stopped_.load(std::memory_order_relaxed)) {
       EstablishConnectionTo(node);
     }
     node_mngr_.RefreshLastSeen(node.node_id, last_seen);

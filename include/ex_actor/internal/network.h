@@ -99,7 +99,7 @@ class NodeInfoManager {
   explicit NodeInfoManager(uint32_t this_node_id);
   void Add(uint32_t node_id, const NodeState& state);
   void RefreshLastSeen(uint32_t node_id, uint64_t last_seen);
-  bool Connected(uint32_t node_id);
+  bool Connected(uint32_t node_id, const std::string& address = "");
   bool Contains(uint32_t node_id);
   void DeactivateNode(uint32_t node_id);
   void WaitAllNodesExit();

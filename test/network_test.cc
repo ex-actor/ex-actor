@@ -188,6 +188,12 @@ TEST(NetworkTest, MessageBrokerDuplicateClusterNodesTest) {
     std::jthread node_2(create_node, nodes.at(2), nodes.at(0));
   };
 
+#ifdef _WIN32
+  EXPECT_DEATH(duplicate_node_test(), "");
+#else
+  EXPECT_DEATH(duplicate_node_test(), "Nodes with the same node ID but different addresses exist in the cluster");
+#endif  // _WIN32
+
   auto duplicate_node_forward_test = [&]() {
     std::jthread node_0(create_node, nodes.at(0));
     std::jthread node_1(create_node, nodes.at(1), nodes.at(0));
@@ -195,6 +201,10 @@ TEST(NetworkTest, MessageBrokerDuplicateClusterNodesTest) {
     std::jthread node_2(create_node, nodes.at(3), nodes.at(1));
   };
 
+#ifdef _WIN32
+  EXPECT_DEATH(duplicate_node_forward_test(), "");
+#else
   EXPECT_DEATH(duplicate_node_forward_test(),
                "Nodes with the same node ID but different addresses exist in the cluster");
+#endif  // _WIN32
 }

@@ -3,7 +3,7 @@
 
 #include "ex_actor/api.h"
 
-namespace logging = ex_actor::internal::logging;
+namespace logging = ex_actor::internal::log;
 
 class PingWorker {
  public:

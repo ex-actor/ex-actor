@@ -28,7 +28,7 @@
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/reflect.h"
 
-namespace ex_actor::internal::serde {
+namespace ex_actor::internal {
 
 template <class T>
 static auto GetCachedSchema() {
@@ -100,7 +100,7 @@ struct ActorLookUpRequest {
 
 template <auto kFn>
 auto DeserializeFnArgs(const uint8_t* data, size_t size, const ActorRefDeserializationInfo& info) {
-  using Sig = reflect::Signature<decltype(kFn)>;
+  using Sig = Signature<decltype(kFn)>;
   if constexpr (std::is_member_function_pointer_v<decltype(kFn)>) {
     return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, size, info);
   } else {
@@ -203,4 +203,4 @@ inline std::string BufferToHex(const uint8_t* data, size_t size) {
 inline std::string BufferToHex(const char* data, size_t size) {
   return BufferToHex(reinterpret_cast<const uint8_t*>(data), size);
 }
-}  // namespace ex_actor::internal::serde
+}  // namespace ex_actor::internal

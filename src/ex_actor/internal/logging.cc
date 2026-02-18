@@ -5,8 +5,8 @@
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
-namespace ex_actor::internal::logging {
-using ex_actor::logging::LogLevel;
+namespace ex_actor::internal {
+using ex_actor::LogLevel;
 
 spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
   switch (level) {
@@ -24,7 +24,7 @@ spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
   EXA_THROW << "Invalid log level: " << level;
 }
 
-std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const ex_actor::logging::LogConfig& config) {
+std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const ex_actor::LogConfig& config) {
   constexpr char kLoggerName[] = "ex_actor";
   std::unique_ptr<spdlog::logger> logger;
   if (config.log_file_path.empty()) {
@@ -49,14 +49,14 @@ void InstallFallbackExceptionHandler() {
       try {
         std::rethrow_exception(ex);
       } catch (const std::exception& e) {
-        logging::Critical("terminate called with an active exception, type: {}, what: {}", typeid(e).name(), e.what());
+        log::Critical("terminate called with an active exception, type: {}, what: {}", typeid(e).name(), e.what());
       } catch (...) {
-        logging::Critical("terminate called with an unknown exception");
+        log::Critical("terminate called with an unknown exception");
       }
     } else {
-      logging::Critical("terminate called without an active exception");
+      log::Critical("terminate called without an active exception");
     }
     std::abort();
   });
 };
-}  // namespace ex_actor::internal::logging
+}  // namespace ex_actor::internal

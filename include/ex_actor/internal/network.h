@@ -37,7 +37,7 @@ struct NodeInfo {
 };
 }  // namespace ex_actor
 
-namespace ex_actor::internal::network {
+namespace ex_actor::internal {
 using ByteBufferType = zmq::message_t;
 
 enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kHeartbeat };
@@ -85,7 +85,7 @@ class MessageBroker {
       bool expected = false;
       bool changed = started.compare_exchange_strong(expected, true);
       if (!changed) [[unlikely]] {
-        logging::Critical("MessageBroker Operation already started");
+        log::Critical("MessageBroker Operation already started");
         std::terminate();
       }
       message_broker->PushOperation(this);
@@ -134,13 +134,13 @@ class MessageBroker {
   std::atomic_uint64_t received_request_id_counter_ = 0;
 
   zmq::context_t context_ {/*io_threads_=*/1};
-  util::LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
+  LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
   zmq::socket_t recv_socket_ {context_, zmq::socket_type::dealer};
 
-  util::LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;
-  util::LockGuardedMap<uint64_t, TypeErasedSendOperation*> send_request_id_to_operation_;
-  util::LinearizableUnboundedMpscQueue<ReplyOperation> pending_reply_operations_;
-  util::LockGuardedMap<uint64_t, Identifier> received_request_id_to_identifier_;
+  LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;
+  LockGuardedMap<uint64_t, TypeErasedSendOperation*> send_request_id_to_operation_;
+  LinearizableUnboundedMpscQueue<ReplyOperation> pending_reply_operations_;
+  LockGuardedMap<uint64_t, Identifier> received_request_id_to_identifier_;
 
   std::jthread send_thread_;
   std::jthread recv_thread_;
@@ -153,8 +153,8 @@ class MessageBroker {
   std::unordered_map<uint32_t, TimePoint> last_seen_;
 };
 
-}  // namespace ex_actor::internal::network
+}  // namespace ex_actor::internal
 
 namespace ex_actor {
-using internal::network::HeartbeatConfig;
+using internal::HeartbeatConfig;
 }  // namespace ex_actor

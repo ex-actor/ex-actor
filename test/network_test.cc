@@ -7,8 +7,8 @@
 
 #include "ex_actor/api.h"
 
-using ex_actor::internal::network::ByteBufferType;
-namespace logging = ex_actor::internal::logging;
+using ex_actor::internal::ByteBufferType;
+namespace logging = ex_actor::internal::log;
 
 TEST(NetworkTest, MessageBrokerTest) {
   auto test_once = []() {
@@ -17,8 +17,8 @@ TEST(NetworkTest, MessageBrokerTest) {
                                                  {.node_id = 2, .address = "tcp://127.0.0.1:5203"}};
 
     auto node_main = [](const std::vector<ex_actor::NodeInfo>& node_list, uint32_t node_id) {
-      ex_actor::internal::util::SetThreadName("node_" + std::to_string(node_id));
-      ex_actor::internal::network::MessageBroker message_broker(
+      ex_actor::internal::SetThreadName("node_" + std::to_string(node_id));
+      ex_actor::internal::MessageBroker message_broker(
           node_list,
           /*this_node_id=*/node_id, [&message_broker](uint64_t received_request_id, ByteBufferType data) {
             message_broker.ReplyRequest(received_request_id, std::move(data));

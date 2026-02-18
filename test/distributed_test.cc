@@ -14,7 +14,7 @@ using testing::HasSubstr;
 using testing::Property;
 using testing::Throws;
 
-namespace logging = ex_actor::internal::logging;
+namespace logging = ex_actor::internal::log;
 
 class A {
  public:

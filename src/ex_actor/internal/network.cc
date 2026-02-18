@@ -511,6 +511,9 @@ void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
     const auto& node = msg.node_info;
     const auto& last_seen = msg.last_seen;
     if (node.node_id == this_node_.node_id) {
+      if (node.address != this_node_.address) {
+        EXA_THROW << "Nodes with the same node ID but different addresses exist in the cluster.";
+      }
       continue;
     }
 

@@ -185,3 +185,62 @@ struct hash<ex_actor::ActorRef<UserClass>> {
   }
 };
 }  // namespace std
+
+// ==============================
+// rfl serialization support
+// ==============================
+namespace rfl {
+
+template <typename U>
+struct Reflector<ex_actor::internal::ActorRef<U>> {
+  struct ReflType {
+    bool is_empty {};
+    uint32_t node_id {};
+    uint64_t actor_id {};
+  };
+
+  static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
+    ex_actor::internal::ActorRef<U> actor(0, rfl_type.node_id, rfl_type.actor_id, nullptr, nullptr);
+    return actor;
+  }
+
+  static ReflType from(const ex_actor::internal::ActorRef<U>& actor_ref) {
+    return {
+        .is_empty = actor_ref.is_empty_,
+        .node_id = actor_ref.node_id_,
+        .actor_id = actor_ref.actor_id_,
+    };
+  }
+};
+
+namespace parsing {
+template <class ProcessorsType, class U>
+struct Parser<capnproto::ReaderWithContext<ex_actor::internal::ActorRefSerdeContext>, capnproto::Writer,
+              ex_actor::internal::ActorRef<U>, ProcessorsType> {
+  using Reader = capnproto::ReaderWithContext<ex_actor::internal::ActorRefSerdeContext>;
+  using InputVarType = typename Reader::InputVarType;
+
+  static Result<ex_actor::internal::ActorRef<U>> read(const Reader& reader, const InputVarType& var) noexcept {
+    using Type = typename Reflector<ex_actor::internal::ActorRef<U>>::ReflType;
+    auto parse_res =
+        Parser<capnproto::Reader, capnproto::Writer, ex_actor::internal::ActorRef<U>, ProcessorsType>::read(reader,
+                                                                                                            var);
+    if (!parse_res) {
+      return Unexpected {parse_res.error()};
+    }
+    auto actor_ref = parse_res.value();
+    const auto& info = reader.info;
+    actor_ref.SetLocalRuntimeInfo(info.this_node_id, info.actor_look_up_fn(actor_ref.GetActorId()),
+                                  info.message_broker);
+    return actor_ref;
+  }
+
+  template <class Parent>
+  static void write(const capnproto::Writer& w, const ex_actor::internal::ActorRef<U>& ref, const Parent& parent) {
+    Parser<capnproto::Reader, capnproto::Writer, ex_actor::internal::ActorRef<U>, ProcessorsType>::write(w, ref,
+                                                                                                         parent);
+  }
+};
+
+}  // namespace parsing
+}  // namespace rfl

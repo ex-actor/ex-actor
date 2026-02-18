@@ -119,14 +119,14 @@ void ActorRegistryBackend::HandleActorCreationRequest(uint64_t received_request_
   auto handler_key = reader.PullString(handler_key_len);
   try {
     auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(handler_key);
-    ActorRefDeserializationInfo info {.this_node_id = this_node_id_,
-                                      .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
-                                        if (actor_id_to_actor_.contains(actor_id)) {
-                                          return actor_id_to_actor_.at(actor_id).get();
-                                        }
-                                        return nullptr;
-                                      },
-                                      .message_broker = message_broker_};
+    ActorRefSerdeContext info {.this_node_id = this_node_id_,
+                               .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
+                                 if (actor_id_to_actor_.contains(actor_id)) {
+                                   return actor_id_to_actor_.at(actor_id).get();
+                                 }
+                                 return nullptr;
+                               },
+                               .message_broker = message_broker_};
     auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
         .request_buffer = std::move(reader), .scheduler = scheduler_->Clone(), .info = info});
     uint64_t actor_id = GenerateRandomActorId();
@@ -169,14 +169,14 @@ exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(uint64_t rec
   }
 
   EXA_THROW_CHECK(handler != nullptr);
-  ActorRefDeserializationInfo info {.this_node_id = this_node_id_,
-                                    .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
-                                      if (actor_id_to_actor_.contains(actor_id)) {
-                                        return actor_id_to_actor_.at(actor_id).get();
-                                      }
-                                      return nullptr;
-                                    },
-                                    .message_broker = message_broker_};
+  ActorRefSerdeContext info {.this_node_id = this_node_id_,
+                             .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
+                               if (actor_id_to_actor_.contains(actor_id)) {
+                                 return actor_id_to_actor_.at(actor_id).get();
+                               }
+                               return nullptr;
+                             },
+                             .message_broker = message_broker_};
   try {
     auto task = handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
         .actor = actor_id_to_actor_.at(actor_id).get(), .request_buffer = std::move(reader), .info = info});

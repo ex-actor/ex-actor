@@ -21,7 +21,6 @@
 #include <utility>
 
 #include "ex_actor/internal/actor.h"
-#include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization.h"  // IWYU pragma: keep
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
@@ -38,12 +37,12 @@ class RemoteActorRequestHandlerRegistry {
   struct RemoteActorMethodCallHandlerContext {
     TypeErasedActor* actor;
     BufferReader<ByteBufferType> request_buffer;
-    ActorRefDeserializationInfo info;
+    ActorRefSerdeContext info;
   };
   struct RemoteActorCreationHandlerContext {
     BufferReader<ByteBufferType> request_buffer;
     std::unique_ptr<TypeErasedActorScheduler> scheduler;
-    ActorRefDeserializationInfo info;
+    ActorRefSerdeContext info;
   };
   struct CreateActorResult {
     std::unique_ptr<TypeErasedActor> actor;

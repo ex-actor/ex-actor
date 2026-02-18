@@ -26,7 +26,7 @@
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/serialization.h"
 
-namespace ex_actor::internal::network {
+namespace ex_actor::internal {
 
 MessageBroker::MessageBroker(std::vector<ex_actor::NodeInfo> node_list, uint32_t this_node_id,
                              std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
@@ -58,7 +58,7 @@ MessageBroker::~MessageBroker() {
 
 void MessageBroker::ClusterAlignedStop() {
   // tell all other nodes: I'm going to quit
-  logging::Info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_id_);
+  log::Info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_id_);
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_) {
       auto sender = SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kQuit) | ex::then([](auto empty) {});
@@ -71,13 +71,13 @@ void MessageBroker::ClusterAlignedStop() {
   quit_latch_.wait();
   stopped_.store(true);
   ex::sync_wait(async_scope_.on_empty());
-  logging::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_id_);
+  log::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_id_);
   // stop io threads first
   send_thread_.request_stop();
   recv_thread_.request_stop();
   send_thread_.join();
   recv_thread_.join();
-  logging::Info("[Cluster Aligned Stop] Node {}'s io threads stopped, cluster aligned stop completed", this_node_id_);
+  log::Info("[Cluster Aligned Stop] Node {}'s io threads stopped, cluster aligned stop completed", this_node_id_);
 }
 
 void MessageBroker::EstablishConnections() {
@@ -88,7 +88,7 @@ void MessageBroker::EstablishConnections() {
       recv_socket_.bind(node.address);
       recv_socket_.set(zmq::sockopt::linger, 0);
       found_local_address = true;
-      logging::Info("Node {}'s recv socket bound to {}", this_node_id_, node.address);
+      log::Info("Node {}'s recv socket bound to {}", this_node_id_, node.address);
       break;
     }
   }
@@ -103,8 +103,7 @@ void MessageBroker::EstablishConnections() {
       auto& send_socket = node_id_to_send_socket_.At(node.node_id);
       send_socket.set(zmq::sockopt::linger, 0);
       send_socket.connect(node.address);
-      logging::Info("Node {} added a send socket, connected to node {} at {}", this_node_id_, node.node_id,
-                    node.address);
+      log::Info("Node {} added a send socket, connected to node {} at {}", this_node_id_, node.node_id, node.address);
     }
   }
 }
@@ -141,12 +140,12 @@ void MessageBroker::PushOperation(TypeErasedSendOperation* operation) {
 }
 
 void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
-  util::SetThreadName("snd_proc_loop");
+  SetThreadName("snd_proc_loop");
   while (!stop_token.stop_requested()) {
     bool any_item_pulled = false;
     while (auto optional_operation = pending_send_operations_.TryPop()) {
       auto* operation = optional_operation.value();
-      auto serialized_identifier = internal::serde::Serialize(operation->identifier);
+      auto serialized_identifier = Serialize(operation->identifier);
       zmq::multipart_t multi;
       multi.addmem(serialized_identifier.data(), serialized_identifier.size());
       multi.add(std::move(operation->data));
@@ -162,7 +161,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
     while (auto optional_reply_operation = pending_reply_operations_.TryPop()) {
       auto& reply_operation = optional_reply_operation.value();
       auto& send_socket = node_id_to_send_socket_.At(reply_operation.identifier.request_node_id);
-      auto serialized_identifier = internal::serde::Serialize(reply_operation.identifier);
+      auto serialized_identifier = Serialize(reply_operation.identifier);
       zmq::multipart_t multi;
       multi.addmem(serialized_identifier.data(), serialized_identifier.size());
       multi.add(std::move(reply_operation.data));
@@ -178,7 +177,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
 }
 
 void MessageBroker::ReceiveProcessLoop(const std::stop_token& stop_token) {
-  util::SetThreadName("recv_proc_loop");
+  SetThreadName("recv_proc_loop");
   recv_socket_.set(zmq::sockopt::rcvtimeo, 100);
 
   while (!stop_token.stop_requested()) {
@@ -199,13 +198,13 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   zmq::message_t identifier_bytes = multi.pop();
   zmq::message_t data_bytes = multi.pop();
 
-  auto identifier = internal::serde::Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
+  auto identifier = Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
   // all received messages will update the last seen time;
   last_seen_[identifier.request_node_id] = std::chrono::steady_clock::now();
 
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
-    logging::Info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
+    log::Info("[Cluster Aligned Stop] Node {} is going to quit", identifier.request_node_id);
     quit_latch_.count_down();
     return;
   }
@@ -233,7 +232,7 @@ void MessageBroker::CheckHeartbeat() {
   for (const auto& node : node_list_) {
     if (node.node_id != this_node_id_ &&
         std::chrono::steady_clock::now() - last_seen_[node.node_id] >= heartbeat_.heartbeat_timeout) {
-      logging::Error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
+      log::Error("Node {} detect that node {} is dead, try to exit", this_node_id_, node.node_id);
       // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
       std::quick_exit(1);
     }
@@ -253,4 +252,4 @@ void MessageBroker::SendHeartbeat() {
   }
 }
 
-}  // namespace ex_actor::internal::network
+}  // namespace ex_actor::internal

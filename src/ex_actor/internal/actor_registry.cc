@@ -23,7 +23,7 @@ namespace ex_actor::internal {
 // ----------------------ActorRegistryBackend--------------------------
 ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint32_t this_node_id,
                                            const std::vector<NodeInfo>& cluster_node_info,
-                                           network::MessageBroker* message_broker)
+                                           MessageBroker* message_broker)
     : is_distributed_mode_(!cluster_node_info.empty()),
       scheduler_(std::move(scheduler)),
       this_node_id_(this_node_id),
@@ -35,44 +35,42 @@ ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorSchedu
 exec::task<void> ActorRegistryBackend::AsyncDestroyAllActors() {
   exec::async_scope async_scope;
   // bulk destroy actors
-  logging::Info("Sending destroy messages to actors");
+  log::Info("Sending destroy messages to actors");
   for (auto& [_, actor] : actor_id_to_actor_) {
     async_scope.spawn(actor->AsyncDestroy());
   }
-  logging::Info("Waiting for actors to be destroyed");
+  log::Info("Waiting for actors to be destroyed");
   co_await async_scope.on_empty();
-  logging::Info("All actors destroyed");
+  log::Info("All actors destroyed");
 }
 
 exec::task<void> ActorRegistryBackend::HandleNetworkRequest(uint64_t received_request_id,
-                                                            network::ByteBufferType request_buffer) {
-  serde::BufferReader<network::ByteBufferType> reader(std::move(request_buffer));
-  auto message_type = reader.NextPrimitive<serde::NetworkRequestType>();
+                                                            ByteBufferType request_buffer) {
+  BufferReader<ByteBufferType> reader(std::move(request_buffer));
+  auto message_type = reader.NextPrimitive<NetworkRequestType>();
 
-  if (message_type == serde::NetworkRequestType::kActorCreationRequest) {
+  if (message_type == NetworkRequestType::kActorCreationRequest) {
     HandleActorCreationRequest(received_request_id, std::move(reader));
     co_return;
   }
 
-  if (message_type == serde::NetworkRequestType::kActorMethodCallRequest) {
+  if (message_type == NetworkRequestType::kActorMethodCallRequest) {
     co_await HandleActorMethodCallRequest(received_request_id, std::move(reader));
     co_return;
   }
 
-  if (message_type == serde::NetworkRequestType::kActorLookUpRequest) {
-    auto actor_name =
-        serde::Deserialize<serde::ActorLookUpRequest>(reader.Current(), reader.RemainingSize()).actor_name;
+  if (message_type == NetworkRequestType::kActorLookUpRequest) {
+    auto actor_name = Deserialize<ActorLookUpRequest>(reader.Current(), reader.RemainingSize()).actor_name;
 
     if (actor_name_to_id_.contains(actor_name)) {
-      serde::BufferWriter<network::ByteBufferType> writer(
-          network::ByteBufferType(sizeof(serde::NetworkRequestType) + sizeof(uint64_t)));
+      BufferWriter<ByteBufferType> writer(ByteBufferType(sizeof(NetworkRequestType) + sizeof(uint64_t)));
       auto actor_id = actor_name_to_id_.at(actor_name);
-      writer.WritePrimitive(serde::NetworkReplyType::kActorLookUpReturn);
+      writer.WritePrimitive(NetworkReplyType::kActorLookUpReturn);
       writer.WritePrimitive(actor_id);
       message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
     } else {
-      serde::BufferWriter writer(network::ByteBufferType(sizeof(serde::NetworkRequestType)));
-      writer.WritePrimitive(serde::NetworkReplyType::kActorLookUpError);
+      BufferWriter writer(ByteBufferType(sizeof(NetworkRequestType)));
+      writer.WritePrimitive(NetworkReplyType::kActorLookUpError);
       message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
     }
     co_return;
@@ -101,22 +99,22 @@ void ActorRegistryBackend::ValidateNodeInfo(const std::vector<NodeInfo>& cluster
   }
 }
 
-serde::NetworkRequestType ActorRegistryBackend::ParseMessageType(const network::ByteBufferType& buffer) {
+NetworkRequestType ActorRegistryBackend::ParseMessageType(const ByteBufferType& buffer) {
   EXA_THROW_CHECK_LE(buffer.size(), 1) << "Invalid buffer size, " << buffer.size();
-  return static_cast<serde::NetworkRequestType>(*static_cast<const uint8_t*>(buffer.data()));
+  return static_cast<NetworkRequestType>(*static_cast<const uint8_t*>(buffer.data()));
 }
 
-void ActorRegistryBackend::ReplyError(uint64_t received_request_id, serde::NetworkReplyType reply_type,
+void ActorRegistryBackend::ReplyError(uint64_t received_request_id, NetworkReplyType reply_type,
                                       std::string error_msg) {
-  std::vector<char> serialized = serde::Serialize(serde::ActorMethodReturnError {std::move(error_msg)});
-  serde::BufferWriter writer(network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
+  std::vector<char> serialized = Serialize(ActorMethodReturnError {std::move(error_msg)});
+  BufferWriter writer(ByteBufferType(sizeof(NetworkRequestType) + serialized.size()));
   writer.WritePrimitive(reply_type);
   writer.CopyFrom(serialized.data(), serialized.size());
   message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
 }
 
 void ActorRegistryBackend::HandleActorCreationRequest(uint64_t received_request_id,
-                                                      serde::BufferReader<network::ByteBufferType> reader) {
+                                                      BufferReader<ByteBufferType> reader) {
   auto handler_key_len = reader.NextPrimitive<uint64_t>();
   auto handler_key = reader.PullString(handler_key_len);
   try {
@@ -138,25 +136,24 @@ void ActorRegistryBackend::HandleActorCreationRequest(uint64_t received_request_
       actor_name_to_id_[result.actor_name.value()] = actor_id;
     }
     actor_id_to_actor_[actor_id] = std::move(result.actor);
-    serde::BufferWriter<network::ByteBufferType> writer(
-        network::ByteBufferType(sizeof(serde::NetworkReplyType) + sizeof(actor_id)));
-    writer.WritePrimitive(serde::NetworkReplyType::kActorCreationReturn);
+    BufferWriter<ByteBufferType> writer(ByteBufferType(sizeof(NetworkReplyType) + sizeof(actor_id)));
+    writer.WritePrimitive(NetworkReplyType::kActorCreationReturn);
     writer.WritePrimitive(actor_id);
     message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-    ReplyError(received_request_id, serde::NetworkReplyType::kActorCreationError, std::move(error_msg));
+    ReplyError(received_request_id, NetworkReplyType::kActorCreationError, std::move(error_msg));
   }
 }
 
-exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(
-    uint64_t received_request_id, serde::BufferReader<network::ByteBufferType> reader) {
+exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(uint64_t received_request_id,
+                                                                    BufferReader<ByteBufferType> reader) {
   auto handler_key_len = reader.NextPrimitive<uint64_t>();
   auto handler_key = reader.PullString(handler_key_len);
   auto actor_id = reader.NextPrimitive<uint64_t>();
   if (!actor_id_to_actor_.contains(actor_id)) {
     ReplyError(
-        received_request_id, serde::NetworkReplyType::kActorMethodCallError,
+        received_request_id, NetworkReplyType::kActorMethodCallError,
         fmt_lib::format("Can't find actor at remote node, actor_id={}, node_id={}, maybe it's already destroyed.",
                         actor_id, this_node_id_));
     co_return;
@@ -167,7 +164,7 @@ exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(
     handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorMethodCallHandler(handler_key);
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-    ReplyError(received_request_id, serde::NetworkReplyType::kActorMethodCallError, std::move(error_msg));
+    ReplyError(received_request_id, NetworkReplyType::kActorMethodCallError, std::move(error_msg));
     co_return;
   }
 
@@ -187,39 +184,39 @@ exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(
     message_broker_->ReplyRequest(received_request_id, std::move(buffer));
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-    ReplyError(received_request_id, serde::NetworkReplyType::kActorMethodCallError, std::move(error_msg));
+    ReplyError(received_request_id, NetworkReplyType::kActorMethodCallError, std::move(error_msg));
   }
 }
 
 // ----------------------ActorRegistry--------------------------
 ActorRegistry::~ActorRegistry() {
-  logging::Info("Start to shutdown actor registry");
+  log::Info("Start to shutdown actor registry");
   if (is_distributed_mode_) {
     message_broker_->ClusterAlignedStop();
   }
   ex::sync_wait(backend_actor_.CallActorMethod<&ActorRegistryBackend::AsyncDestroyAllActors>());
   ex::sync_wait(backend_actor_.AsyncDestroy());
   ex::sync_wait(async_scope_.on_empty());
-  logging::Info("Actor registry shutdown completed");
+  log::Info("Actor registry shutdown completed");
 }
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                             network::HeartbeatConfig heartbeat_config)
+                             HeartbeatConfig heartbeat_config)
     : is_distributed_mode_(!cluster_node_info.empty()),
       this_node_id_(this_node_id),
       default_work_sharing_thread_pool_(thread_pool_size),
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
-      message_broker_([&cluster_node_info, &heartbeat_config, this]() -> std::unique_ptr<network::MessageBroker> {
+      message_broker_([&cluster_node_info, &heartbeat_config, this]() -> std::unique_ptr<MessageBroker> {
         if (cluster_node_info.empty()) {
           return nullptr;
         }
-        return std::make_unique<network::MessageBroker>(
+        return std::make_unique<MessageBroker>(
             cluster_node_info, this_node_id_,
             /*request_handler=*/
-            [this](uint64_t received_request_id, network::ByteBufferType data) {
+            [this](uint64_t received_request_id, ByteBufferType data) {
               auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
                   received_request_id, std::move(data));
               async_scope_.spawn(std::move(task));
@@ -271,7 +268,7 @@ static void RegisterAtExitCleanup() {
     if (!IsGlobalDefaultRegistryInitialized()) {
       return;
     }
-    logging::Error(
+    log::Error(
         "ex_actor is not shutdown when exiting main(), calling std::quick_exit(1) to force exit, resources may not be "
         "cleaned properly. To fix this error, call ex_actor::Shutdown() before main() exits.");
     std::quick_exit(1);
@@ -279,22 +276,22 @@ static void RegisterAtExitCleanup() {
 }
 
 void SetupGlobalHandlers() {
-  logging::InstallFallbackExceptionHandler();
+  InstallFallbackExceptionHandler();
   RegisterAtExitCleanup();
 }
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
 void Init(uint32_t thread_pool_size) {
-  internal::logging::Info("Initializing ex_actor in single-node mode with default scheduler, thread_pool_size={}",
-                          thread_pool_size);
+  internal::log::Info("Initializing ex_actor in single-node mode with default scheduler, thread_pool_size={}",
+                      thread_pool_size);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size);
   internal::SetupGlobalHandlers();
 }
 
 void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
-  internal::logging::Info(
+  internal::log::Info(
       "Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}, this_node_id={}, "
       "total_nodes={}",
       thread_pool_size, this_node_id, cluster_node_info.size());
@@ -306,14 +303,12 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
 
 void Shutdown() {
-  internal::logging::Info("Shutting down ex_actor.");
+  internal::log::Info("Shutting down ex_actor.");
   EXA_THROW_CHECK(internal::IsGlobalDefaultRegistryInitialized()) << "Not initialized.";
   global_default_registry.reset();
   resource_holder.clear();
 }
 
-void ConfigureLogging(const logging::LogConfig& config) {
-  internal::logging::GlobalLogger() = internal::logging::CreateLoggerUsingConfig(config);
-}
+void ConfigureLogging(const LogConfig& config) { internal::GlobalLogger() = internal::CreateLoggerUsingConfig(config); }
 
 }  // namespace ex_actor

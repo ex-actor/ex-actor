@@ -68,7 +68,7 @@ class WorkSharingThreadPoolBase {
     void start() noexcept {
       uint32_t priority = UINT32_MAX;
       if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
-                                   internal::util::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
+                                   internal::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
         auto env = stdexec::get_env(receiver);
         priority = ex_actor::get_priority(env);
       }
@@ -107,7 +107,7 @@ class WorkSharingThreadPoolBase {
 
   void EnqueueOperation(TypeEasedOperation* operation, uint32_t priority = 0) {
     if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
-                                 internal::util::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
+                                 internal::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
       queue_.Push(operation, priority);
     } else {
       queue_.Push(operation);
@@ -120,7 +120,7 @@ class WorkSharingThreadPoolBase {
   std::vector<std::jthread> workers_;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {
-    internal::util::SetThreadName("ws_pool_worker");
+    internal::SetThreadName("ws_pool_worker");
     while (!stop_token.stop_requested()) {
       auto optional_operation = queue_.Pop(/*timeout_ms=*/10);
       if (!optional_operation) {
@@ -131,8 +131,8 @@ class WorkSharingThreadPoolBase {
   }
 };
 
-using WorkSharingThreadPool = WorkSharingThreadPoolBase<internal::util::UnboundedBlockingQueue>;
-using PriorityThreadPool = WorkSharingThreadPoolBase<internal::util::UnboundedBlockingPriorityQueue>;
+using WorkSharingThreadPool = WorkSharingThreadPoolBase<internal::UnboundedBlockingQueue>;
+using PriorityThreadPool = WorkSharingThreadPoolBase<internal::UnboundedBlockingPriorityQueue>;
 
 class WorkStealingThreadPool : public exec::static_thread_pool {
  public:

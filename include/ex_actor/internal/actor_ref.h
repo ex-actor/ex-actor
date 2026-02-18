@@ -32,7 +32,7 @@ class ActorRef {
   ActorRef() : is_empty_(true) {}
 
   ActorRef(uint32_t this_node_id, uint32_t node_id, uint64_t actor_id, TypeErasedActor* actor,
-           network::MessageBroker* message_broker)
+           MessageBroker* message_broker)
       : is_empty_(false),
         this_node_id_(this_node_id),
         node_id_(node_id),
@@ -47,7 +47,7 @@ class ActorRef {
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
   }
 
-  void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor, network::MessageBroker* message_broker) {
+  void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor, MessageBroker* message_broker) {
     this_node_id_ = this_node_id;
     type_erased_actor_ = actor;
     message_broker_ = message_broker;
@@ -90,7 +90,7 @@ class ActorRef {
   template <auto kMethod, class... Args>
   [[nodiscard]] auto Send(Args... args) const {
     // Add a fallback inline_scheduler for it.
-    return util::WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...));
+    return WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...));
   }
 
   /**
@@ -118,11 +118,11 @@ class ActorRef {
   uint32_t node_id_ = 0;
   uint64_t actor_id_ = 0;
   TypeErasedActor* type_erased_actor_ = nullptr;
-  network::MessageBroker* message_broker_ = nullptr;
+  MessageBroker* message_broker_ = nullptr;
 
   template <auto kMethod, class... Args>
   [[nodiscard]] auto SendInternal(Args... args) const
-      -> exec::task<typename decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type> {
+      -> exec::task<typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
     if (IsEmpty()) [[unlikely]] {
@@ -134,36 +134,35 @@ class ActorRef {
 
     // remote call
     EXA_THROW_CHECK(message_broker_ != nullptr) << "Message broker not set";
-    using Sig = reflect::Signature<decltype(kMethod)>;
-    serde::ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
+    using Sig = Signature<decltype(kMethod)>;
+    ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
         .args_tuple = typename Sig::DecayedArgsTupleType(std::move(args)...)};
-    auto serialized_args = serde::Serialize(method_call_args);
-    std::string handler_key = reflect::GetUniqueNameForFunction<kMethod>();
-    serde::BufferWriter buffer_writer(network::ByteBufferType {sizeof(serde::NetworkRequestType) + sizeof(uint64_t) +
-                                                               sizeof(handler_key.size()) + handler_key.size() +
-                                                               sizeof(actor_id_) + serialized_args.size()});
+    auto serialized_args = Serialize(method_call_args);
+    std::string handler_key = GetUniqueNameForFunction<kMethod>();
+    BufferWriter buffer_writer(ByteBufferType {sizeof(NetworkRequestType) + sizeof(uint64_t) +
+                                               sizeof(handler_key.size()) + handler_key.size() + sizeof(actor_id_) +
+                                               serialized_args.size()});
     // protocol: [request_type][handler_key_len][handler_key][actor_id][ActorMethodCallArgs]
 
-    buffer_writer.WritePrimitive(serde::NetworkRequestType::kActorMethodCallRequest);
+    buffer_writer.WritePrimitive(NetworkRequestType::kActorMethodCallRequest);
     buffer_writer.WritePrimitive(handler_key.size());
     buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
     buffer_writer.WritePrimitive(actor_id_);
     buffer_writer.CopyFrom(serialized_args.data(), serialized_args.size());
 
-    using UnwrappedType = decltype(reflect::UnwrapReturnSenderIfNested<kMethod>())::type;
-    network::ByteBufferType response_buffer =
+    using UnwrappedType = decltype(UnwrapReturnSenderIfNested<kMethod>())::type;
+    ByteBufferType response_buffer =
         co_await message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut());
-    serde::BufferReader reader {std::move(response_buffer)};
-    auto type = reader.NextPrimitive<serde::NetworkReplyType>();
-    if (type == serde::NetworkReplyType::kActorMethodCallError) {
-      auto res = serde::Deserialize<serde::ActorMethodReturnError>(reader.Current(), reader.RemainingSize());
+    BufferReader reader {std::move(response_buffer)};
+    auto type = reader.NextPrimitive<NetworkReplyType>();
+    if (type == NetworkReplyType::kActorMethodCallError) {
+      auto res = Deserialize<ActorMethodReturnError>(reader.Current(), reader.RemainingSize());
       EXA_THROW << res.error;
     }
     if constexpr (std::is_void_v<UnwrappedType>) {
       co_return;
     } else {
-      auto res =
-          serde::Deserialize<serde::ActorMethodReturnValue<UnwrappedType>>(reader.Current(), reader.RemainingSize());
+      auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(reader.Current(), reader.RemainingSize());
       co_return res.return_value;
     }
   }

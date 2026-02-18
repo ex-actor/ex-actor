@@ -5,7 +5,7 @@
 #include "ex_actor/api.h"
 
 TEST(UtilTest, SemaphoreBasicUsageCase) {
-  ex_actor::util::Semaphore semaphore(0);
+  ex_actor::Semaphore semaphore(0);
   ex_actor::ex::sync_wait(semaphore.OnDrained());
   ASSERT_EQ(semaphore.Release(10), 10);
   std::jthread t([&semaphore]() {

@@ -45,7 +45,7 @@ struct NodeInfo {
 };
 }  // namespace ex_actor
 
-namespace ex_actor::internal::network {
+namespace ex_actor::internal {
 using ByteBufferType = zmq::message_t;
 using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -67,7 +67,7 @@ struct NetworkConfig {
 struct ClusterConfig {
   NodeInfo this_node;
   NodeInfo contact_node {};
-  network::NetworkConfig network_config {};
+  NetworkConfig network_config {};
 };
 
 struct GossipMessage {
@@ -77,7 +77,7 @@ struct GossipMessage {
 
 struct Waiter {
   explicit Waiter(TimePoint deadline) : sem(1), deadline(deadline) {}
-  ex_actor::util::Semaphore sem;
+  ex_actor::Semaphore sem;
   TimePoint deadline;
   std::atomic_bool arrive = false;
 };
@@ -153,7 +153,7 @@ class MessageBroker {
       bool expected = false;
       bool changed = started.compare_exchange_strong(expected, true);
       if (!changed) [[unlikely]] {
-        logging::Critical("MessageBroker Operation already started");
+        log::Critical("MessageBroker Operation already started");
         std::terminate();
       }
       message_broker->PushOperation(this);
@@ -230,15 +230,15 @@ class MessageBroker {
   size_t contact_node_index_ = 0;
 
   zmq::context_t context_ {/*io_threads_=*/1};
-  util::LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
+  LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
   DeferredOperations<ReplyOperation> node_id_to_pending_replies_;
   DeferredOperations<TypeErasedSendOperation*> node_id_to_pending_request_;
   zmq::socket_t recv_socket_ {context_, zmq::socket_type::dealer};
 
-  util::LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;
-  util::LockGuardedMap<uint64_t, TypeErasedSendOperation*> send_request_id_to_operation_;
-  util::LinearizableUnboundedMpscQueue<ReplyOperation> pending_reply_operations_;
-  util::LockGuardedMap<uint64_t, Identifier> received_request_id_to_identifier_;
+  LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;
+  LockGuardedMap<uint64_t, TypeErasedSendOperation*> send_request_id_to_operation_;
+  LinearizableUnboundedMpscQueue<ReplyOperation> pending_reply_operations_;
+  LockGuardedMap<uint64_t, Identifier> received_request_id_to_identifier_;
 
   std::jthread send_thread_;
   std::jthread recv_thread_;
@@ -249,9 +249,9 @@ class MessageBroker {
   TimePoint last_heartbeat_;
 };
 
-}  // namespace ex_actor::internal::network
+}  // namespace ex_actor::internal
 
 namespace ex_actor {
-using internal::network::ClusterConfig;
-using internal::network::NetworkConfig;
+using internal::ClusterConfig;
+using internal::NetworkConfig;
 }  // namespace ex_actor

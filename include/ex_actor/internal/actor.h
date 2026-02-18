@@ -200,7 +200,7 @@ class Actor : public TypeErasedActor {
 
  private:
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
-  util::LinearizableUnboundedMpscQueue<ActorMessage*> mailbox_;
+  LinearizableUnboundedMpscQueue<ActorMessage*> mailbox_;
   std::atomic_size_t pending_message_count_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
   exec::async_scope async_scope_;
@@ -223,8 +223,7 @@ class Actor : public TypeErasedActor {
     if (user_class_instance_ == nullptr) [[unlikely]] {
       // already destroyed
       size_t remaining = pending_message_count_.load(std::memory_order_acquire);
-      logging::Warn("{} is already destroyed, but triggered again, it has {} messages remaining", Description(),
-                    remaining);
+      log::Warn("{} is already destroyed, but triggered again, it has {} messages remaining", Description(), remaining);
       return;
     }
 
@@ -233,7 +232,7 @@ class Actor : public TypeErasedActor {
       activated_.store(false, std::memory_order_release);
       size_t remaining = pending_message_count_.fetch_sub(1, std::memory_order_acq_rel) - 1;
       if (remaining > 0) {
-        logging::Warn("{} is destroyed but still has {} messages remaining", Description(), remaining);
+        log::Warn("{} is destroyed but still has {} messages remaining", Description(), remaining);
       }
       return;
     }
@@ -271,7 +270,7 @@ ex::sender auto TypeErasedActor::CallActorMethod(Args... args) {
 
 template <auto kMethod, class... Args>
 ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::tuple<Args...> args_tuple) {
-  using Sig = reflect::Signature<decltype(kMethod)>;
+  using Sig = Signature<decltype(kMethod)>;
   using ReturnType = Sig::ReturnType;
   using UserClass = Sig::ClassType;
   constexpr bool kIsNested = ex::sender<ReturnType>;

@@ -55,7 +55,7 @@ TEST(LoggingTest, InitShutdownWithoutConfigureLogging) {
   ex_actor::Shutdown();
 
   // flush log
-  ex_actor::internal::logging::GlobalLogger()->flush();
+  ex_actor::internal::GlobalLogger()->flush();
 
   // Read log file and verify both Init and Shutdown logs are present
   std::string log_contents = ReadFile(log_file);
@@ -78,7 +78,7 @@ TEST(LoggingTest, ConfigureLoggingWithErrorLevel) {
 
   // Configure logging to file with Error level (should filter out Info logs)
   ex_actor::ConfigureLogging({
-      .level = ex_actor::logging::LogLevel::kError,
+      .level = ex_actor::LogLevel::kError,
       .log_file_path = log_file,
   });
 
@@ -87,7 +87,7 @@ TEST(LoggingTest, ConfigureLoggingWithErrorLevel) {
   ex_actor::Shutdown();
 
   // flush log
-  ex_actor::internal::logging::GlobalLogger()->flush();
+  ex_actor::internal::GlobalLogger()->flush();
 
   // Read log file - should be empty or not contain Info logs
   std::string log_contents = ReadFile(log_file);
@@ -112,7 +112,7 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
 
   // Configure logging to file with Info level initially
   ex_actor::ConfigureLogging({
-      .level = ex_actor::logging::LogLevel::kInfo,
+      .level = ex_actor::LogLevel::kInfo,
       .log_file_path = log_file,
   });
 
@@ -121,7 +121,7 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
 
   // Change log level to Error in the middle
   ex_actor::ConfigureLogging({
-      .level = ex_actor::logging::LogLevel::kError,
+      .level = ex_actor::LogLevel::kError,
       .log_file_path = log_file,
   });
 
@@ -129,7 +129,7 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
   ex_actor::Shutdown();
 
   // flush log
-  ex_actor::internal::logging::GlobalLogger()->flush();
+  ex_actor::internal::GlobalLogger()->flush();
 
   // Read log file
   std::string log_contents = ReadFile(log_file);

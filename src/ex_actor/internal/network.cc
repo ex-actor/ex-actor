@@ -32,7 +32,7 @@
 #include "ex_actor/internal/serialization.h"
 #include "ex_actor/internal/util.h"
 
-namespace ex_actor::internal::network {
+namespace ex_actor::internal {
 
 NodeInfoManager::NodeInfoManager(uint32_t this_node_id) : this_node_id_(this_node_id) {}
 
@@ -108,10 +108,10 @@ void NodeInfoManager::PrintAllNodesState(uint32_t this_node_id) {
   std::vector<NodeInfo> node_list {};
   node_list.reserve(node_id_to_state_.size());
   std::lock_guard lock(mutex_);
-  logging::Info("[PeerNodes] This node {}", this_node_id);
+  log::Info("[PeerNodes] This node {}", this_node_id);
   for (const auto& pair : node_id_to_state_) {
-    logging::Info("[PeerNodes] Node {}, address {}, state {} ", pair.first, pair.second.address,
-                  static_cast<uint8_t>(pair.second.liveness));
+    log::Info("[PeerNodes] Node {}, address {}, state {} ", pair.first, pair.second.address,
+              static_cast<uint8_t>(pair.second.liveness));
   }
 }
 
@@ -216,7 +216,7 @@ void NodeInfoManager::CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds t
       const auto& state = pair.second;
       if (state.liveness == Liveness::kAlive &&
           GetTimeMs() - state.last_seen >= std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count()) {
-        logging::Error("Node {} detects that node {} is dead, try to exit", this_node_id_, pair.first);
+        log::Error("Node {} detects that node {} is dead, try to exit", this_node_id_, pair.first);
         // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
         std::quick_exit(1);
       }
@@ -248,7 +248,7 @@ MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
   if (!this_node_.address.empty()) {
     recv_socket_.bind(this_node_.address);
     recv_socket_.set(zmq::sockopt::linger, 0);
-    logging::Info("Node {}'s recv socket bound to {}", this_node_.node_id, this_node_.address);
+    log::Info("Node {}'s recv socket bound to {}", this_node_.node_id, this_node_.address);
 
     if (!cluster_config.contact_node.address.empty()) {
       EXA_THROW_CHECK(this_node_.address != cluster_config.contact_node.address &&
@@ -270,7 +270,7 @@ MessageBroker::~MessageBroker() {
 
 void MessageBroker::ClusterAlignedStop() {
   // tell all other nodes: I'm going to quit
-  logging::Info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_.node_id);
+  log::Info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_.node_id);
   const auto node_list = node_mngr_.GetHealthyNodeList();
 
   for (const auto& node : node_list) {
@@ -284,15 +284,13 @@ void MessageBroker::ClusterAlignedStop() {
   stopped_.store(true, std::memory_order_release);
   node_mngr_.WaitAllNodesExit();
   ex::sync_wait(async_scope_.on_empty());
-  logging::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.",
-                this_node_.node_id);
+  log::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_.node_id);
   // stop io threads first
   send_thread_.request_stop();
   recv_thread_.request_stop();
   send_thread_.join();
   recv_thread_.join();
-  logging::Info("[Cluster Aligned Stop] Node {}'s io threads stopped, cluster aligned stop completed",
-                this_node_.node_id);
+  log::Info("[Cluster Aligned Stop] Node {}'s io threads stopped, cluster aligned stop completed", this_node_.node_id);
 }
 
 void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
@@ -303,7 +301,7 @@ void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
   auto& send_socket = node_id_to_send_socket_.At(node_id);
   send_socket.set(zmq::sockopt::linger, 0);
   send_socket.connect(node_address);
-  logging::Info("[Gossip] Node {} found node {}, connected to it at {}", this_node_.node_id, node_id, node_address);
+  log::Info("[Gossip] Node {} found node {}, connected to it at {}", this_node_.node_id, node_id, node_address);
 
   node_mngr_.Add(
       node_info.node_id,
@@ -332,7 +330,7 @@ void MessageBroker::EstablishConnection(const std::vector<NodeInfo>& node_list) 
       // Setting linger to 0 instructs the socket to discard any unsent messages immediately and return control to the
       // without waiting when it is closed.
       recv_socket_.set(zmq::sockopt::linger, 0);
-      logging::Info("Node {}'s recv socket bound to {}", this_node_.node_id, node.address);
+      log::Info("Node {}'s recv socket bound to {}", this_node_.node_id, node.address);
     }
     if (node.node_id < contact_node.node_id) {
       contact_node = node;
@@ -379,21 +377,20 @@ void MessageBroker::PushOperation(TypeErasedSendOperation* operation) {
 }
 
 void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
-  util::SetThreadName("snd_proc_loop");
+  SetThreadName("snd_proc_loop");
   while (!stop_token.stop_requested()) {
     bool any_item_pulled = false;
     while (auto optional_operation = pending_send_operations_.TryPop()) {
       auto* operation = optional_operation.value();
       auto response_node_id = operation->identifier.response_node_id;
       if (node_id_to_send_socket_.Contains(response_node_id)) {
-        auto serialized_identifier = internal::serde::Serialize(operation->identifier);
+        auto serialized_identifier = Serialize(operation->identifier);
         zmq::multipart_t multi;
         multi.addmem(serialized_identifier.data(), serialized_identifier.size());
         multi.add(std::move(operation->data));
         auto& send_socket = node_id_to_send_socket_.At(operation->identifier.response_node_id);
         EXA_THROW_CHECK(multi.send(send_socket));
         if (operation->identifier.flag == MessageFlag::kQuit || operation->identifier.flag == MessageFlag::kGossip) {
-          // quit operation,heartbeat and gossip has no response, complete it immediately
           operation->Complete(ByteBufferType {});
         }
         any_item_pulled = true;
@@ -406,7 +403,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
       auto request_node_id = reply_operation.identifier.request_node_id;
       if (node_id_to_send_socket_.Contains(request_node_id)) {
         auto& send_socket = node_id_to_send_socket_.At(request_node_id);
-        auto serialized_identifier = internal::serde::Serialize(reply_operation.identifier);
+        auto serialized_identifier = Serialize(reply_operation.identifier);
         zmq::multipart_t multi;
         multi.addmem(serialized_identifier.data(), serialized_identifier.size());
         multi.add(std::move(reply_operation.data));
@@ -424,7 +421,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
 }
 
 void MessageBroker::ReceiveProcessLoop(const std::stop_token& stop_token) {
-  util::SetThreadName("recv_proc_loop");
+  SetThreadName("recv_proc_loop");
   recv_socket_.set(zmq::sockopt::rcvtimeo, 100);
 
   while (!stop_token.stop_requested()) {
@@ -445,7 +442,7 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   zmq::message_t identifier_bytes = multi.pop();
   zmq::message_t data_bytes = multi.pop();
 
-  auto identifier = internal::serde::Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
+  auto identifier = Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
 
   // all received messages will update the last seen time;
   // For responses, the peer is response_node_id.
@@ -455,8 +452,8 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
 
   if (identifier.flag == MessageFlag::kQuit) {
     EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
-    logging::Info("[Cluster Aligned Stop] Node {} detects node {} is going to quit", this_node_.node_id,
-                  identifier.request_node_id);
+    log::Info("[Cluster Aligned Stop] Node {} detects node {} is going to quit", this_node_.node_id,
+              identifier.request_node_id);
     node_mngr_.DeactivateNode(identifier.request_node_id);
     return;
   }
@@ -487,8 +484,8 @@ void MessageBroker::SendGossip() {
     const auto node_list = node_mngr_.GetRandomPeers(std::max(1U, network_config_.gossip_fanout));
     auto message = node_mngr_.GenerateGossipMessage();
     message.emplace_back(this_node_, GetTimeMs());
-    auto serialized_message = serde::Serialize(serde::GossipMessage {message});
-    serde::BufferWriter writer {ByteBufferType(serialized_message.size())};
+    auto serialized_message = Serialize(GossipPayload {message});
+    BufferWriter writer {ByteBufferType(serialized_message.size())};
     writer.CopyFrom(serialized_message.data(), serialized_message.size());
     auto payload = std::move(writer).MoveBufferOut();
 
@@ -497,7 +494,6 @@ void MessageBroker::SendGossip() {
       per_node_payload.copy(payload);
       auto gossip =
           SendRequest(node.node_id, std::move(per_node_payload), MessageFlag::kGossip) | ex::then([](auto&& null) {});
-      // logging::Info("[Gossip] node {} send gossip to  node {}", this_node_.node_id, node.node_id);
       async_scope_.spawn(std::move(gossip));
     }
     last_heartbeat_ = std::chrono::steady_clock::now();
@@ -505,8 +501,7 @@ void MessageBroker::SendGossip() {
 }
 
 void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
-  const auto messages =
-      serde::Deserialize<serde::GossipMessage>(gossip_msg.data<uint8_t>(), gossip_msg.size()).messages;
+  const auto messages = Deserialize<GossipPayload>(gossip_msg.data<uint8_t>(), gossip_msg.size()).messages;
   for (const auto& msg : messages) {
     const auto& node = msg.node_info;
     const auto& last_seen = msg.last_seen;
@@ -531,4 +526,4 @@ exec::task<bool> MessageBroker::WaitNodeAlive(uint32_t node_id, std::chrono::mil
   co_return co_await node_mngr_.WaitNodeAlive(node_id, timeout);
 }
 
-}  // namespace ex_actor::internal::network
+}  // namespace ex_actor::internal

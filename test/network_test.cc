@@ -15,10 +15,10 @@
 
 #include "ex_actor/api.h"
 
-using ex_actor::internal::network::ByteBufferType;
-using ex_actor::internal::network::NodeInfoManager;
+using ex_actor::internal::ByteBufferType;
+using ex_actor::internal::NodeInfoManager;
 using Liveness = NodeInfoManager::Liveness;
-namespace logging = ex_actor::internal::logging;
+namespace logging = ex_actor::internal::log;
 
 TEST(NetworkTest, NodeInfoManagerBasicTest) {
   NodeInfoManager manager {0};
@@ -37,7 +37,7 @@ TEST(NetworkTest, NodeInfoManagerBasicTest) {
 
   auto gossip_messages = manager.GenerateGossipMessage();
   auto find_gossip = [&](uint32_t node_id) {
-    return std::ranges::find_if(gossip_messages, [node_id](const ex_actor::internal::network::GossipMessage& message) {
+    return std::ranges::find_if(gossip_messages, [node_id](const ex_actor::internal::GossipMessage& message) {
       return message.node_info.node_id == node_id;
     });
   };
@@ -104,13 +104,13 @@ TEST(NetworkTest, MessageBrokerClusterConfigTest) {
   auto test_once = [&node_list]() {
     std::barrier bar {3};
     auto node_main = [&bar](const std::vector<ex_actor::NodeInfo>& node_list, uint32_t node_id) {
-      ex_actor::internal::util::SetThreadName("node_" + std::to_string(node_id));
+      ex_actor::internal::SetThreadName("node_" + std::to_string(node_id));
       ex_actor::ClusterConfig config {.network_config {.gossip_interval = std::chrono::milliseconds {50}}};
       config.this_node = node_list.at(node_id);
       if (node_id != 0) {
         config.contact_node = node_list.front();
       }
-      ex_actor::internal::network::MessageBroker message_broker(
+      ex_actor::internal::MessageBroker message_broker(
           config, [&message_broker](uint64_t received_request_id, ByteBufferType data) {
             message_broker.ReplyRequest(received_request_id, std::move(data));
           });
@@ -152,17 +152,14 @@ TEST(NetworkTest, MessageBrokerDuplicateContactNodeTest) {
   };
 
   auto duplicate_node_id_and_addr = make_cluster_config("tcp://127.0.0.1:7201", "tcp://127.0.0.1:7201");
-  EXPECT_THAT(
-      [&]() -> void { (void)ex_actor::internal::network::MessageBroker(duplicate_node_id_and_addr, request_handler); },
-      testing::Throws<std::exception>(testing::Property(
-          &std::exception::what,
-          testing::HasSubstr("The local node has the same node ID or address as the contact node."))));
+  EXPECT_THAT([&]() -> void { (void)ex_actor::internal::MessageBroker(duplicate_node_id_and_addr, request_handler); },
+              testing::Throws<std::exception>(testing::Property(
+                  &std::exception::what,
+                  testing::HasSubstr("The local node has the same node ID or address as the contact node."))));
 
   auto duplicate_node_id_different_addr = make_cluster_config("tcp://127.0.0.1:7202", "tcp://127.0.0.1:7203");
   EXPECT_THAT(
-      [&]() -> void {
-        (void)ex_actor::internal::network::MessageBroker(duplicate_node_id_different_addr, request_handler);
-      },
+      [&]() -> void { (void)ex_actor::internal::MessageBroker(duplicate_node_id_different_addr, request_handler); },
       testing::Throws<std::exception>(testing::Property(
           &std::exception::what, testing::HasSubstr("The local node has the same node ID or address as the "
                                                     "contact node."))));
@@ -178,7 +175,7 @@ TEST(NetworkTest, MessageBrokerDuplicateClusterNodesTest) {
 
   auto create_node = [&request_handler](ex_actor::NodeInfo this_node, ex_actor::NodeInfo contact_node = {}) {
     ex_actor::ClusterConfig cluster_config {.this_node = std::move(this_node), .contact_node = std::move(contact_node)};
-    ex_actor::internal::network::MessageBroker message_broker(cluster_config, request_handler);
+    ex_actor::internal::MessageBroker message_broker(cluster_config, request_handler);
     std::this_thread::sleep_for(std::chrono::milliseconds {1000});
   };
 

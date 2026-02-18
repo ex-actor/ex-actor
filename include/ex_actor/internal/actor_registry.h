@@ -43,10 +43,10 @@ namespace ex_actor::internal {
 class ActorRegistryBackend {
  public:
   explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint32_t this_node_id,
-                                const std::vector<NodeInfo>& cluster_node_info, network::MessageBroker* message_broker);
+                                const std::vector<NodeInfo>& cluster_node_info, MessageBroker* message_broker);
 
   explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                                const network::ClusterConfig& cluster_config, network::MessageBroker* message_broker);
+                                const ClusterConfig& cluster_config, MessageBroker* message_broker);
 
   exec::task<void> AsyncDestroyAllActors();
 
@@ -94,17 +94,16 @@ class ActorRegistryBackend {
     }
 
     if constexpr (kCreateFn != nullptr) {
-      using CreateFnSig = reflect::Signature<decltype(kCreateFn)>;
+      using CreateFnSig = Signature<decltype(kCreateFn)>;
 
       // protocol: [message_type][handler_key_len][handler_key][ActorCreationArgs]
       typename CreateFnSig::DecayedArgsTupleType args_tuple {std::move(args)...};
-      serde::ActorCreationArgs<typename CreateFnSig::DecayedArgsTupleType> actor_creation_args {config,
-                                                                                                std::move(args_tuple)};
-      std::vector<char> serialized = serde::Serialize(actor_creation_args);
-      std::string handler_key = reflect::GetUniqueNameForFunction<kCreateFn>();
-      serde::BufferWriter buffer_writer(network::ByteBufferType {
-          serialized.size() + sizeof(uint64_t) + handler_key.size() + sizeof(serde::NetworkRequestType)});
-      buffer_writer.WritePrimitive(serde::NetworkRequestType::kActorCreationRequest);
+      ActorCreationArgs<typename CreateFnSig::DecayedArgsTupleType> actor_creation_args {config, std::move(args_tuple)};
+      std::vector<char> serialized = Serialize(actor_creation_args);
+      std::string handler_key = GetUniqueNameForFunction<kCreateFn>();
+      BufferWriter buffer_writer(
+          ByteBufferType {serialized.size() + sizeof(uint64_t) + handler_key.size() + sizeof(NetworkRequestType)});
+      buffer_writer.WritePrimitive(NetworkRequestType::kActorCreationRequest);
       buffer_writer.WritePrimitive(handler_key.size());
       // TODO optimize the copy here
       buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
@@ -114,11 +113,11 @@ class ActorRegistryBackend {
       // send to remote
       auto response_buffer =
           co_await message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut());
-      serde::BufferReader reader(std::move(response_buffer));
-      auto type = reader.template NextPrimitive<serde::NetworkReplyType>();
-      if (type == serde::NetworkReplyType::kActorCreationError) {
+      BufferReader reader(std::move(response_buffer));
+      auto type = reader.template NextPrimitive<NetworkReplyType>();
+      if (type == NetworkReplyType::kActorCreationError) {
         EXA_THROW << "Got actor creation error from remote node:"
-                  << serde::Deserialize<serde::ActorCreationError>(reader.Current(), reader.RemainingSize()).error;
+                  << Deserialize<ActorCreationError>(reader.Current(), reader.RemainingSize()).error;
       }
       auto actor_id = reader.template NextPrimitive<uint64_t>();
       co_return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, nullptr, message_broker_);
@@ -156,19 +155,18 @@ class ActorRegistryBackend {
       co_return GetActorRefByName<UserClass>(name);
     }
 
-    std::vector<char> serialized = serde::Serialize(serde::ActorLookUpRequest {name});
-    serde::BufferWriter<network::ByteBufferType> writer(
-        network::ByteBufferType(sizeof(serde::NetworkRequestType) + serialized.size()));
-    writer.WritePrimitive(serde::NetworkRequestType::kActorLookUpRequest);
+    std::vector<char> serialized = Serialize(ActorLookUpRequest {name});
+    BufferWriter<ByteBufferType> writer(ByteBufferType(sizeof(NetworkRequestType) + serialized.size()));
+    writer.WritePrimitive(NetworkRequestType::kActorLookUpRequest);
     writer.CopyFrom(serialized.data(), serialized.size());
 
     auto response_buffer =
-        co_await message_broker_->SendRequest(node_id, network::ByteBufferType {std::move(writer).MoveBufferOut()});
+        co_await message_broker_->SendRequest(node_id, ByteBufferType {std::move(writer).MoveBufferOut()});
 
     std::optional<uint64_t> actor_id = std::nullopt;
-    serde::BufferReader<network::ByteBufferType> reader(std::move(response_buffer));
-    auto type = reader.NextPrimitive<serde::NetworkReplyType>();
-    if (type == serde::NetworkReplyType::kActorLookUpReturn) {
+    BufferReader<ByteBufferType> reader(std::move(response_buffer));
+    auto type = reader.NextPrimitive<NetworkReplyType>();
+    if (type == NetworkReplyType::kActorLookUpReturn) {
       actor_id = reader.NextPrimitive<uint64_t>();
     }
 
@@ -178,7 +176,7 @@ class ActorRegistryBackend {
     co_return std::nullopt;
   }
 
-  exec::task<void> HandleNetworkRequest(uint64_t received_request_id, network::ByteBufferType request_buffer);
+  exec::task<void> HandleNetworkRequest(uint64_t received_request_id, ByteBufferType request_buffer);
   exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
 
  private:
@@ -186,18 +184,17 @@ class ActorRegistryBackend {
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   uint32_t this_node_id_ = 0;
-  network::MessageBroker* message_broker_ = nullptr;
+  MessageBroker* message_broker_ = nullptr;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
 
   void InitRandomNumGenerator();
   uint64_t GenerateRandomActorId();
   void ValidateNodeInfo(const std::vector<NodeInfo>& cluster_node_info);
-  serde::NetworkRequestType ParseMessageType(const network::ByteBufferType& buffer);
-  void ReplyError(uint64_t received_request_id, serde::NetworkReplyType reply_type, std::string error_msg);
-  void HandleActorCreationRequest(uint64_t received_request_id, serde::BufferReader<network::ByteBufferType> reader);
-  exec::task<void> HandleActorMethodCallRequest(uint64_t received_request_id,
-                                                serde::BufferReader<network::ByteBufferType> reader);
+  NetworkRequestType ParseMessageType(const ByteBufferType& buffer);
+  void ReplyError(uint64_t received_request_id, NetworkReplyType reply_type, std::string error_msg);
+  void HandleActorCreationRequest(uint64_t received_request_id, BufferReader<ByteBufferType> reader);
+  exec::task<void> HandleActorMethodCallRequest(uint64_t received_request_id, BufferReader<ByteBufferType> reader);
 };
 
 /**
@@ -227,10 +224,10 @@ class ActorRegistry {
       "Deprecated: use `ActorRegistry(uint32_t, const network::ClusterConfig&)` instead. "
       "This API will be removed in the future.")]]
   explicit ActorRegistry(uint32_t thread_pool_size, uint32_t this_node_id,
-                         const std::vector<NodeInfo>& cluster_node_info, network::NetworkConfig network_config = {})
+                         const std::vector<NodeInfo>& cluster_node_info, NetworkConfig network_config = {})
       : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, this_node_id, cluster_node_info, network_config) {}
 
-  explicit ActorRegistry(uint32_t thread_pool_size, const network::ClusterConfig& cluster_config)
+  explicit ActorRegistry(uint32_t thread_pool_size, const ClusterConfig& cluster_config)
       : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, cluster_config) {}
 
   /**
@@ -241,13 +238,12 @@ class ActorRegistry {
       "Deprecated: use `ActorRegistry(Scheduler, const network::ClusterConfig&, "
       "network::NetworkConfig)` instead. This API will be removed in the future.")]]
   explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         network::NetworkConfig network_config = {})
+                         NetworkConfig network_config = {})
       : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler), this_node_id,
                       cluster_node_info, network_config) {}
 
   template <ex::scheduler Scheduler>
-  explicit ActorRegistry(Scheduler scheduler, const network::ClusterConfig& cluster_config,
-                         network::NetworkConfig network_config = {})
+  explicit ActorRegistry(Scheduler scheduler, const ClusterConfig& cluster_config, NetworkConfig network_config = {})
       : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler),
                       cluster_config, network_config) {}
 
@@ -257,29 +253,29 @@ class ActorRegistry {
    * @brief Create actor at current node using default config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  reflect::AwaitableOf<ActorRef<UserClass>> auto CreateActor(Args... args) {
+  AwaitableOf<ActorRef<UserClass>> auto CreateActor(Args... args) {
     // resolve overload ambiguity
     constexpr exec::task<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(Args...) =
         &ActorRegistryBackend::CreateActor<UserClass, kCreateFn, Args...>;
 
-    return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(std::move(args)...));
+    return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(std::move(args)...));
   }
 
   /**
    * @brief Create an actor with a manually specified config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  reflect::AwaitableOf<ActorRef<UserClass>> auto CreateActor(ActorConfig config, Args... args) {
+  AwaitableOf<ActorRef<UserClass>> auto CreateActor(ActorConfig config, Args... args) {
     // resolve overload ambiguity
     constexpr exec::task<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(ActorConfig, Args...) =
         &ActorRegistryBackend::CreateActor<UserClass, kCreateFn, Args...>;
 
-    return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(config, std::move(args)...));
+    return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(config, std::move(args)...));
   }
 
   template <class UserClass>
-  reflect::AwaitableOf<void> auto DestroyActor(const ActorRef<UserClass>& actor_ref) {
-    return util::WrapSenderWithInlineScheduler(
+  AwaitableOf<void> auto DestroyActor(const ActorRef<UserClass>& actor_ref) {
+    return WrapSenderWithInlineScheduler(
         backend_actor_ref_.SendLocal<&ActorRegistryBackend::DestroyActor<UserClass>>(actor_ref));
   }
 
@@ -287,25 +283,25 @@ class ActorRegistry {
    * @brief Find the actor by name at current node.
    */
   template <class UserClass>
-  reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const std::string& name) const {
+  AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const std::string& name) const {
     // resolve overload ambiguity
     constexpr std::optional<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(const std::string& name) const =
         &ActorRegistryBackend::GetActorRefByName<UserClass>;
 
-    return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(name));
+    return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(name));
   }
 
   /**
    * @brief Find the actor by name at remote node.
    */
   template <class UserClass>
-  reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32_t& node_id,
-                                                                                  const std::string& name) const {
+  AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32_t& node_id,
+                                                                         const std::string& name) const {
     // resolve overload ambiguity
     constexpr exec::task<std::optional<ActorRef<UserClass>>> (ActorRegistryBackend::*kProcessFn)(
         const uint32_t& node_id, const std::string& name) const = &ActorRegistryBackend::GetActorRefByName<UserClass>;
 
-    return util::WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(node_id, name));
+    return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(node_id, name));
   }
 
   exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
@@ -315,17 +311,17 @@ class ActorRegistry {
   uint32_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
-  std::unique_ptr<network::MessageBroker> message_broker_;
+  std::unique_ptr<MessageBroker> message_broker_;
   Actor<ActorRegistryBackend> backend_actor_;
   ActorRef<ActorRegistryBackend> backend_actor_ref_;
   exec::async_scope async_scope_;
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                          uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         network::NetworkConfig network_config = {});
+                         NetworkConfig network_config = {});
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                         const network::ClusterConfig& cluster_config);
+                         const ClusterConfig& cluster_config);
 };
 
 }  // namespace ex_actor::internal
@@ -395,7 +391,7 @@ void Shutdown();
  * @brief Create actor at current node using default config.
  */
 template <class UserClass, auto kCreateFn = nullptr, class... Args>
-internal::reflect::AwaitableOf<ActorRef<UserClass>> auto Spawn(Args... args) {
+internal::AwaitableOf<ActorRef<UserClass>> auto Spawn(Args... args) {
   return internal::GetGlobalDefaultRegistry().CreateActor<UserClass, kCreateFn, Args...>(std::move(args)...);
 }
 
@@ -403,7 +399,7 @@ internal::reflect::AwaitableOf<ActorRef<UserClass>> auto Spawn(Args... args) {
  * @brief Create an actor with a manually specified config.
  */
 template <class UserClass, auto kCreateFn = nullptr, class... Args>
-internal::reflect::AwaitableOf<ActorRef<UserClass>> auto Spawn(ActorConfig config, Args... args) {
+internal::AwaitableOf<ActorRef<UserClass>> auto Spawn(ActorConfig config, Args... args) {
   return internal::GetGlobalDefaultRegistry().CreateActor<UserClass, kCreateFn, Args...>(config, std::move(args)...);
 }
 
@@ -411,7 +407,7 @@ internal::reflect::AwaitableOf<ActorRef<UserClass>> auto Spawn(ActorConfig confi
  * @brief Destroy an actor.
  */
 template <class UserClass>
-internal::reflect::AwaitableOf<void> auto DestroyActor(const ActorRef<UserClass>& actor_ref) {
+internal::AwaitableOf<void> auto DestroyActor(const ActorRef<UserClass>& actor_ref) {
   return internal::GetGlobalDefaultRegistry().DestroyActor<UserClass>(actor_ref);
 }
 
@@ -419,7 +415,7 @@ internal::reflect::AwaitableOf<void> auto DestroyActor(const ActorRef<UserClass>
  * @brief Find the actor by name at current node.
  */
 template <class UserClass>
-internal::reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const std::string& name) {
+internal::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const std::string& name) {
   return internal::GetGlobalDefaultRegistry().GetActorRefByName<UserClass>(name);
 }
 
@@ -427,15 +423,15 @@ internal::reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActor
  * @brief Find the actor by name at specified node.
  */
 template <class UserClass>
-internal::reflect::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32_t& node_id,
-                                                                                          const std::string& name) {
+internal::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32_t& node_id,
+                                                                                 const std::string& name) {
   return internal::GetGlobalDefaultRegistry().GetActorRefByName<UserClass>(node_id, name);
 }
 
 /**
  * @brief Configure the logging of ex_actor. Not thread-safe, please call it only when no logs are printing.
  */
-void ConfigureLogging(const logging::LogConfig& config = {});
+void ConfigureLogging(const LogConfig& config = {});
 }  // namespace ex_actor
 
 // -----------template function implementations-------------
@@ -443,7 +439,7 @@ void ConfigureLogging(const logging::LogConfig& config = {});
 namespace ex_actor {
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler) {
-  internal::logging::Info("Initializing ex_actor in single-node mode with custom scheduler.");
+  internal::log::Info("Initializing ex_actor in single-node mode with custom scheduler.");
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
   internal::SetupGlobalHandlers();
@@ -451,7 +447,7 @@ void Init(Scheduler scheduler) {
 
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
-  internal::logging::Info(
+  internal::log::Info(
       "Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}, total_nodes={}", this_node_id,
       cluster_node_info.size());
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
@@ -461,8 +457,8 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
 
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler, const ClusterConfig& cluster_config) {
-  internal::logging::Info("Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}",
-                          cluster_config.this_node.node_id);
+  internal::log::Info("Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}",
+                      cluster_config.this_node.node_id);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), cluster_config));
   internal::SetupGlobalHandlers();

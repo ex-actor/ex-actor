@@ -10,7 +10,7 @@
 #include "ex_actor/api.h"
 
 namespace ex = stdexec;
-namespace logging = ex_actor::internal::logging;
+namespace logging = ex_actor::internal::log;
 
 struct SkynetActor;
 

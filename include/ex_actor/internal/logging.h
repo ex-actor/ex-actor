@@ -21,7 +21,7 @@
 #include <rfl/to_view.hpp>
 #include <spdlog/spdlog.h>
 
-namespace ex_actor::logging {
+namespace ex_actor {
 enum class LogLevel : uint8_t {
   kDebug = 0,
   kInfo = 1,
@@ -35,14 +35,14 @@ struct LogConfig {
   // empty means print to stdout
   std::string log_file_path;
 };
-}  // namespace ex_actor::logging
+}  // namespace ex_actor
 
-namespace ex_actor::internal::logging {
+namespace ex_actor::internal {
 inline constexpr char kDefaultLoggerPattern[] = "[%Y-%m-%d %T.%e%z] [%^%L%$] [%t] %v";
 
-spdlog::level::level_enum ToSpdlogLevel(ex_actor::logging::LogLevel level);
+spdlog::level::level_enum ToSpdlogLevel(LogLevel level);
 
-std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const ex_actor::logging::LogConfig& config);
+std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const LogConfig& config);
 
 std::unique_ptr<spdlog::logger>& GlobalLogger();
 
@@ -78,52 +78,46 @@ struct ThrowStream : public std::exception {
   mutable std::string what_;
 };
 
-#define EXA_THROW throw ::ex_actor::internal::logging::ThrowStream() << __FILE__ << ":" << __LINE__ << " "
+#define EXA_THROW throw ::ex_actor::internal::ThrowStream() << __FILE__ << ":" << __LINE__ << " "
 
 #define EXA_THROW_IF(condition) \
   if (condition) [[unlikely]]   \
-  throw ::ex_actor::internal::logging::ThrowStream() << __FILE__ << ":" << __LINE__ << " `" << #condition << "` "
+  throw ::ex_actor::internal::ThrowStream() << __FILE__ << ":" << __LINE__ << " `" << #condition << "` "
 
-#define EXA_THROW_CHECK(condition)                   \
-  if (!(condition)) [[unlikely]]                     \
-  throw ::ex_actor::internal::logging::ThrowStream() \
+#define EXA_THROW_CHECK(condition)          \
+  if (!(condition)) [[unlikely]]            \
+  throw ::ex_actor::internal::ThrowStream() \
       << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #condition << "` is true, got false. "
 
-#define EXA_THROW_CHECK_EQ(val1, val2)                                                                                 \
-  if ((val1) != (val2)) [[unlikely]]                                                                                   \
-  throw ::ex_actor::internal::logging::ThrowStream()                                                                   \
-      << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 << " == " << #val2 << "`, got " << (val1) \
-      << " vs " << (val2) << ". "
+#define EXA_THROW_CHECK_EQ(val1, val2)                                                                             \
+  if ((val1) != (val2)) [[unlikely]]                                                                               \
+  throw ::ex_actor::internal::ThrowStream() << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 \
+                                            << " == " << #val2 << "`, got " << (val1) << " vs " << (val2) << ". "
 
-#define EXA_THROW_CHECK_LE(val1, val2)                                                                                 \
-  if ((val1) > (val2)) [[unlikely]]                                                                                    \
-  throw ::ex_actor::internal::logging::ThrowStream()                                                                   \
-      << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 << " <= " << #val2 << "`, got " << (val1) \
-      << " vs " << (val2) << ". "
+#define EXA_THROW_CHECK_LE(val1, val2)                                                                             \
+  if ((val1) > (val2)) [[unlikely]]                                                                                \
+  throw ::ex_actor::internal::ThrowStream() << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 \
+                                            << " <= " << #val2 << "`, got " << (val1) << " vs " << (val2) << ". "
 
-#define EXA_THROW_CHECK_LT(val1, val2)                                                                                \
-  if ((val1) >= (val2)) [[unlikely]]                                                                                  \
-  throw ::ex_actor::internal::logging::ThrowStream()                                                                  \
-      << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 << " < " << #val2 << "`, got " << (val1) \
-      << " vs " << (val2) << ". "
+#define EXA_THROW_CHECK_LT(val1, val2)                                                                             \
+  if ((val1) >= (val2)) [[unlikely]]                                                                               \
+  throw ::ex_actor::internal::ThrowStream() << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 \
+                                            << " < " << #val2 << "`, got " << (val1) << " vs " << (val2) << ". "
 
-#define EXA_THROW_CHECK_GE(val1, val2)                                                                                 \
-  if ((val1) < (val2)) [[unlikely]]                                                                                    \
-  throw ::ex_actor::internal::logging::ThrowStream()                                                                   \
-      << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 << " >= " << #val2 << "`, got " << (val1) \
-      << " vs " << (val2) << ". "
+#define EXA_THROW_CHECK_GE(val1, val2)                                                                             \
+  if ((val1) < (val2)) [[unlikely]]                                                                                \
+  throw ::ex_actor::internal::ThrowStream() << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 \
+                                            << " >= " << #val2 << "`, got " << (val1) << " vs " << (val2) << ". "
 
-#define EXA_THROW_CHECK_GT(val1, val2)                                                                                \
-  if ((val1) <= (val2)) [[unlikely]]                                                                                  \
-  throw ::ex_actor::internal::logging::ThrowStream()                                                                  \
-      << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 << " > " << #val2 << "`, got " << (val1) \
-      << " vs " << (val2) << ". "
+#define EXA_THROW_CHECK_GT(val1, val2)                                                                             \
+  if ((val1) <= (val2)) [[unlikely]]                                                                               \
+  throw ::ex_actor::internal::ThrowStream() << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 \
+                                            << " > " << #val2 << "`, got " << (val1) << " vs " << (val2) << ". "
 
-#define EXA_THROW_CHECK_NE(val1, val2)                                                                                 \
-  if ((val1) == (val2)) [[unlikely]]                                                                                   \
-  throw ::ex_actor::internal::logging::ThrowStream()                                                                   \
-      << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 << " != " << #val2 << "`, got " << (val1) \
-      << " vs " << (val2) << ". "
+#define EXA_THROW_CHECK_NE(val1, val2)                                                                             \
+  if ((val1) == (val2)) [[unlikely]]                                                                               \
+  throw ::ex_actor::internal::ThrowStream() << __FILE__ << ":" << __LINE__ << " Check failed, expected `" << #val1 \
+                                            << " != " << #val2 << "`, got " << (val1) << " vs " << (val2) << ". "
 
 template <class T>
 concept HasOstreamOperator = requires(T t, std::ostream& os) {
@@ -158,22 +152,32 @@ std::string JoinVarsNameValue(std::string_view names, T&& first, Args&&... remai
   return builder.str();
 }
 
-#define EXA_DUMP_VARS(...) ::ex_actor::internal::logging::JoinVarsNameValue(#__VA_ARGS__, __VA_ARGS__)
+#define EXA_DUMP_VARS(...) ::ex_actor::internal::JoinVarsNameValue(#__VA_ARGS__, __VA_ARGS__)
 
+}  // namespace ex_actor::internal
+
+namespace ex_actor::internal::log {
 template <typename... Args>
 inline void Info(spdlog::format_string_t<Args...> fmt, Args&&... args) {
-  logging::GlobalLogger()->info(fmt, std::forward<Args>(args)...);
+  internal::GlobalLogger()->info(fmt, std::forward<Args>(args)...);
 }
 template <typename... Args>
 inline void Warn(spdlog::format_string_t<Args...> fmt, Args&&... args) {
-  logging::GlobalLogger()->warn(fmt, std::forward<Args>(args)...);
+  internal::GlobalLogger()->warn(fmt, std::forward<Args>(args)...);
 }
 template <typename... Args>
 inline void Error(spdlog::format_string_t<Args...> fmt, Args&&... args) {
-  logging::GlobalLogger()->error(fmt, std::forward<Args>(args)...);
+  internal::GlobalLogger()->error(fmt, std::forward<Args>(args)...);
 }
 template <typename... Args>
 inline void Critical(spdlog::format_string_t<Args...> fmt, Args&&... args) {
-  logging::GlobalLogger()->critical(fmt, std::forward<Args>(args)...);
+  internal::GlobalLogger()->critical(fmt, std::forward<Args>(args)...);
 }
-}  // namespace ex_actor::internal::logging
+}  // namespace ex_actor::internal::log
+
+// Backward-compatibility aliases — these namespaces were removed in favor of ex_actor.
+// Use ex_actor::LogLevel and ex_actor::LogConfig directly.
+namespace ex_actor::logging {
+using LogLevel [[deprecated("Use ex_actor::LogLevel instead")]] = ex_actor::LogLevel;
+using LogConfig [[deprecated("Use ex_actor::LogConfig instead")]] = ex_actor::LogConfig;
+}  // namespace ex_actor::logging

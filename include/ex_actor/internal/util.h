@@ -31,7 +31,7 @@
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/logging.h"
 
-namespace ex_actor::util {
+namespace ex_actor {
 /**
  * @brief A std::execution style semaphore. support on_negative sender.
  */
@@ -107,9 +107,9 @@ class Semaphore {
   std::atomic_int64_t count_;
 };
 
-};  // namespace ex_actor::util
+};  // namespace ex_actor
 
-namespace ex_actor::internal::util {
+namespace ex_actor::internal {
 
 template <class T>
 struct LinearizableUnboundedMpscQueue {
@@ -288,11 +288,7 @@ class MoveOnlyAny {
   std::unique_ptr<AnyValueHolder> value_holder_;
 };
 
-#if defined(_WIN32)
-inline void SetThreadName(const std::string& name) {
-  // TODO
-}
-#elif defined(__linux__)
+#if defined(__linux__)
 #include <pthread.h>
 inline void SetThreadName(const std::string& name) { pthread_setname_np(pthread_self(), name.c_str()); }
 #else
@@ -302,4 +298,10 @@ inline void SetThreadName(const std::string&) {}
 inline auto WrapSenderWithInlineScheduler(auto task) {
   return std::move(task) | stdexec::write_env(ex::prop {stdexec::get_scheduler, stdexec::inline_scheduler {}});
 }
-}  // namespace ex_actor::internal::util
+}  // namespace ex_actor::internal
+
+// Backward-compatibility alias — this namespace was removed in favor of ex_actor.
+// Use ex_actor::Semaphore directly.
+namespace ex_actor::util {
+using Semaphore [[deprecated("Use ex_actor::Semaphore instead")]] = ex_actor::Semaphore;
+}  // namespace ex_actor::util

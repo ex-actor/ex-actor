@@ -23,12 +23,78 @@
 #include <spdlog/spdlog.h>
 
 #include "ex_actor/internal/actor_config.h"
-#include "ex_actor/internal/actor_ref_serialization/actor_ref_deserialization_info.h"
-#include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization_reader.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/reflect.h"
 
+// ===================================================
+// Add external context support to rfl::capnproto
+// ===================================================
+
+namespace rfl {
+namespace capnproto {
+template <class Ctx>
+class ReaderWithContext : public Reader {
+ public:
+  const Ctx& info;
+  explicit ReaderWithContext(const Ctx& info) : info(info) {}
+
+  template <class VariantType, class UnionReaderType>
+  Result<VariantType> read_union(const InputUnionType& u) const noexcept {
+    const auto opt_pair = identify_discriminant(u);
+    if (!opt_pair) {
+      return error("Could not get the discriminant.");
+    }
+    const auto& [field, disc] = *opt_pair;
+    return UnionReaderType::read(*this, disc, InputVarType {u.val_.get(field)});
+  }
+
+  std::optional<std::pair<capnp::StructSchema::Field, size_t>> identify_discriminant(
+      const InputUnionType& _union) const noexcept {
+    size_t ix = 0;
+    for (auto field : _union.val_.getSchema().getFields()) {
+      if (_union.val_.has(field)) {
+        return std::make_pair(field, ix);
+      }
+      ++ix;
+    }
+    return std::optional<std::pair<capnp::StructSchema::Field, size_t>>();
+  }
+};
+
+template <class T, class Ctx, class... Ps>
+auto read(const InputVarType& _obj, const Ctx& ctx) {
+  const ReaderWithContext r {ctx};
+  return rfl::parsing::Parser<ReaderWithContext<Ctx>, Writer, T, Processors<SnakeCaseToCamelCase, Ps...>>::read(r,
+                                                                                                                _obj);
+}
+
+template <class T, class Ctx, class... Ps>
+Result<internal::wrap_in_rfl_array_t<T>> read(const concepts::ByteLike auto* bytes, size_t size,
+                                              const Schema<T>& schema, const Ctx& ctx) {
+  const auto array_ptr = kj::ArrayPtr<const kj::byte>(internal::ptr_cast<const kj::byte*>(bytes), size);
+  auto input_stream = kj::ArrayInputStream(array_ptr);
+  auto message_reader = capnp::PackedMessageReader(input_stream);
+  const auto root_name = get_root_name<std::remove_cv_t<T>, Ps...>();
+  const auto root_schema = schema.value().getNested(root_name.c_str());
+  const auto input_var = InputVarType {message_reader.getRoot<capnp::DynamicStruct>(root_schema.asStruct())};
+  return read<T, Ctx, Ps...>(input_var, ctx);
+}
+}  // namespace capnproto
+};  // namespace rfl
+
+// ===================================================
+// ex_actor's own serialization related code
+// ===================================================
 namespace ex_actor::internal {
+
+class TypeErasedActor;
+class MessageBroker;
+
+struct ActorRefSerdeContext {
+  uint32_t this_node_id = 0;
+  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
+  MessageBroker* message_broker = nullptr;
+};
 
 template <class T>
 static auto GetCachedSchema() {
@@ -47,8 +113,8 @@ T Deserialize(const uint8_t* data, size_t size) {
 }
 
 template <class T>
-T Deserialize(const uint8_t* data, size_t size, const ActorRefDeserializationInfo& info) {
-  return rfl::capnproto::read<T>(data, size, GetCachedSchema<T>(), info).value();
+T Deserialize(const uint8_t* data, size_t size, const ActorRefSerdeContext& ctx) {
+  return rfl::capnproto::read<T, ActorRefSerdeContext>(data, size, GetCachedSchema<T>(), ctx).value();
 }
 
 enum class NetworkRequestType : uint8_t {
@@ -99,7 +165,7 @@ struct ActorLookUpRequest {
 };
 
 template <auto kFn>
-auto DeserializeFnArgs(const uint8_t* data, size_t size, const ActorRefDeserializationInfo& info) {
+auto DeserializeFnArgs(const uint8_t* data, size_t size, const ActorRefSerdeContext& info) {
   using Sig = Signature<decltype(kFn)>;
   if constexpr (std::is_member_function_pointer_v<decltype(kFn)>) {
     return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, size, info);

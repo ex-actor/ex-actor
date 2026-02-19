@@ -22,9 +22,7 @@
 #include <rfl/capnproto.hpp>
 #include <spdlog/spdlog.h>
 
-#include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/logging.h"
-#include "ex_actor/internal/reflect.h"
 
 // ===================================================
 // Add external context support to rfl::capnproto
@@ -87,15 +85,6 @@ Result<internal::wrap_in_rfl_array_t<T>> read(const concepts::ByteLike auto* byt
 // ===================================================
 namespace ex_actor::internal {
 
-class TypeErasedActor;
-class MessageBroker;
-
-struct ActorRefSerdeContext {
-  uint32_t this_node_id = 0;
-  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
-  MessageBroker* message_broker = nullptr;
-};
-
 template <class T>
 static auto GetCachedSchema() {
   thread_local auto schema = rfl::capnproto::to_schema<T>();
@@ -112,66 +101,9 @@ T Deserialize(const uint8_t* data, size_t size) {
   return rfl::capnproto::read<T>(data, size, GetCachedSchema<T>()).value();
 }
 
-template <class T>
-T Deserialize(const uint8_t* data, size_t size, const ActorRefSerdeContext& ctx) {
-  return rfl::capnproto::read<T, ActorRefSerdeContext>(data, size, GetCachedSchema<T>(), ctx).value();
-}
-
-enum class NetworkRequestType : uint8_t {
-  kActorCreationRequest = 0,
-  kActorMethodCallRequest,
-  kActorLookUpRequest,
-};
-
-enum class NetworkReplyType : uint8_t {
-  kActorCreationReturn = 0,
-  kActorCreationError,
-  kActorMethodCallReturn,
-  kActorMethodCallError,
-  kActorLookUpReturn,
-  kActorLookUpError,
-
-};
-
-template <class Tuple>
-struct ActorCreationArgs {
-  ActorConfig actor_config;
-  Tuple args_tuple;
-};
-
-struct ActorCreationError {
-  std::string error;
-};
-
-template <class Tuple>
-struct ActorMethodCallArgs {
-  Tuple args_tuple;
-};
-
-template <class T>
-struct ActorMethodReturnValue {
-  T return_value;
-};
-
-struct ActorMethodReturnError {
-  std::string error;
-};
-
-template <>
-struct ActorMethodReturnValue<void> {};
-
-struct ActorLookUpRequest {
-  std::string actor_name;
-};
-
-template <auto kFn>
-auto DeserializeFnArgs(const uint8_t* data, size_t size, const ActorRefSerdeContext& info) {
-  using Sig = Signature<decltype(kFn)>;
-  if constexpr (std::is_member_function_pointer_v<decltype(kFn)>) {
-    return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, size, info);
-  } else {
-    return Deserialize<ActorCreationArgs<typename Sig::DecayedArgsTupleType>>(data, size, info);
-  }
+template <class T, class Ctx>
+T Deserialize(const uint8_t* data, size_t size, const Ctx& ctx) {
+  return rfl::capnproto::read<T, Ctx>(data, size, GetCachedSchema<T>(), ctx).value();
 }
 
 struct MemoryBuf : std::streambuf {

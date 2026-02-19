@@ -22,12 +22,67 @@
 #include <rfl/capnproto.hpp>
 #include <spdlog/spdlog.h>
 
-#include "ex_actor/internal/actor_config.h"
-#include "ex_actor/internal/actor_ref_serialization/actor_ref_deserialization_info.h"
-#include "ex_actor/internal/actor_ref_serialization/actor_ref_serialization_reader.h"
 #include "ex_actor/internal/logging.h"
-#include "ex_actor/internal/reflect.h"
 
+// ===================================================
+// Add external context support to rfl::capnproto
+// ===================================================
+
+namespace rfl {
+namespace capnproto {
+template <class Ctx>
+class ReaderWithContext : public Reader {
+ public:
+  const Ctx& info;
+  explicit ReaderWithContext(const Ctx& info) : info(info) {}
+
+  template <class VariantType, class UnionReaderType>
+  Result<VariantType> read_union(const InputUnionType& u) const noexcept {
+    const auto opt_pair = identify_discriminant(u);
+    if (!opt_pair) {
+      return error("Could not get the discriminant.");
+    }
+    const auto& [field, disc] = *opt_pair;
+    return UnionReaderType::read(*this, disc, InputVarType {u.val_.get(field)});
+  }
+
+  std::optional<std::pair<capnp::StructSchema::Field, size_t>> identify_discriminant(
+      const InputUnionType& _union) const noexcept {
+    size_t ix = 0;
+    for (auto field : _union.val_.getSchema().getFields()) {
+      if (_union.val_.has(field)) {
+        return std::make_pair(field, ix);
+      }
+      ++ix;
+    }
+    return std::optional<std::pair<capnp::StructSchema::Field, size_t>>();
+  }
+};
+
+template <class T, class Ctx, class... Ps>
+auto read(const InputVarType& _obj, const Ctx& ctx) {
+  const ReaderWithContext r {ctx};
+  return rfl::parsing::Parser<ReaderWithContext<Ctx>, Writer, T, Processors<SnakeCaseToCamelCase, Ps...>>::read(r,
+                                                                                                                _obj);
+}
+
+template <class T, class Ctx, class... Ps>
+Result<internal::wrap_in_rfl_array_t<T>> read(const concepts::ByteLike auto* bytes, size_t size,
+                                              const Schema<T>& schema, const Ctx& ctx) {
+  const auto array_ptr = kj::ArrayPtr<const kj::byte>(internal::ptr_cast<const kj::byte*>(bytes), size);
+  auto input_stream = kj::ArrayInputStream(array_ptr);
+  auto message_reader = capnp::PackedMessageReader(input_stream);
+  const auto root_name = get_root_name<std::remove_cv_t<T>, Ps...>();
+  const auto root_schema = schema.value().getNested(root_name.c_str());
+  const auto input_var = InputVarType {message_reader.getRoot<capnp::DynamicStruct>(root_schema.asStruct())};
+  return read<T, Ctx, Ps...>(input_var, ctx);
+}
+}  // namespace capnproto
+};  // namespace rfl
+
+// ===================================================
+// ex_actor's own serialization related code
+// ===================================================
 namespace ex_actor::internal {
 
 template <class T>
@@ -46,70 +101,9 @@ T Deserialize(const uint8_t* data, size_t size) {
   return rfl::capnproto::read<T>(data, size, GetCachedSchema<T>()).value();
 }
 
-template <class T>
-T Deserialize(const uint8_t* data, size_t size, const ActorRefDeserializationInfo& info) {
-  return rfl::capnproto::read<T>(data, size, GetCachedSchema<T>(), info).value();
-}
-
-enum class NetworkRequestType : uint8_t {
-  kActorCreationRequest = 0,
-  kActorMethodCallRequest,
-  kActorLookUpRequest,
-};
-
-enum class NetworkReplyType : uint8_t {
-  kActorCreationReturn = 0,
-  kActorCreationError,
-  kActorMethodCallReturn,
-  kActorMethodCallError,
-  kActorLookUpReturn,
-  kActorLookUpError,
-
-};
-
-template <class Tuple>
-struct ActorCreationArgs {
-  ActorConfig actor_config;
-  Tuple args_tuple;
-};
-
-struct ActorCreationError {
-  std::string error;
-};
-
-template <class Tuple>
-struct ActorMethodCallArgs {
-  Tuple args_tuple;
-};
-
-template <class T>
-struct ActorMethodReturnValue {
-  T return_value;
-};
-
-struct ActorMethodReturnError {
-  std::string error;
-};
-
-template <>
-struct ActorMethodReturnValue<void> {};
-
-struct ActorLookUpRequest {
-  std::string actor_name;
-};
-
-struct GossipPayload {
-  std::vector<GossipMessage> messages;
-};
-
-template <auto kFn>
-auto DeserializeFnArgs(const uint8_t* data, size_t size, const ActorRefDeserializationInfo& info) {
-  using Sig = Signature<decltype(kFn)>;
-  if constexpr (std::is_member_function_pointer_v<decltype(kFn)>) {
-    return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, size, info);
-  } else {
-    return Deserialize<ActorCreationArgs<typename Sig::DecayedArgsTupleType>>(data, size, info);
-  }
+template <class T, class Ctx>
+T Deserialize(const uint8_t* data, size_t size, const Ctx& ctx) {
+  return rfl::capnproto::read<T, Ctx>(data, size, GetCachedSchema<T>(), ctx).value();
 }
 
 struct MemoryBuf : std::streambuf {

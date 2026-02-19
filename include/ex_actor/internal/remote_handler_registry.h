@@ -21,6 +21,8 @@
 #include <utility>
 
 #include "ex_actor/internal/actor.h"
+#include "ex_actor/internal/actor_ref.h"
+#include "ex_actor/internal/message.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"

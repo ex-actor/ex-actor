@@ -21,6 +21,7 @@
 
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/logging.h"
+#include "ex_actor/internal/message.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
@@ -189,8 +190,16 @@ struct hash<ex_actor::ActorRef<UserClass>> {
 // ==============================
 // rfl serialization support
 // ==============================
-namespace rfl {
 
+namespace ex_actor::internal {
+struct ActorRefSerdeContext {
+  uint32_t this_node_id = 0;
+  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
+  MessageBroker* message_broker = nullptr;
+};
+}  // namespace ex_actor::internal
+
+namespace rfl {
 template <typename U>
 struct Reflector<ex_actor::internal::ActorRef<U>> {
   struct ReflType {

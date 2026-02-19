@@ -15,7 +15,6 @@
 #pragma once
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -177,7 +176,7 @@ class ActorRegistryBackend {
   }
 
   exec::task<void> HandleNetworkRequest(uint64_t received_request_id, ByteBufferType request_buffer);
-  exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
   bool is_distributed_mode_ = false;
@@ -304,7 +303,7 @@ class ActorRegistry {
     return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(node_id, name));
   }
 
-  exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
   bool is_distributed_mode_;
@@ -373,7 +372,7 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
 
 void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config);
 
-exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
+exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
 /**
  * @brief Ask ex_actor to hold a resource, the resource won't be released until runtime is shut down.

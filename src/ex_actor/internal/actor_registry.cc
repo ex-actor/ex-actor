@@ -14,7 +14,6 @@
 
 #include "ex_actor/internal/actor_registry.h"
 
-#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <unordered_set>
@@ -207,8 +206,8 @@ exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(uint64_t rec
   }
 }
 
-exec::task<bool> ActorRegistryBackend::WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
-  co_return co_await message_broker_->WaitNodeAlive(node_id, timeout);
+exec::task<bool> ActorRegistryBackend::WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
+  co_return co_await message_broker_->WaitNodeAlive(node_id, timeout_ms);
 }
 
 // ----------------------ActorRegistry--------------------------
@@ -270,7 +269,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
                          message_broker_.get()) {
   for (const auto& node : cluster_node_info) {
     if (node.node_id != this_node_id) {
-      auto [connected] = stdexec::sync_wait(WaitNodeAlive(node.node_id, std::chrono::milliseconds {4000})).value();
+      auto [connected] = stdexec::sync_wait(WaitNodeAlive(node.node_id, 4000)).value();
       EXA_THROW_CHECK(connected) << "Can not connect to the node " << node.node_id;
     }
   }
@@ -300,11 +299,11 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
       backend_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &backend_actor_,
                          message_broker_.get()) {}
 
-exec::task<bool> ActorRegistry::WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
+exec::task<bool> ActorRegistry::WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
   if (node_id == this_node_id_) {
     co_return true;
   }
-  co_return co_await backend_actor_ref_.Send<&ActorRegistryBackend::WaitNodeAlive>(node_id, timeout);
+  co_return co_await backend_actor_ref_.Send<&ActorRegistryBackend::WaitNodeAlive>(node_id, timeout_ms);
 }
 
 }  // namespace ex_actor::internal
@@ -391,8 +390,8 @@ void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
 
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
 
-exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout) {
-  co_return co_await global_default_registry->WaitNodeAlive(node_id, timeout);
+exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
+  co_return co_await global_default_registry->WaitNodeAlive(node_id, timeout_ms);
 }
 
 void Shutdown() {

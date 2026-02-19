@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
@@ -36,18 +35,37 @@
 
 #include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/logging.h"
+#include "ex_actor/internal/message.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
 struct NodeInfo {
+  /// Unique ID for this node, should be unique within the cluster.
   uint32_t node_id = 0;
+  /// Format: "<protocol>://<IP>:<port>". For the current node, we'll open a listener on this address. For other nodes,
+  /// we'll connect to this address.
   std::string address;
+};
+
+struct NetworkConfig {
+  /// How long (ms) should we consider a node dead if we haven't received any messages from it
+  uint64_t heartbeat_timeout_ms = internal::kDefaultHeartbeatTimeoutMs;
+  /// Interval (ms) at which gossip messages are sent.
+  uint64_t gossip_interval_ms = internal::kDefaultGossipIntervalMs;
+  /// Number of peers to propagate each gossip message to per round.
+  size_t gossip_fanout = internal::kDefaultGossipFanout;
+};
+
+struct ClusterConfig {
+  NodeInfo this_node;
+  /// If you are the first node in the cluster, leave it empty. Otherwise, set it to any other node in the cluster.
+  NodeInfo contact_node;
+  NetworkConfig network_config;
 };
 }  // namespace ex_actor
 
 namespace ex_actor::internal {
 using ByteBufferType = zmq::message_t;
-using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
 enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kGossip };
 
@@ -58,44 +76,15 @@ struct Identifier {
   MessageFlag flag;
 };
 
-struct NetworkConfig {
-  std::chrono::milliseconds heartbeat_timeout = kDefaultHeartbeatTimeout;
-  std::chrono::milliseconds gossip_interval = kDefaultGossipInterval;
-  uint32_t gossip_fanout;
-};
-
-struct ClusterConfig {
-  NodeInfo this_node;
-  NodeInfo contact_node {};
-  NetworkConfig network_config {};
-};
-
-struct GossipMessage {
-  NodeInfo node_info;
-  uint64_t last_seen {};
-};
-
 struct Waiter {
-  explicit Waiter(TimePoint deadline) : sem(1), deadline(deadline) {}
+  explicit Waiter(uint64_t deadline_ms) : sem(1), deadline_ms(deadline_ms) {}
   ex_actor::Semaphore sem;
-  TimePoint deadline;
+  uint64_t deadline_ms;
   std::atomic_bool arrive = false;
 };
 
-inline uint64_t GetTimeMs() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-      .count();
-}
-
 class NodeInfoManager {
  public:
-  enum class Liveness : uint8_t { kAlive = 0, kConnecting, kQuitting, kDead };
-  struct NodeState {
-    Liveness liveness;
-    uint64_t last_seen;
-    std::string address;
-  };
-
   explicit NodeInfoManager(uint32_t this_node_id);
   void Add(uint32_t node_id, const NodeState& state);
   void RefreshLastSeen(uint32_t node_id, uint64_t last_seen);
@@ -105,12 +94,12 @@ class NodeInfoManager {
   void WaitAllNodesExit();
   std::vector<NodeInfo> GetHealthyNodeList();
   void PrintAllNodesState(uint32_t this_node_id);
-  std::vector<GossipMessage> GenerateGossipMessage();
+  GossipMessage GenerateGossipMessage();
   std::vector<NodeInfo> GetRandomPeers(size_t size);
-  exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
   void NotifyWaiters(uint32_t node_id);
   void NotifyAllWaiters();
-  void CheckHeartbeatAndExpireWaiters(std::chrono::milliseconds timeout);
+  void CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms);
 
  private:
   uint32_t this_node_id_;
@@ -182,7 +171,7 @@ class MessageBroker {
 
   bool CheckNodeConnected(uint32_t node_id);
 
-  exec::task<bool> WaitNodeAlive(uint32_t node_id, std::chrono::milliseconds timeout);
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
   void EstablishConnectionTo(const NodeInfo& node_info);
@@ -243,15 +232,10 @@ class MessageBroker {
   std::jthread send_thread_;
   std::jthread recv_thread_;
   std::atomic_bool stopped_ = false;
-  NodeInfoManager node_mngr_;
+  NodeInfoManager node_manager_;
   exec::async_scope async_scope_;
 
-  TimePoint last_heartbeat_;
+  uint64_t last_heartbeat_ms_;
 };
 
 }  // namespace ex_actor::internal
-
-namespace ex_actor {
-using internal::ClusterConfig;
-using internal::NetworkConfig;
-}  // namespace ex_actor

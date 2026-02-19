@@ -61,8 +61,8 @@ class DynamicConnectivityTest {
     config.this_node = {.node_id = this_node_id_,
                         .address = fmt::format("tcp://127.0.0.1:{}", kBasePort + this_node_id_)};
     config.network_config = {
-        .heartbeat_timeout = std::chrono::milliseconds {1000},
-        .gossip_interval = std::chrono::milliseconds {100},
+        .heartbeat_timeout_ms = 1000,
+        .gossip_interval_ms = 100,
         .gossip_fanout = cluster_size_ > 1 ? cluster_size_ / 2 : 1,
     };
 
@@ -91,8 +91,7 @@ class DynamicConnectivityTest {
       }
     }
 
-    auto [connected] =
-        stdexec::sync_wait(ex_actor::WaitNodeAlive(target_node_id, std::chrono::milliseconds {6000})).value();
+    auto [connected] = stdexec::sync_wait(ex_actor::WaitNodeAlive(target_node_id, 6000)).value();
     EXA_THROW_CHECK(connected) << fmt::format("Error: node {} can't connected to node {}", this_node_id_,
                                               target_node_id);
 

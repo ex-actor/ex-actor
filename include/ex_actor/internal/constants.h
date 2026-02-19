@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
-#include <chrono>
+#include <cstddef>
+#include <cstdint>
 namespace ex_actor {
 namespace internal {
 
 constexpr size_t kEmptyActorRefHashVal = 10086;
-constexpr auto kDefaultHeartbeatTimeout = std::chrono::milliseconds(5000);
-constexpr auto kDefaultGossipInterval = std::chrono::milliseconds(500);
+constexpr uint64_t kDefaultHeartbeatTimeoutMs = 5000;
+constexpr uint64_t kDefaultGossipIntervalMs = 500;
+constexpr size_t kDefaultGossipFanout = 3;
 
 }  // namespace internal
 }  // namespace ex_actor

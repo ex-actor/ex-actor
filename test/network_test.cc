@@ -17,14 +17,14 @@
 
 using ex_actor::internal::ByteBufferType;
 using ex_actor::internal::NodeInfoManager;
-using Liveness = NodeInfoManager::Liveness;
+using Liveness = ex_actor::internal::NodeState::Liveness;
 namespace logging = ex_actor::internal::log;
 
 TEST(NetworkTest, NodeInfoManagerBasicTest) {
   NodeInfoManager manager {0};
 
-  manager.Add(1, {.liveness = Liveness::kAlive, .last_seen = 100, .address = "tcp://127.0.0.1:7101"});
-  manager.Add(2, {.liveness = Liveness::kAlive, .last_seen = 200, .address = "tcp://127.0.0.1:7102"});
+  manager.Add(1, {.liveness = Liveness::kAlive, .last_seen = 100, .node_id = 1, .address = "tcp://127.0.0.1:7101"});
+  manager.Add(2, {.liveness = Liveness::kAlive, .last_seen = 200, .node_id = 2, .address = "tcp://127.0.0.1:7102"});
 
   EXPECT_TRUE(manager.Contains(1));
   EXPECT_TRUE(manager.Connected(1));
@@ -35,37 +35,37 @@ TEST(NetworkTest, NodeInfoManagerBasicTest) {
   manager.RefreshLastSeen(1, 150);
   manager.RefreshLastSeen(3, 300);
 
-  auto gossip_messages = manager.GenerateGossipMessage();
+  auto gossip_message = manager.GenerateGossipMessage();
+  const auto& node_states = gossip_message.node_states;
   auto find_gossip = [&](uint32_t node_id) {
-    return std::ranges::find_if(gossip_messages, [node_id](const ex_actor::internal::GossipMessage& message) {
-      return message.node_info.node_id == node_id;
-    });
+    return std::ranges::find_if(
+        node_states, [node_id](const ex_actor::internal::NodeState& state) { return state.node_id == node_id; });
   };
   auto node_1 = find_gossip(1);
   auto node_2 = find_gossip(2);
-  EXPECT_NE(node_1, gossip_messages.end());
-  EXPECT_NE(node_2, gossip_messages.end());
+  EXPECT_NE(node_1, node_states.end());
+  EXPECT_NE(node_2, node_states.end());
   EXPECT_EQ(node_1->last_seen, 150U);
   EXPECT_EQ(node_2->last_seen, 200U);
-  EXPECT_EQ(node_1->node_info.address, "tcp://127.0.0.1:7101");
-  EXPECT_EQ(node_2->node_info.address, "tcp://127.0.0.1:7102");
-  EXPECT_EQ(find_gossip(3), gossip_messages.end());
+  EXPECT_EQ(node_1->address, "tcp://127.0.0.1:7101");
+  EXPECT_EQ(node_2->address, "tcp://127.0.0.1:7102");
+  EXPECT_EQ(find_gossip(3), node_states.end());
 
   auto peers = manager.GetRandomPeers(10);
   for (const auto& node : peers) {
     EXPECT_TRUE(node.node_id == 1 || node.node_id == 2);
   }
 
-  auto [alive] = stdexec::sync_wait(manager.WaitNodeAlive(1, std::chrono::milliseconds {10})).value();
+  auto [alive] = stdexec::sync_wait(manager.WaitNodeAlive(1, 10)).value();
   EXPECT_TRUE(alive);
 
   manager.DeactivateNode(1);
   manager.DeactivateNode(2);
   EXPECT_TRUE(manager.Connected(1));
   EXPECT_TRUE(manager.Connected(2));
-  EXPECT_TRUE(manager.GenerateGossipMessage().empty());
+  EXPECT_TRUE(manager.GenerateGossipMessage().node_states.empty());
 
-  manager.Add(4, {.liveness = Liveness::kAlive, .last_seen = 100, .address = "tcp://127.0.0.1:7301"});
+  manager.Add(4, {.liveness = Liveness::kAlive, .last_seen = 100, .node_id = 4, .address = "tcp://127.0.0.1:7301"});
 
   EXPECT_THAT([&manager]() -> void { (void)manager.Connected(4, "tcp://127.0.0.1:7302"); },
               testing::Throws<std::exception>(testing::Property(
@@ -80,8 +80,7 @@ TEST(NetworkTest, NodeInfoManagerWaiterTest) {
   std::atomic_bool done = false;
 
   auto spawn_waiter = [&](uint32_t node_id) {
-    waiter_scope.spawn(manager.WaitNodeAlive(node_id, std::chrono::milliseconds {1000}) |
-                       stdexec::then([&woke_count](bool result) {
+    waiter_scope.spawn(manager.WaitNodeAlive(node_id, 1000) | stdexec::then([&woke_count](bool result) {
                          if (result) {
                            woke_count.fetch_add(1, std::memory_order_relaxed);
                          }
@@ -105,7 +104,7 @@ TEST(NetworkTest, MessageBrokerClusterConfigTest) {
     std::barrier bar {3};
     auto node_main = [&bar](const std::vector<ex_actor::NodeInfo>& node_list, uint32_t node_id) {
       ex_actor::internal::SetThreadName("node_" + std::to_string(node_id));
-      ex_actor::ClusterConfig config {.network_config {.gossip_interval = std::chrono::milliseconds {50}}};
+      ex_actor::ClusterConfig config {.network_config {.gossip_interval_ms = 50}};
       config.this_node = node_list.at(node_id);
       if (node_id != 0) {
         config.contact_node = node_list.front();
@@ -116,7 +115,7 @@ TEST(NetworkTest, MessageBrokerClusterConfigTest) {
           });
       uint32_t to_node_id = (node_id + 1) % node_list.size();
       // Waiting all the nodes find its contact node
-      stdexec::sync_wait(message_broker.WaitNodeAlive(to_node_id, std::chrono::milliseconds {500}));
+      stdexec::sync_wait(message_broker.WaitNodeAlive(to_node_id, 500));
       exec::async_scope scope;
       for (int i = 0; i < 5; ++i) {
         scope.spawn(message_broker.SendRequest(to_node_id, ByteBufferType(std::to_string(node_id))) |

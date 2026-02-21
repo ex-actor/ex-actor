@@ -306,7 +306,6 @@ class ActorRegistry {
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
-  bool is_distributed_mode_;
   uint32_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;

@@ -213,7 +213,7 @@ exec::task<bool> ActorRegistryBackend::WaitNodeAlive(uint32_t node_id, uint64_t 
 // ----------------------ActorRegistry--------------------------
 ActorRegistry::~ActorRegistry() {
   log::Info("Start to shutdown actor registry");
-  if (is_distributed_mode_) {
+  if (message_broker_ != nullptr) {
     message_broker_->ClusterAlignedStop();
   }
   ex::sync_wait(backend_actor_.CallActorMethod<&ActorRegistryBackend::AsyncDestroyAllActors>());
@@ -225,8 +225,7 @@ ActorRegistry::~ActorRegistry() {
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
                              NetworkConfig network_config)
-    : is_distributed_mode_(!cluster_node_info.empty()),
-      this_node_id_(this_node_id),
+    : this_node_id_(this_node_id),
       default_work_sharing_thread_pool_(thread_pool_size),
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
@@ -277,8 +276,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              const ClusterConfig& cluster_config)
-    : is_distributed_mode_(),
-      this_node_id_(cluster_config.this_node.node_id),
+    : this_node_id_(cluster_config.this_node.node_id),
       default_work_sharing_thread_pool_(thread_pool_size),
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(

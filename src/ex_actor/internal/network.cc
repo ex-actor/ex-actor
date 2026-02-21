@@ -45,13 +45,7 @@ NodeInfoManager::NodeInfoManager(uint32_t this_node_id) : this_node_id_(this_nod
 
 void NodeInfoManager::Add(uint32_t node_id, const NodeState& state) {
   std::lock_guard lock(mutex_);
-  auto [iter, inserted] = node_id_to_state_.try_emplace(node_id, state);
-  if (!inserted) {
-    iter->second.node_id = state.node_id;
-    iter->second.address = state.address;
-    iter->second.liveness = NodeState::Liveness::kAlive;
-    iter->second.last_seen = GetTimeMs();
-  }
+  node_id_to_state_[node_id] = state;
   alive_peers_ += 1;
 }
 
@@ -196,25 +190,6 @@ void NodeInfoManager::NotifyWaiters(uint32_t node_id) {
   }
 }
 
-void NodeInfoManager::NotifyAllWaiters() {
-  std::vector<std::shared_ptr<Waiter>> waiters {};
-  {
-    std::lock_guard lock(mutex_);
-    waiters.reserve(node_id_to_waiters_.size() * 2);
-    for (auto& pair : node_id_to_waiters_) {
-      for (auto& waiter : pair.second) {
-        waiters.push_back(std::move(waiter));
-      }
-    }
-    node_id_to_waiters_.clear();
-  }
-
-  for (auto& waiter : waiters) {
-    waiter->arrive.store(true, std::memory_order_release);
-    waiter->sem.Acquire(1);
-  }
-}
-
 void NodeInfoManager::CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms) {
   std::vector<std::shared_ptr<Waiter>> expired;
 
@@ -326,32 +301,6 @@ void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
   }
 
   node_manager_.NotifyWaiters(node_id);
-}
-
-void MessageBroker::EstablishConnection(const std::vector<NodeInfo>& node_list) {
-  // Bind router socket to this node's address
-  NodeInfo contact_node {.node_id = UINT32_MAX};
-
-  for (const auto& node : node_list) {
-    if (node.node_id == this_node_.node_id) {
-      this_node_.address = node.address;
-      recv_socket_.bind(node.address);
-      // Setting linger to 0 instructs the socket to discard any unsent messages immediately and return control to the
-      // without waiting when it is closed.
-      recv_socket_.set(zmq::sockopt::linger, 0);
-      log::Info("Node {}'s recv socket bound to {}", this_node_.node_id, node.address);
-    }
-    if (node.node_id < contact_node.node_id) {
-      contact_node = node;
-    }
-  }
-  if (this_node_.node_id == contact_node.node_id) {
-    return;
-  }
-
-  EXA_THROW_CHECK(!this_node_.address.empty())
-      << "Local address not found in node list, this_node_id: " << this_node_.node_id;
-  EstablishConnectionTo(contact_node);
 }
 
 MessageBroker::SendRequestSender MessageBroker::SendRequest(uint32_t to_node_id, ByteBufferType data,

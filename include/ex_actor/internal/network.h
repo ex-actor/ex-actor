@@ -98,7 +98,6 @@ class NodeInfoManager {
   std::vector<NodeInfo> GetRandomPeers(size_t size);
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
   void NotifyWaiters(uint32_t node_id);
-  void NotifyAllWaiters();
   void CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms);
 
  private:
@@ -175,7 +174,6 @@ class MessageBroker {
 
  private:
   void EstablishConnectionTo(const NodeInfo& node_info);
-  void EstablishConnection(const std::vector<NodeInfo>& node_list);
   void PushOperation(TypeErasedSendOperation* operation);
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
@@ -216,7 +214,6 @@ class MessageBroker {
   NetworkConfig network_config_;
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;
-  size_t contact_node_index_ = 0;
 
   zmq::context_t context_ {/*io_threads_=*/1};
   LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;

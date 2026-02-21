@@ -187,15 +187,14 @@ class MessageBroker {
     ByteBufferType data;
   };
 
-  template <typename Operation>
   class DeferredOperations {
    public:
-    void Add(const uint32_t& node_id, Operation operation) {
+    void Add(const uint32_t& node_id, ReplyOperation operation) {
       std::lock_guard lock {mutex_};
       map_[node_id].push_back(std::move(operation));
     }
 
-    std::vector<Operation> TryMoveOut(const uint32_t& node_id) {
+    std::vector<ReplyOperation> TryMoveOut(const uint32_t& node_id) {
       std::lock_guard lock {mutex_};
       auto it = map_.find(node_id);
       if (it == map_.end()) return {};
@@ -205,7 +204,7 @@ class MessageBroker {
     }
 
    private:
-    std::unordered_map<uint32_t, std::vector<Operation>> map_;
+    std::unordered_map<uint32_t, std::vector<ReplyOperation>> map_;
     std::mutex mutex_;
   };
 
@@ -217,8 +216,7 @@ class MessageBroker {
 
   zmq::context_t context_ {/*io_threads_=*/1};
   LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
-  DeferredOperations<ReplyOperation> node_id_to_pending_replies_;
-  DeferredOperations<TypeErasedSendOperation*> node_id_to_pending_request_;
+  DeferredOperations node_id_to_pending_replies_;
   zmq::socket_t recv_socket_ {context_, zmq::socket_type::dealer};
 
   LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;

@@ -291,13 +291,8 @@ void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
                                         .node_id = node_info.node_id,
                                         .address = node_info.address});
   auto pending_replies = node_id_to_pending_replies_.TryMoveOut(node_id);
-  auto pending_requests = node_id_to_pending_request_.TryMoveOut(node_id);
   for (auto&& reply : pending_replies) {
     pending_reply_operations_.Push(std::move(reply));
-  }
-
-  for (auto* request : pending_requests) {
-    pending_send_operations_.Push(request);
   }
 
   node_manager_.NotifyWaiters(node_id);
@@ -353,9 +348,10 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         }
         any_item_pulled = true;
       } else {
-        node_id_to_pending_request_.Add(response_node_id, operation);
+        EXA_THROW << fmt_lib::format("Node {} isn't connected", response_node_id);
       }
     }
+
     while (auto optional_reply_operation = pending_reply_operations_.TryPop()) {
       auto& reply_operation = optional_reply_operation.value();
       auto request_node_id = reply_operation.identifier.request_node_id;
@@ -369,10 +365,20 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         any_item_pulled = true;
       } else {
         node_id_to_pending_replies_.Add(request_node_id, std::move(reply_operation));
+        // If the response_node arrive before Add, this new added reply_operation won't be pushed into
+        // pending_reply_operations_ and will get stuck;
+        if (node_id_to_send_socket_.Contains(request_node_id)) {
+          auto pending_replies = node_id_to_pending_replies_.TryMoveOut(request_node_id);
+          for (auto&& reply : pending_replies) {
+            pending_reply_operations_.Push(std::move(reply));
+          }
+        }
       }
     }
+
+    SendGossip();
+
     if (!any_item_pulled) {
-      SendGossip();
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }

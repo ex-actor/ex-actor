@@ -25,17 +25,6 @@
 namespace ex_actor::internal {
 
 // ----------------------ActorRegistryBackend--------------------------
-ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint32_t this_node_id,
-                                           const std::vector<NodeInfo>& cluster_node_info,
-                                           MessageBroker* message_broker)
-    : is_distributed_mode_(!cluster_node_info.empty()),
-      scheduler_(std::move(scheduler)),
-      this_node_id_(this_node_id),
-      message_broker_(message_broker) {
-  InitRandomNumGenerator();
-  ValidateNodeInfo(cluster_node_info);
-}
-
 ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
                                            const ClusterConfig& cluster_config, MessageBroker* message_broker)
     : is_distributed_mode_(true),
@@ -45,7 +34,7 @@ ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorSchedu
   InitRandomNumGenerator();
   if (!cluster_config.contact_node.address.empty()) {
     EXA_THROW_CHECK(cluster_config.this_node.node_id != cluster_config.contact_node.node_id)
-        << "Duplicate node id:" << cluster_config.this_node.node_id;
+        << "Duplicate node id: " << cluster_config.this_node.node_id;
   }
 }
 
@@ -106,14 +95,6 @@ uint64_t ActorRegistryBackend::GenerateRandomActorId() {
     if (!actor_id_to_actor_.contains(id)) {
       return id;
     }
-  }
-}
-
-void ActorRegistryBackend::ValidateNodeInfo(const std::vector<NodeInfo>& cluster_node_info) {
-  std::unordered_set<uint32_t> set;
-  for (const auto& node : cluster_node_info) {
-    EXA_THROW_CHECK(!set.contains(node.node_id)) << "Duplicate node id: " << node.node_id;
-    set.insert(node.node_id);
   }
 }
 
@@ -223,58 +204,6 @@ ActorRegistry::~ActorRegistry() {
 }
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                             uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                             NetworkConfig network_config)
-    : this_node_id_(this_node_id),
-      default_work_sharing_thread_pool_(thread_pool_size),
-      scheduler_(scheduler != nullptr ? std::move(scheduler)
-                                      : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
-                                            default_work_sharing_thread_pool_.GetScheduler())),
-      message_broker_([&cluster_node_info, &network_config, this]() -> std::unique_ptr<MessageBroker> {
-        if (cluster_node_info.empty()) {
-          return nullptr;
-        }
-
-        NodeInfo this_node {.node_id = this_node_id_};
-        NodeInfo contact_node {.node_id = this_node_id_};
-        for (const auto& node : cluster_node_info) {
-          if (node.node_id < contact_node.node_id) {
-            contact_node.node_id = node.node_id;
-            contact_node.address = node.address;
-          }
-
-          if (node.node_id == this_node_id_) {
-            this_node.address = node.address;
-          }
-        }
-
-        ClusterConfig cluster_config {.this_node = std::move(this_node), .network_config = network_config};
-        if (cluster_config.this_node.node_id != contact_node.node_id) {
-          cluster_config.contact_node = std::move(contact_node);
-        }
-
-        return std::make_unique<MessageBroker>(
-            cluster_config,
-            /*request_handler=*/
-            [this](uint64_t received_request_id, ByteBufferType data) {
-              auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
-                  received_request_id, std::move(data));
-              async_scope_.spawn(std::move(task));
-            });
-      }()),
-      backend_actor_(scheduler_->Clone(), ActorConfig {.node_id = this_node_id_}, scheduler_->Clone(), this_node_id,
-                     cluster_node_info, message_broker_.get()),
-      backend_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &backend_actor_,
-                         message_broker_.get()) {
-  for (const auto& node : cluster_node_info) {
-    if (node.node_id != this_node_id) {
-      auto [connected] = stdexec::sync_wait(WaitNodeAlive(node.node_id, 4000)).value();
-      EXA_THROW_CHECK(connected) << "Can not connect to the node " << node.node_id;
-    }
-  }
-}
-
-ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              const ClusterConfig& cluster_config)
     : this_node_id_(cluster_config.this_node.node_id),
       default_work_sharing_thread_pool_(thread_pool_size),
@@ -373,8 +302,31 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
       "total_nodes={}",
       thread_pool_size, this_node_id, cluster_node_info.size());
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, this_node_id, cluster_node_info);
+
+  ClusterConfig cluster_config {};
+  NodeInfo this_node {.node_id = this_node_id};
+  NodeInfo contact_node {.node_id = this_node_id};
+  for (const auto& node : cluster_node_info) {
+    if (node.node_id < contact_node.node_id) {
+      contact_node.node_id = node.node_id;
+      contact_node.address = node.address;
+    }
+
+    if (node.node_id == this_node_id) {
+      this_node.address = node.address;
+    }
+  }
+  cluster_config.this_node = this_node;
+  cluster_config.contact_node = contact_node;
+
+  global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, cluster_config);
   internal::SetupGlobalHandlers();
+  for (const auto& node : cluster_node_info) {
+    if (node.node_id != this_node_id) {
+      auto [connected] = stdexec::sync_wait(WaitNodeAlive(node.node_id, 4000)).value();
+      EXA_THROW_CHECK(connected) << "Cannot connect to the node " << node.node_id;
+    }
+  }
 }
 
 void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {

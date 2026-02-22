@@ -107,7 +107,7 @@ class Semaphore {
   std::atomic_int64_t count_;
 };
 
-};  // namespace ex_actor
+}  // namespace ex_actor
 
 namespace ex_actor::internal {
 

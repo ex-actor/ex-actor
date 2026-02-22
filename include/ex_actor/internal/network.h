@@ -93,7 +93,6 @@ class NodeInfoManager {
   void DeactivateNode(uint32_t node_id);
   void WaitAllNodesExit();
   std::vector<NodeInfo> GetHealthyNodeList();
-  void PrintAllNodesState(uint32_t this_node_id);
   GossipMessage GenerateGossipMessage();
   std::vector<NodeInfo> GetRandomPeers(size_t size);
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
@@ -179,7 +178,6 @@ class MessageBroker {
   void ReceiveProcessLoop(const std::stop_token& stop_token);
   void HandleReceivedMessage(zmq::multipart_t multi);
   void SendGossip();
-  void SendFirstGossipMessage(const NodeInfo& contact_node);
   void HandleGossip(zmq::message_t gossip_msg);
 
   struct ReplyOperation {

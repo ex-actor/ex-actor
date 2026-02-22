@@ -41,9 +41,6 @@ namespace ex_actor::internal {
  */
 class ActorRegistryBackend {
  public:
-  explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint32_t this_node_id,
-                                const std::vector<NodeInfo>& cluster_node_info, MessageBroker* message_broker);
-
   explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
                                 const ClusterConfig& cluster_config, MessageBroker* message_broker);
 
@@ -189,7 +186,6 @@ class ActorRegistryBackend {
 
   void InitRandomNumGenerator();
   uint64_t GenerateRandomActorId();
-  void ValidateNodeInfo(const std::vector<NodeInfo>& cluster_node_info);
   NetworkRequestType ParseMessageType(const ByteBufferType& buffer);
   void ReplyError(uint64_t received_request_id, NetworkReplyType reply_type, std::string error_msg);
   void HandleActorCreationRequest(uint64_t received_request_id, BufferReader<ByteBufferType> reader);
@@ -219,13 +215,6 @@ class ActorRegistry {
   /**
    * @brief Construct in distributed mode, use the default work-sharing thread pool as the scheduler.
    */
-  [[deprecated(
-      "Deprecated: use `ActorRegistry(uint32_t, const network::ClusterConfig&)` instead. "
-      "This API will be removed in the future.")]]
-  explicit ActorRegistry(uint32_t thread_pool_size, uint32_t this_node_id,
-                         const std::vector<NodeInfo>& cluster_node_info, NetworkConfig network_config = {})
-      : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, this_node_id, cluster_node_info, network_config) {}
-
   explicit ActorRegistry(uint32_t thread_pool_size, const ClusterConfig& cluster_config)
       : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, cluster_config) {}
 
@@ -233,18 +222,9 @@ class ActorRegistry {
    * @brief Construct in distributed mode, use specified scheduler.
    */
   template <ex::scheduler Scheduler>
-  [[deprecated(
-      "Deprecated: use `ActorRegistry(Scheduler, const network::ClusterConfig&, "
-      "network::NetworkConfig)` instead. This API will be removed in the future.")]]
-  explicit ActorRegistry(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         NetworkConfig network_config = {})
-      : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler), this_node_id,
-                      cluster_node_info, network_config) {}
-
-  template <ex::scheduler Scheduler>
-  explicit ActorRegistry(Scheduler scheduler, const ClusterConfig& cluster_config, NetworkConfig network_config = {})
+  explicit ActorRegistry(Scheduler scheduler, const ClusterConfig& cluster_config)
       : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler),
-                      cluster_config, network_config) {}
+                      cluster_config) {}
 
   ~ActorRegistry();
 
@@ -315,10 +295,6 @@ class ActorRegistry {
   exec::async_scope async_scope_;
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                         uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info,
-                         NetworkConfig network_config = {});
-
-  explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                          const ClusterConfig& cluster_config);
 };
 
@@ -357,7 +333,7 @@ void Init(Scheduler scheduler);
     "This API will be removed in the future.")]]
 void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 
-void Init(uint32_t thread_pool_size, uint32_t this_node_id, const ClusterConfig& cluster_config);
+void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config);
 
 /**
  * @brief Init the global default registry in distributed mode, use specified scheduler. Not thread-safe.
@@ -365,11 +341,12 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const ClusterConfig&
 template <ex::scheduler Scheduler>
 [[deprecated(
     "Deprecated: use cluster_config-based initialization: `Init(uint32_t, const ClusterConfig&)` "
-    "or `ActorRegistry(Scheduler, const network::ClusterConfig&, network::NetworkConfig)`. "
+    "or `ActorRegistry(Scheduler, const ClusterConfig&)`. "
     "This API will be removed in the future.")]]
 void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 
-void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config);
+template <ex::scheduler Scheduler>
+void Init(Scheduler scheduler, const ClusterConfig& cluster_config);
 
 exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
@@ -449,8 +426,30 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
       "Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}, total_nodes={}", this_node_id,
       cluster_node_info.size());
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), this_node_id, cluster_node_info));
+  ClusterConfig cluster_config {};
+  NodeInfo this_node {.node_id = this_node_id};
+  NodeInfo contact_node {.node_id = this_node_id};
+  for (const auto& node : cluster_node_info) {
+    if (node.node_id < contact_node.node_id) {
+      contact_node.node_id = node.node_id;
+      contact_node.address = node.address;
+    }
+
+    if (node.node_id == this_node_id) {
+      this_node.address = node.address;
+    }
+  }
+  cluster_config.this_node = this_node;
+  cluster_config.contact_node = contact_node;
+
+  AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), cluster_config));
   internal::SetupGlobalHandlers();
+  for (const auto& node : cluster_node_info) {
+    if (node.node_id != this_node_id) {
+      auto [connected] = stdexec::sync_wait(WaitNodeAlive(node.node_id, 4000)).value();
+      EXA_THROW_CHECK(connected) << "Cannot connect to the node " << node.node_id;
+    }
+  }
 }
 
 template <ex::scheduler Scheduler>

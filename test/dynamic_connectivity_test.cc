@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "ex_actor/api.h"
-#include "spdlog/fmt/bundled/format.h"
 
 using std::chrono::milliseconds;
 
@@ -59,7 +58,7 @@ class DynamicConnectivityTest {
     ex_actor::ClusterConfig config;
     constexpr uint32_t kBasePort = 5000;
     config.this_node = {.node_id = this_node_id_,
-                        .address = fmt::format("tcp://127.0.0.1:{}", kBasePort + this_node_id_)};
+                        .address = ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", kBasePort + this_node_id_)};
     config.network_config = {
         .heartbeat_timeout_ms = 1000,
         .gossip_interval_ms = 100,
@@ -72,7 +71,7 @@ class DynamicConnectivityTest {
         contact_node_id = this_node_id_ - 1;
       }
       config.contact_node = {.node_id = contact_node_id,
-                             .address = fmt::format("tcp://127.0.0.1:{}", kBasePort + contact_node_id)};
+                             .address = ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", kBasePort + contact_node_id)};
     }
     return config;
   }
@@ -100,13 +99,14 @@ class DynamicConnectivityTest {
     auto [actor_ref] = stdexec::sync_wait(actor_creation_sender).value();
     auto actor_method_calling_sender = actor_ref.Send<&Echoer::Echo>(str);
     auto [method_calling_return_val] = stdexec::sync_wait(std::move(actor_method_calling_sender)).value();
-    EXA_THROW_CHECK(method_calling_return_val == str) << fmt::format("Error: local method calling error");
+    EXA_THROW_CHECK(method_calling_return_val == str) << ex_actor::fmt_lib::format("Error: local method calling error");
 
     auto remote_actor_creation_sender = ex_actor::Spawn<Echoer, &Echoer::Create>({.node_id = target_node_id});
     auto [remote_actor_ref] = stdexec::sync_wait(std::move(remote_actor_creation_sender)).value();
     auto remote_actor_calling_sender = remote_actor_ref.Send<&Echoer::Echo>(str);
     auto [remote_method_calling_return_val] = stdexec::sync_wait(std::move(remote_actor_calling_sender)).value();
-    EXA_THROW_CHECK(remote_method_calling_return_val == str) << fmt::format("Error: remote method calling error");
+    EXA_THROW_CHECK(remote_method_calling_return_val == str)
+        << ex_actor::fmt_lib::format("Error: remote method calling error");
   }
 
   uint32_t this_node_id_;

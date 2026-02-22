@@ -106,15 +106,6 @@ std::vector<NodeInfo> NodeInfoManager::GetHealthyNodeList() {
   return node_list;
 }
 
-void NodeInfoManager::PrintAllNodesState(uint32_t this_node_id) {
-  std::lock_guard lock(mutex_);
-  log::Info("[PeerNodes] This node {}", this_node_id);
-  for (const auto& pair : node_id_to_state_) {
-    log::Info("[PeerNodes] Node {}, address {}, state {} ", pair.first, pair.second.address,
-              static_cast<uint8_t>(pair.second.liveness));
-  }
-}
-
 GossipMessage NodeInfoManager::GenerateGossipMessage() {
   GossipMessage message;
   std::lock_guard lock(mutex_);

@@ -204,3 +204,16 @@ TEST(NetworkTest, MessageBrokerDuplicateClusterNodesTest) {
                "Nodes with the same node ID but different addresses exist in the cluster");
 #endif  // _WIN32
 }
+
+TEST(NetworkTest, MessageBrokerUnknownNodesTest) {
+  auto request_handler = [](uint64_t /*received_request_id*/, ByteBufferType /*data*/) {};
+
+  auto send_msg_to_unconnected_node = [&]() {
+    ex_actor::ClusterConfig cluster_config {.this_node = {.node_id = 0, .address = "tcp://127.0.0.1:5000"},
+                                            .contact_node = {}};
+    ex_actor::internal::MessageBroker message_broker(cluster_config, request_handler);
+    stdexec::sync_wait(message_broker.SendRequest(1, {}));
+  };
+
+  EXPECT_DEATH(send_msg_to_unconnected_node(), "trying to send request to unconnected node");
+}

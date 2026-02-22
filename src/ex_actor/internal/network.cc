@@ -95,8 +95,8 @@ void NodeInfoManager::WaitAllNodesExit() {
 
 std::vector<NodeInfo> NodeInfoManager::GetHealthyNodeList() {
   std::vector<NodeInfo> node_list {};
-  node_list.reserve(node_id_to_state_.size());
   std::lock_guard lock(mutex_);
+  node_list.reserve(node_id_to_state_.size());
   for (const auto& pair : node_id_to_state_) {
     const auto& liveness = pair.second.liveness;
     if (liveness != NodeState::Liveness::kDead && liveness != NodeState::Liveness::kConnecting) {
@@ -117,8 +117,8 @@ void NodeInfoManager::PrintAllNodesState(uint32_t this_node_id) {
 
 GossipMessage NodeInfoManager::GenerateGossipMessage() {
   GossipMessage message;
-  message.node_states.reserve(node_id_to_state_.size());
   std::lock_guard lock(mutex_);
+  message.node_states.reserve(node_id_to_state_.size());
   for (const auto& pair : node_id_to_state_) {
     if (pair.second.liveness == NodeState::Liveness::kAlive) {
       message.node_states.push_back({.liveness = NodeState::Liveness::kAlive,
@@ -132,7 +132,6 @@ GossipMessage NodeInfoManager::GenerateGossipMessage() {
 
 std::vector<NodeInfo> NodeInfoManager::GetRandomPeers(size_t size) {
   std::vector<NodeInfo> nodes;
-
   {
     std::lock_guard lock(mutex_);
     if (node_id_to_state_.empty()) {
@@ -348,7 +347,8 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         }
         any_item_pulled = true;
       } else {
-        EXA_THROW << fmt_lib::format("Node {} isn't connected", response_node_id);
+        EXA_THROW << fmt_lib::format("Node {} is trying to send request to unconnected node {}", this_node_.node_id,
+                                     response_node_id);
       }
     }
 
@@ -368,10 +368,8 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         // If the response_node arrive before Add, this new added reply_operation won't be pushed into
         // pending_reply_operations_ and will get stuck;
         if (node_id_to_send_socket_.Contains(request_node_id)) {
-          auto pending_replies = node_id_to_pending_replies_.TryMoveOut(request_node_id);
-          for (auto&& reply : pending_replies) {
-            pending_reply_operations_.Push(std::move(reply));
-          }
+          std::ranges::for_each(node_id_to_pending_replies_.TryMoveOut(request_node_id),
+                                [this](ReplyOperation& reply) { pending_reply_operations_.Push(std::move(reply)); });
         }
       }
     }

@@ -14,13 +14,19 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
-#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <functional>
-#include <latch>
+#include <mutex>
+#include <random>
+#include <string>
 #include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
@@ -28,19 +34,40 @@
 #include <zmq_addon.hpp>
 
 #include "ex_actor/internal/constants.h"
+#include "ex_actor/internal/logging.h"
+#include "ex_actor/internal/message.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
 struct NodeInfo {
+  /// Unique ID for this node, should be unique within the cluster.
   uint32_t node_id = 0;
+  /// Format: "<protocol>://<IP>:<port>". For the current node, we'll open a listener on this address. For other nodes,
+  /// we'll connect to this address.
   std::string address;
+};
+
+struct NetworkConfig {
+  /// How long (ms) should we consider a node dead if we haven't received any messages from it
+  uint64_t heartbeat_timeout_ms = internal::kDefaultHeartbeatTimeoutMs;
+  /// Interval (ms) at which gossip messages are sent.
+  uint64_t gossip_interval_ms = internal::kDefaultGossipIntervalMs;
+  /// Number of peers to propagate each gossip message to per round.
+  size_t gossip_fanout = internal::kDefaultGossipFanout;
+};
+
+struct ClusterConfig {
+  NodeInfo this_node;
+  /// If you are the first node in the cluster, leave it empty. Otherwise, set it to any other node in the cluster.
+  NodeInfo contact_node;
+  NetworkConfig network_config;
 };
 }  // namespace ex_actor
 
 namespace ex_actor::internal {
 using ByteBufferType = zmq::message_t;
 
-enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kHeartbeat };
+enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kGossip };
 
 struct Identifier {
   uint32_t request_node_id;
@@ -49,16 +76,44 @@ struct Identifier {
   MessageFlag flag;
 };
 
-struct HeartbeatConfig {
-  std::chrono::milliseconds heartbeat_timeout = kDefaultHeartbeatTimeout;
-  std::chrono::milliseconds heartbeat_interval = kDefaultHeartbeatInterval;
+struct Waiter {
+  explicit Waiter(uint64_t deadline_ms) : sem(1), deadline_ms(deadline_ms) {}
+  ex_actor::Semaphore sem;
+  uint64_t deadline_ms;
+  std::atomic_bool arrive = false;
+};
+
+class NodeInfoManager {
+ public:
+  explicit NodeInfoManager(uint32_t this_node_id);
+  void Add(uint32_t node_id, const NodeState& state);
+  void RefreshLastSeen(uint32_t node_id, uint64_t last_seen);
+  bool Connected(uint32_t node_id, const std::string& address = "");
+  bool Contains(uint32_t node_id);
+  void DeactivateNode(uint32_t node_id);
+  void WaitAllNodesExit();
+  std::vector<NodeInfo> GetHealthyNodeList();
+  GossipMessage GenerateGossipMessage();
+  std::vector<NodeInfo> GetRandomPeers(size_t size);
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
+  void NotifyWaiters(uint32_t node_id);
+  void CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms);
+
+ private:
+  uint32_t this_node_id_;
+  std::unordered_map<uint32_t, NodeState> node_id_to_state_;
+  std::unordered_map<uint32_t, std::vector<std::shared_ptr<Waiter>>> node_id_to_waiters_;
+  std::condition_variable cv_;
+  std::mutex mutex_;
+  std::mt19937 rng_ {std::random_device {}()};
+  uint32_t alive_peers_ = 0;
 };
 
 class MessageBroker {
  public:
-  explicit MessageBroker(std::vector<NodeInfo> node_list, uint32_t this_node_id,
-                         std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler,
-                         HeartbeatConfig heartbeat_config = {});
+  explicit MessageBroker(const ClusterConfig& cluster_config,
+                         std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler);
+
   ~MessageBroker();
 
   void ClusterAlignedStop();
@@ -112,29 +167,54 @@ class MessageBroker {
 
   void ReplyRequest(uint64_t received_request_id, ByteBufferType data);
 
+  bool CheckNodeConnected(uint32_t node_id);
+
+  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
+
  private:
-  void EstablishConnections();
+  void EstablishConnectionTo(const NodeInfo& node_info);
   void PushOperation(TypeErasedSendOperation* operation);
   void SendProcessLoop(const std::stop_token& stop_token);
   void ReceiveProcessLoop(const std::stop_token& stop_token);
   void HandleReceivedMessage(zmq::multipart_t multi);
-  void CheckHeartbeat();
-  void SendHeartbeat();
+  void SendGossip();
+  void HandleGossip(zmq::message_t gossip_msg);
 
   struct ReplyOperation {
     Identifier identifier;
     ByteBufferType data;
   };
 
-  std::vector<NodeInfo> node_list_;
-  uint32_t this_node_id_;
+  class DeferredOperations {
+   public:
+    void Add(const uint32_t& node_id, ReplyOperation operation) {
+      std::lock_guard lock {mutex_};
+      map_[node_id].push_back(std::move(operation));
+    }
+
+    std::vector<ReplyOperation> TryMoveOut(const uint32_t& node_id) {
+      std::lock_guard lock {mutex_};
+      auto it = map_.find(node_id);
+      if (it == map_.end()) return {};
+      auto operations = std::move(it->second);
+      map_.erase(it);
+      return operations;
+    }
+
+   private:
+    std::unordered_map<uint32_t, std::vector<ReplyOperation>> map_;
+    std::mutex mutex_;
+  };
+
+  NodeInfo this_node_ {};
   std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
-  HeartbeatConfig heartbeat_;
+  NetworkConfig network_config_;
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;
 
   zmq::context_t context_ {/*io_threads_=*/1};
   LockGuardedMap<uint32_t, zmq::socket_t> node_id_to_send_socket_;
+  DeferredOperations node_id_to_pending_replies_;
   zmq::socket_t recv_socket_ {context_, zmq::socket_type::dealer};
 
   LinearizableUnboundedMpscQueue<TypeErasedSendOperation*> pending_send_operations_;
@@ -145,16 +225,10 @@ class MessageBroker {
   std::jthread send_thread_;
   std::jthread recv_thread_;
   std::atomic_bool stopped_ = false;
-  std::latch quit_latch_;
+  NodeInfoManager node_manager_;
   exec::async_scope async_scope_;
 
-  using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
-  TimePoint last_heartbeat_;
-  std::unordered_map<uint32_t, TimePoint> last_seen_;
+  uint64_t last_heartbeat_ms_;
 };
 
 }  // namespace ex_actor::internal
-
-namespace ex_actor {
-using internal::HeartbeatConfig;
-}  // namespace ex_actor

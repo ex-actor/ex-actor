@@ -15,4 +15,5 @@ try:
     node1.wait(10)
 except subprocess.TimeoutExpired:
     print("Node0 is dead, but node1 is still running")
+    node1.kill()
     raise

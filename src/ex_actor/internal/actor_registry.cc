@@ -323,7 +323,8 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
   internal::SetupGlobalHandlers();
   for (const auto& node : cluster_node_info) {
     if (node.node_id != this_node_id) {
-      auto [connected] = stdexec::sync_wait(WaitNodeAlive(node.node_id, 4000)).value();
+      auto [connected] =
+          stdexec::sync_wait(WaitNodeAlive(node.node_id, internal::kDefaultWaitNodeAliveTimeoutMs)).value();
       EXA_THROW_CHECK(connected) << "Cannot connect to the node " << node.node_id;
     }
   }

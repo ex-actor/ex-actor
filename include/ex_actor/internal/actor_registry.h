@@ -25,6 +25,7 @@
 
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/actor_ref.h"
+#include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
@@ -446,7 +447,8 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
   internal::SetupGlobalHandlers();
   for (const auto& node : cluster_node_info) {
     if (node.node_id != this_node_id) {
-      auto [connected] = stdexec::sync_wait(WaitNodeAlive(node.node_id, 4000)).value();
+      auto [connected] =
+          stdexec::sync_wait(WaitNodeAlive(node.node_id, internal::kDefaultWaitNodeAliveTimeoutMs)).value();
       EXA_THROW_CHECK(connected) << "Cannot connect to the node " << node.node_id;
     }
   }

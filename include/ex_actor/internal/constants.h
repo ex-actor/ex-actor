@@ -20,6 +20,7 @@ namespace internal {
 constexpr size_t kEmptyActorRefHashVal = 10086;
 constexpr uint64_t kDefaultHeartbeatTimeoutMs = 5000;
 constexpr uint64_t kDefaultGossipIntervalMs = 500;
+constexpr uint64_t kDefaultWaitNodeAliveTimeoutMs = 4000;
 constexpr size_t kDefaultGossipFanout = 3;
 
 }  // namespace internal

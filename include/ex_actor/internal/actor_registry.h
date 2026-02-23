@@ -86,7 +86,7 @@ class ActorRegistryBackend {
                 << config.node_id << ", this_node_id=" << this_node_id_ << ", actor_type=" << typeid(UserClass).name();
     }
 
-    if (is_distributed_mode_) {
+    if (message_broker_ != nullptr) {
       EXA_THROW_CHECK(message_broker_->CheckNodeConnected(config.node_id)) << "Can't find node " << config.node_id;
     }
 
@@ -177,7 +177,6 @@ class ActorRegistryBackend {
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
-  bool is_distributed_mode_ = false;
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   uint32_t this_node_id_ = 0;

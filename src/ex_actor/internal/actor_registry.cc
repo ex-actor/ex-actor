@@ -16,7 +16,6 @@
 
 #include <cstdint>
 #include <exception>
-#include <unordered_set>
 
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
@@ -27,8 +26,7 @@ namespace ex_actor::internal {
 // ----------------------ActorRegistryBackend--------------------------
 ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
                                            const ClusterConfig& cluster_config, MessageBroker* message_broker)
-    : is_distributed_mode_(true),
-      scheduler_(std::move(scheduler)),
+    : scheduler_(std::move(scheduler)),
       this_node_id_(cluster_config.this_node.node_id),
       message_broker_(message_broker) {
   InitRandomNumGenerator();
@@ -211,6 +209,11 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
       message_broker_([&cluster_config, this]() -> std::unique_ptr<MessageBroker> {
+        if (cluster_config.this_node.address.empty()) {
+          EXA_THROW_CHECK(cluster_config.contact_node.address.empty())
+              << "Local address is empty while contact node address is non-empty.";
+          return nullptr;
+        }
         return std::make_unique<MessageBroker>(
             cluster_config,
             /*request_handler=*/

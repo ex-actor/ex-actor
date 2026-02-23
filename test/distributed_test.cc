@@ -319,3 +319,12 @@ TEST(DistributedTest, ActorRefSerializationTest) {
   node_0.join();
   node_1.join();
 }
+
+TEST(DistributedTest, IllegalClusterConfigTest) {
+  ex_actor::ClusterConfig cluster_config {.this_node = {.node_id = 0},
+                                          .contact_node = {.node_id = 1, .address = "tcp://127.0.0.1:5001"}};
+  EXPECT_THAT(
+      [&]() { ex_actor::ActorRegistry(1, cluster_config); },
+      Throws<std::exception>(Property(&std::exception::what,
+                                      HasSubstr("Local address is empty while contact node address is non-empty."))));
+}

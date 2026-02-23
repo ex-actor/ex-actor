@@ -2,6 +2,7 @@
 #include <cstdlib>
 
 #include "ex_actor/api.h"
+#include "ex_actor/internal/logging.h"
 
 namespace logging = ex_actor::internal::log;
 
@@ -25,7 +26,7 @@ namespace {
 exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
   uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
   bool connected = co_await ex_actor::WaitNodeAlive(remote_node_id, 5000);
-  assert(connected);
+  EXA_THROW_CHECK(connected) << "Cannot connected to node " << remote_node_id;
 
   // 2. Specify the factory function in registry.CreateActor
   auto ping_worker = co_await ex_actor::Spawn<PingWorker, &PingWorker::FactoryCreate>(

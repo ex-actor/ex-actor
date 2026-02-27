@@ -45,12 +45,22 @@ NodeInfoManager::NodeInfoManager(uint32_t this_node_id) : this_node_id_(this_nod
 
 void NodeInfoManager::Add(uint32_t node_id, const NodeState& state) {
   std::lock_guard lock(mutex_);
-  node_id_to_state_[node_id] = state;
-  alive_peers_ += 1;
+  auto [iter, inserted] = node_id_to_state_.try_emplace(node_id, state);
+  if (inserted) {
+    alive_peers_ += 1;
+  } else if (iter->second.liveness == NodeState::Liveness::kConnecting) {
+    // RefreshLastSeen() may insert a kConnecting entry with an empty address.
+    // Update it here once we actually establish a connection.
+    node_id_to_state_[node_id] = state;
+    alive_peers_ += 1;
+  }
 }
 
 void NodeInfoManager::RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
   std::lock_guard lock(mutex_);
+  // Every received message triggers this, but we might hear from a node we never connected to
+  // (e.g., a node about to quit whose info was gossiped). Insert a placeholder with an empty
+  // address to avoid errors.
   auto [iter, inserted] = node_id_to_state_.try_emplace(
       node_id, NodeState {.liveness = NodeState::Liveness::kConnecting, .last_seen = last_seen});
   if (!inserted) {

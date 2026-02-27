@@ -73,6 +73,21 @@ TEST(NetworkTest, NodeInfoManagerBasicTest) {
                   testing::HasSubstr("Nodes with the same node ID but different addresses exist in the cluster."))));
 }
 
+TEST(NetworkTest, NodeInfoManagerAddDuplicateThrowsTest) {
+  NodeInfoManager manager {0};
+
+  manager.Add(1, {.liveness = Liveness::kAlive, .last_seen = 100, .node_id = 1, .address = "tcp://127.0.0.1:7101"});
+
+  EXPECT_THAT(
+      [&manager]() -> void {
+        manager.Add(1,
+                    {.liveness = Liveness::kAlive, .last_seen = 200, .node_id = 1, .address = "tcp://127.0.0.1:7101"});
+      },
+      testing::Throws<std::exception>(testing::Property(
+          &std::exception::what,
+          testing::HasSubstr("Attempted to add an already-connected node to NodeInfoManager, node_id=1"))));
+}
+
 TEST(NetworkTest, NodeInfoManagerWaiterTest) {
   NodeInfoManager manager {0};
   std::atomic<int> woke_count = 0;

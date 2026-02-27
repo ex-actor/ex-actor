@@ -229,9 +229,7 @@ TEST(NetworkTest, MessageBrokerUnknownNodesTest) {
     ex_actor::internal::MessageBroker message_broker(cluster_config, request_handler);
     stdexec::sync_wait(message_broker.SendRequest(1, {}));
   };
-#ifdef _WIN32
-  EXPECT_DEATH(send_msg_to_unconnected_node(), "");
-#else
-  EXPECT_DEATH(send_msg_to_unconnected_node(), "trying to send request to unconnected node");
-#endif  // _WIN32
+  EXPECT_THAT(send_msg_to_unconnected_node,
+              testing::Throws<std::exception>(testing::Property(
+                  &std::exception::what, testing::HasSubstr("trying to send request to an unconnected node"))));
 }

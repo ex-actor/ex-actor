@@ -17,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -29,6 +30,7 @@
 #include <spdlog/spdlog.h>
 
 #include "ex_actor/internal/logging.h"
+#include "ex_actor/internal/message.h"
 #include "ex_actor/internal/serialization.h"
 #include "ex_actor/internal/util.h"
 
@@ -46,14 +48,18 @@ NodeInfoManager::NodeInfoManager(uint32_t this_node_id) : this_node_id_(this_nod
 void NodeInfoManager::Add(uint32_t node_id, const NodeState& state) {
   std::lock_guard lock(mutex_);
   auto [iter, inserted] = node_id_to_state_.try_emplace(node_id, state);
-  if (inserted) {
+
+  if (inserted || iter->second.liveness == NodeState::Liveness::kConnecting) {
+    if (!inserted) {
+      // RefreshLastSeen() may insert a kConnecting entry with an empty address.
+      // Update it here once we actually establish a connection.
+      iter->second = state;  // avoid extra lookup
+    }
     alive_peers_ += 1;
-  } else if (iter->second.liveness == NodeState::Liveness::kConnecting) {
-    // RefreshLastSeen() may insert a kConnecting entry with an empty address.
-    // Update it here once we actually establish a connection.
-    node_id_to_state_[node_id] = state;
-    alive_peers_ += 1;
+    return;
   }
+
+  EXA_THROW << fmt_lib::format("Attempted to add an already-connected node to NodeInfoManager, node_id={}", node_id);
 }
 
 void NodeInfoManager::RefreshLastSeen(uint32_t node_id, uint64_t last_seen) {
@@ -344,12 +350,15 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         auto& send_socket = node_id_to_send_socket_.At(operation->identifier.response_node_id);
         EXA_THROW_CHECK(multi.send(send_socket));
         if (operation->identifier.flag == MessageFlag::kQuit || operation->identifier.flag == MessageFlag::kGossip) {
+          send_request_id_to_operation_.Erase(operation->identifier.request_id_in_node);
           operation->Complete(ByteBufferType {});
         }
         any_item_pulled = true;
       } else {
-        EXA_THROW << fmt_lib::format("Node {} is trying to send request to unconnected node {}", this_node_.node_id,
-                                     response_node_id);
+        send_request_id_to_operation_.Erase(operation->identifier.request_id_in_node);
+        operation->SetError(std::make_exception_ptr(
+            ex_actor::internal::ThrowStream() << fmt_lib::format(
+                "Node {} is trying to send request to an unconnected node {}", this_node_.node_id, response_node_id)));
       }
     }
 

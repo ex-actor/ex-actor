@@ -121,9 +121,10 @@ class MessageBroker {
   // -------- std::execution sender adaption start--------
   struct TypeErasedSendOperation {
     virtual ~TypeErasedSendOperation() = default;
-    virtual void Complete(ByteBufferType /*response_data*/) {
-      EXA_THROW << "TypeErasedOperation::Complete should not be called";
-    }
+    virtual void Complete(ByteBufferType /*response_data*/) = 0;
+
+    virtual void SetError(std::exception_ptr /*error*/) = 0;
+
     TypeErasedSendOperation(Identifier identifier, ByteBufferType data, MessageBroker* message_broker)
         : identifier(identifier), data(std::move(data)), message_broker(message_broker) {}
     Identifier identifier;
@@ -146,9 +147,11 @@ class MessageBroker {
       message_broker->PushOperation(this);
     }
     void Complete(ByteBufferType response_data) override { receiver.set_value(std::move(response_data)); }
+    void SetError(std::exception_ptr error) override { receiver.set_error(std::move(error)); };
   };
   struct SendRequestSender : ex::sender_t {
-    using completion_signatures = ex::completion_signatures<ex::set_value_t(ByteBufferType)>;
+    using completion_signatures =
+        ex::completion_signatures<ex::set_value_t(ByteBufferType), ex::set_error_t(std::exception_ptr)>;
     Identifier identifier;
     ByteBufferType data;
     MessageBroker* message_broker;

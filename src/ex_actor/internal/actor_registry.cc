@@ -275,10 +275,7 @@ static void RegisterAtExitCleanup() {
   });
 }
 
-void SetupGlobalHandlers() {
-  InstallFallbackExceptionHandler();
-  RegisterAtExitCleanup();
-}
+void SetupGlobalHandlers() { RegisterAtExitCleanup(); }
 }  // namespace ex_actor::internal
 
 namespace ex_actor {

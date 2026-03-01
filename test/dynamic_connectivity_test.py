@@ -20,11 +20,11 @@ def check_nodes(node_list):
     for node in node_list:
         if node.poll() is None:
             clear_nodes(node_list)
-            raise RuntimeError("There is node in the cluster timeout")
+            raise RuntimeError("There is a node in the cluster hangs")
     for node in node_list:
         if node.returncode != 0:
             clear_nodes(node_list)
-            raise RuntimeError("There is error in the cluster")
+            raise RuntimeError("There are some nodes in the cluster exit with non-zero return code")
 
 
 def run_test(bin, test_type):

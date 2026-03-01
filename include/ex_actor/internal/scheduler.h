@@ -40,13 +40,13 @@ class WorkSharingThreadPoolBase {
     }
   }
 
-  struct TypeEasedOperation {
-    virtual ~TypeEasedOperation() = default;
+  struct TypeErasedOperation {
+    virtual ~TypeErasedOperation() = default;
     virtual void Execute() = 0;
   };
 
   template <ex::receiver R>
-  struct Operation : TypeEasedOperation {
+  struct Operation : TypeErasedOperation {
     Operation(R receiver, WorkSharingThreadPoolBase* thread_pool)
         : receiver(std::move(receiver)), thread_pool(thread_pool) {}
     R receiver;
@@ -67,8 +67,8 @@ class WorkSharingThreadPoolBase {
 
     void start() noexcept {
       uint32_t priority = UINT32_MAX;
-      if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
-                                   internal::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
+      if constexpr (std::is_same_v<Queue<TypeErasedOperation*>,
+                                   internal::UnboundedBlockingPriorityQueue<TypeErasedOperation*>>) {
         auto env = stdexec::get_env(receiver);
         priority = ex_actor::get_priority(env);
       }
@@ -105,9 +105,9 @@ class WorkSharingThreadPoolBase {
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
-  void EnqueueOperation(TypeEasedOperation* operation, uint32_t priority = 0) {
-    if constexpr (std::is_same_v<Queue<TypeEasedOperation*>,
-                                 internal::UnboundedBlockingPriorityQueue<TypeEasedOperation*>>) {
+  void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0) {
+    if constexpr (std::is_same_v<Queue<TypeErasedOperation*>,
+                                 internal::UnboundedBlockingPriorityQueue<TypeErasedOperation*>>) {
       queue_.Push(operation, priority);
     } else {
       queue_.Push(operation);
@@ -116,7 +116,7 @@ class WorkSharingThreadPoolBase {
 
  private:
   size_t thread_count_;
-  Queue<TypeEasedOperation*> queue_;
+  Queue<TypeErasedOperation*> queue_;
   std::vector<std::jthread> workers_;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {

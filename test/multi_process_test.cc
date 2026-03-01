@@ -2,6 +2,7 @@
 #include <cstdlib>
 
 #include "ex_actor/api.h"
+#include "ex_actor/internal/logging.h"
 
 namespace logging = ex_actor::internal::log;
 
@@ -24,6 +25,8 @@ EXA_REMOTE(&PingWorker::FactoryCreate, &PingWorker::Ping);
 namespace {
 exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
   uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
+  bool connected = co_await ex_actor::WaitNodeAlive(remote_node_id, 5000);
+  EXA_THROW_CHECK(connected) << "Cannot connected to node " << remote_node_id;
 
   // 2. Specify the factory function in registry.CreateActor
   auto ping_worker = co_await ex_actor::Spawn<PingWorker, &PingWorker::FactoryCreate>(
@@ -39,7 +42,11 @@ int main(int /*argc*/, char** argv) {
   uint32_t this_node_id = std::atoi(argv[1]);
   std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                        {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
-  ex_actor::Init(shared_pool->GetScheduler(), this_node_id, cluster_node_info);
+  ex_actor::ClusterConfig cluster_config {.this_node = cluster_node_info.at(this_node_id)};
+  if (this_node_id != cluster_node_info.front().node_id) {
+    cluster_config.contact_node = cluster_node_info.front();
+  }
+  ex_actor::Init(shared_pool->GetScheduler(), cluster_config);
   ex_actor::HoldResource(shared_pool);
   stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
   logging::Info("main exit, node id: {}", this_node_id);

@@ -15,9 +15,9 @@ ex_actor_test(util_test)
 ex_actor_test(scheduler_test)
 ex_actor_test(stress_test)
 ex_actor_test(shuffle_merge_test TIMEOUT 10)
-ex_actor_test(complex_api_test)
-ex_actor_test(distributed_test)
-ex_actor_test(network_test)
+ex_actor_test(complex_api_test TIMEOUT 5)
+ex_actor_test(distributed_test TIMEOUT 10)
+ex_actor_test(network_test TIMEOUT 15)
 ex_actor_test(skynet_test TIMEOUT 10)
 ex_actor_test(logging_test)
 
@@ -42,3 +42,21 @@ add_test(
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/heartbeat_test.py
           $<TARGET_FILE:heartbeat_test>)
 set_tests_properties(heartbeat_test PROPERTIES TIMEOUT 10)
+
+add_executable(dynamic_connectivity_test dynamic_connectivity_test.cc)
+target_link_libraries(dynamic_connectivity_test PRIVATE ex_actor)
+add_test(
+  NAME dynamic_connectivity_star_test
+  COMMAND
+    ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_connectivity_test.py
+    $<TARGET_FILE:dynamic_connectivity_test> star)
+set_tests_properties(dynamic_connectivity_star_test PROPERTIES TIMEOUT 20)
+
+add_test(
+  NAME dynamic_connectivity_chain_test
+  COMMAND
+    ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_connectivity_test.py
+    $<TARGET_FILE:dynamic_connectivity_test> chain)
+set_tests_properties(dynamic_connectivity_chain_test PROPERTIES TIMEOUT 20)

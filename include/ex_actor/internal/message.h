@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/reflect.h"
@@ -68,6 +69,18 @@ struct ActorMethodReturnValue<void> {};
 
 struct ActorLookUpRequest {
   std::string actor_name;
+};
+
+struct NodeState {
+  enum class Liveness : uint8_t { kAlive = 0, kConnecting, kQuitting, kDead };
+  Liveness liveness {Liveness::kAlive};
+  uint64_t last_seen = 0;
+  uint32_t node_id = 0;
+  std::string address;
+};
+
+struct GossipMessage {
+  std::vector<NodeState> node_states;
 };
 
 template <auto kFn, class Ctx>

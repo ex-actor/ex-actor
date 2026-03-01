@@ -91,8 +91,8 @@ class DynamicConnectivityTest {
     }
 
     auto [connected] = stdexec::sync_wait(ex_actor::WaitNodeAlive(target_node_id, 6000)).value();
-    EXA_THROW_CHECK(connected) << fmt::format("Error: node {} can't connected to node {}", this_node_id_,
-                                              target_node_id);
+    EXA_THROW_CHECK(connected) << ex_actor::fmt_lib::format("Error: node {} can't connected to node {}", this_node_id_,
+                                                            target_node_id);
 
     std::string str {"Hello"};
     auto actor_creation_sender = ex_actor::Spawn<Echoer>();

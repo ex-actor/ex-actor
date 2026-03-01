@@ -15,8 +15,12 @@ def clear_nodes(node_list):
         node.wait()
 
 
-def check_nodes(node_list):
-    time.sleep(15)
+def check_nodes(node_list, timeout=15):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if all(node.poll() is not None for node in node_list):
+            break
+        time.sleep(0.5)
     for node in node_list:
         if node.poll() is None:
             clear_nodes(node_list)

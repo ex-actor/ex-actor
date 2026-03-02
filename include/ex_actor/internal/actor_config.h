@@ -34,12 +34,12 @@ struct ActorConfig {
    * error. here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it
    * explicitly.
    *
-   * i.e. you can't `co_await CreateActor<X>(ActorConfig {.actor_name = "xxx"})` directly, instead, you
-   * should define a separate named variable for the config, and pass it to CreateActor(), like this:
+   * i.e. you can't `co_await Spawn<X>(ActorConfig {.actor_name = "xxx"})` directly, instead, you
+   * should define a separate named variable for the config, and pass it to Spawn(), like this:
    *
    * @code
    * ex_actor::ActorConfig config {.actor_name = "xxx"};
-   * auto actor = co_await CreateActor<X>(config);
+   * auto actor = co_await Spawn<X>(config);
    * @endcode
    *
    * see gcc's bug report: https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html

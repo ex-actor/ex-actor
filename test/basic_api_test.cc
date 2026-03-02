@@ -120,7 +120,7 @@ TEST(BasicApiTest, SpawnWithFullConfig) {
     i.e. you can't `co_await Spawn<X>(ActorConfig {.actor_name = "A"})`, instead, you should do this:
     ```cpp
     ex_actor::ActorConfig a_config {.actor_name = "A"};
-    auto remote_a = co_await registry.Spawn<A, &A::Create>(a_config);
+    auto remote_a = co_await registry.Spawn<&A::Create>(a_config);
     ```
 
     see https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html

@@ -18,17 +18,17 @@ class YourClass  {
   void Method2() {};
 };
 
-YourClass FactoryCreate() { return YourClass(); }
-EXA_REMOTE(&FactoryCreate, &YourClass::Method1, &YourClass::Method2);
+YourClass CreateFn() { return YourClass(); }
+EXA_REMOTE(&CreateFn, &YourClass::Method1, &YourClass::Method2);
 ```
 
 In the `EXA_REMOTE` macro, the first argument is a factory function to create your class, and the rest are the methods you want to call remotely.
 
 This is used to generate a serialization schema for network communication.
 
-Then instead of calling `ex_actor::Spawn<YourClass>()`, you need to call `ex_actor::Spawn<YourClass, &FactoryCreate>()`. Or an exception will be thrown.
+Then instead of calling `ex_actor::Spawn<YourClass>()`, you need to call `ex_actor::Spawn<&CreateFn>()`. Or an exception will be thrown.
 
-✨ **BTW, this can be simplified in C++26 using reflection, I'll implement it when C++26 is released, stay tuned!** ✨
+Such boilerplate is caused by the lack of reflection before C++26. It can be simplified in C++26 using reflection, we'll add a new set of APIs for C++26 in the future, stay tuned!
 
 ## Example
 
@@ -58,7 +58,7 @@ exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
   uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
 
   // 2. Specify the factory function in ex_actor::Spawn
-  auto ping_worker = co_await ex_actor::Spawn<PingWorker, &PingWorker::FactoryCreate>(
+  auto ping_worker = co_await ex_actor::Spawn<&PingWorker::FactoryCreate>(
       ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");

@@ -28,8 +28,8 @@ int main(int /*argc*/, char** argv) {
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
     bool connected = co_await ex_actor::WaitNodeAlive(remote_node_id, 5000);
     EXA_THROW_CHECK(connected) << "Cannot connect to node " << remote_node_id;
-    auto ping_worker = co_await ex_actor::Spawn<PingWorker, &PingWorker::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
+    auto ping_worker = co_await ex_actor::Spawn<&PingWorker::Create>(ex_actor::ActorConfig {.node_id = remote_node_id},
+                                                                     /*name=*/"Alice");
     // Loop forever
     while (true) {
       auto ping = ping_worker.Send<&PingWorker::Ping>("hello");

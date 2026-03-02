@@ -115,4 +115,7 @@ std::string GetUniqueNameForFunction() {
   // it's an unique mangled name. So it works now, maybe replace it with a more robust way in the future.
   return typeid(kFunc).name();
 }
+template <auto kFn>
+using FnReturnType = std::decay_t<typename Signature<decltype(kFn)>::ReturnType>;
+
 }  // namespace ex_actor::internal

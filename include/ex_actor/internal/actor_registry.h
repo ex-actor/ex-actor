@@ -48,95 +48,62 @@ class ActorRegistryBackend {
   exec::task<void> AsyncDestroyAllActors();
 
   /**
-   * @brief Spawn an actor at current node using default config.
+   * @brief Spawn a local actor with config.
    */
-  template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  exec::task<ActorRef<UserClass>> Spawn(Args... args) {
-    return Spawn<UserClass, kCreateFn>(ActorConfig {.node_id = this_node_id_}, std::move(args)...);
+  template <class UserClass, class... Args>
+  exec::task<ActorRef<UserClass>> SpawnWithClass(ActorConfig config, Args... args) {
+    if (config.node_id != this_node_id_) {
+      EXA_THROW << "Spawn<UserClass> can only be used to create local actor, to create remote actor, use "
+                   "Spawn<&CreateFn> to provide a fixed signature for remote actor creation. node_id="
+                << config.node_id << ", this_node_id=" << this_node_id_ << ", actor_type=" << typeid(UserClass).name();
+    }
+    co_return co_await SpawnLocal<UserClass>(std::move(config), std::move(args)...);
   }
 
   /**
-   * @brief Spawn an actor with a manually specified config.
+   * @brief Spawn an actor (local or remote) using a factory function, with config.
    */
-  template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  exec::task<ActorRef<UserClass>> Spawn(ActorConfig config, Args... args) {
-    if constexpr (kCreateFn != nullptr) {
-      static_assert(std::is_invocable_v<decltype(kCreateFn), Args...>,
-                    "Class can't be created by given args and create function");
-    }
+  template <auto kCreateFn, class... Args>
+  exec::task<ActorRef<FnReturnType<kCreateFn>>> SpawnWithCreateFn(ActorConfig config, Args... args) {
+    using UserClass = FnReturnType<kCreateFn>;
+    static_assert(std::is_invocable_v<decltype(kCreateFn), Args...>,
+                  "Class can't be created by given args and create function");
 
-    // local actor, create directly
     if (config.node_id == this_node_id_) {
-      auto actor_id = GenerateRandomActorId();
-      auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::move(args)...);
-      auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, actor.get(), message_broker_);
-      if (config.actor_name.has_value()) {
-        std::string& name = *config.actor_name;
-        EXA_THROW_CHECK(!actor_name_to_id_.contains(name))
-            << "An actor with the same name already exists, name=" << name;
-        actor_name_to_id_[name] = actor_id;
-      }
-      actor_id_to_actor_[actor_id] = std::move(actor);
-      co_return handle;
-    }
-
-    if constexpr (kCreateFn == nullptr) {
-      EXA_THROW << "Spawn<UserClass> can only be used to create local actor, to create remote actor, use "
-                   "Spawn<UserClass, kCreateFn> to provide a fixed signature for remote actor creation. node_id="
-                << config.node_id << ", this_node_id=" << this_node_id_ << ", actor_type=" << typeid(UserClass).name();
+      co_return co_await SpawnLocal<UserClass, kCreateFn>(std::move(config), std::move(args)...);
     }
 
     if (message_broker_ != nullptr) {
       EXA_THROW_CHECK(message_broker_->CheckNodeConnected(config.node_id)) << "Can't find node " << config.node_id;
     }
 
-    if constexpr (kCreateFn != nullptr) {
-      using CreateFnSig = Signature<decltype(kCreateFn)>;
+    using CreateFnSig = Signature<decltype(kCreateFn)>;
 
-      // protocol: [message_type][handler_key_len][handler_key][ActorCreationArgs]
-      typename CreateFnSig::DecayedArgsTupleType args_tuple {std::move(args)...};
-      ActorCreationArgs<typename CreateFnSig::DecayedArgsTupleType> actor_creation_args {config, std::move(args_tuple)};
-      std::vector<char> serialized = Serialize(actor_creation_args);
-      std::string handler_key = GetUniqueNameForFunction<kCreateFn>();
-      BufferWriter buffer_writer(
-          ByteBufferType {serialized.size() + sizeof(uint64_t) + handler_key.size() + sizeof(NetworkRequestType)});
-      buffer_writer.WritePrimitive(NetworkRequestType::kActorCreationRequest);
-      buffer_writer.WritePrimitive(handler_key.size());
-      // TODO optimize the copy here
-      buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
-      buffer_writer.CopyFrom(serialized.data(), serialized.size());
-      EXA_THROW_CHECK(buffer_writer.EndReached()) << "Buffer writer not ended";
+    // protocol: [message_type][handler_key_len][handler_key][ActorCreationArgs]
+    typename CreateFnSig::DecayedArgsTupleType args_tuple {std::move(args)...};
+    ActorCreationArgs<typename CreateFnSig::DecayedArgsTupleType> actor_creation_args {config, std::move(args_tuple)};
+    std::vector<char> serialized = Serialize(actor_creation_args);
+    std::string handler_key = GetUniqueNameForFunction<kCreateFn>();
+    BufferWriter buffer_writer(
+        ByteBufferType {serialized.size() + sizeof(uint64_t) + handler_key.size() + sizeof(NetworkRequestType)});
+    buffer_writer.WritePrimitive(NetworkRequestType::kActorCreationRequest);
+    buffer_writer.WritePrimitive(handler_key.size());
+    // TODO optimize the copy here
+    buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
+    buffer_writer.CopyFrom(serialized.data(), serialized.size());
+    EXA_THROW_CHECK(buffer_writer.EndReached()) << "Buffer writer not ended";
 
-      // send to remote
-      auto response_buffer =
-          co_await message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut());
-      BufferReader reader(std::move(response_buffer));
-      auto type = reader.template NextPrimitive<NetworkReplyType>();
-      if (type == NetworkReplyType::kActorCreationError) {
-        EXA_THROW << "Got actor creation error from remote node:"
-                  << Deserialize<ActorCreationError>(reader.Current(), reader.RemainingSize()).error;
-      }
-      auto actor_id = reader.template NextPrimitive<uint64_t>();
-      co_return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, nullptr, message_broker_);
+    // send to remote
+    auto response_buffer =
+        co_await message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut());
+    BufferReader reader(std::move(response_buffer));
+    auto type = reader.template NextPrimitive<NetworkReplyType>();
+    if (type == NetworkReplyType::kActorCreationError) {
+      EXA_THROW << "Got actor creation error from remote node:"
+                << Deserialize<ActorCreationError>(reader.Current(), reader.RemainingSize()).error;
     }
-  }
-
-  /**
-   * @brief Backward-compatible alias for Spawn.
-   */
-  template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  [[deprecated("Use Spawn() instead of CreateActor().")]]
-  exec::task<ActorRef<UserClass>> CreateActor(Args... args) {
-    return Spawn<UserClass, kCreateFn>(std::move(args)...);
-  }
-
-  /**
-   * @brief Backward-compatible alias for Spawn.
-   */
-  template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  [[deprecated("Use Spawn() instead of CreateActor().")]]
-  exec::task<ActorRef<UserClass>> CreateActor(ActorConfig config, Args... args) {
-    return Spawn<UserClass, kCreateFn>(std::move(config), std::move(args)...);
+    auto actor_id = reader.template NextPrimitive<uint64_t>();
+    co_return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, nullptr, message_broker_);
   }
 
   template <class UserClass>
@@ -195,6 +162,20 @@ class ActorRegistryBackend {
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
+  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  exec::task<ActorRef<UserClass>> SpawnLocal(ActorConfig config, Args... args) {
+    auto actor_id = GenerateRandomActorId();
+    auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::move(args)...);
+    auto handle = ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, actor.get(), message_broker_);
+    if (config.actor_name.has_value()) {
+      std::string& name = *config.actor_name;
+      EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists, name=" << name;
+      actor_name_to_id_[name] = actor_id;
+    }
+    actor_id_to_actor_[actor_id] = std::move(actor);
+    co_return handle;
+  }
+
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   uint32_t this_node_id_ = 0;
@@ -247,25 +228,43 @@ class ActorRegistry {
   ~ActorRegistry();
 
   /**
-   * @brief Spawn an actor at current node using default config.
+   * @brief Spawn a local actor at current node using default config.
    */
-  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  template <class UserClass, class... Args>
   AwaitableOf<ActorRef<UserClass>> auto Spawn(Args... args) {
-    // resolve overload ambiguity
-    constexpr exec::task<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(Args...) =
-        &ActorRegistryBackend::Spawn<UserClass, kCreateFn, Args...>;
-    return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(std::move(args)...));
+    return WrapSenderWithInlineScheduler(
+        backend_actor_ref_.SendLocal<&ActorRegistryBackend::SpawnWithClass<UserClass, Args...>>(
+            ActorConfig {.node_id = this_node_id_}, std::move(args)...));
   }
 
   /**
-   * @brief Spawn an actor with a manually specified config.
+   * @brief Spawn a local actor with a manually specified config.
    */
-  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  template <class UserClass, class... Args>
   AwaitableOf<ActorRef<UserClass>> auto Spawn(ActorConfig config, Args... args) {
-    // resolve overload ambiguity
-    constexpr exec::task<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(ActorConfig, Args...) =
-        &ActorRegistryBackend::Spawn<UserClass, kCreateFn, Args...>;
-    return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(config, std::move(args)...));
+    return WrapSenderWithInlineScheduler(
+        backend_actor_ref_.SendLocal<&ActorRegistryBackend::SpawnWithClass<UserClass, Args...>>(config,
+                                                                                                std::move(args)...));
+  }
+
+  /**
+   * @brief Spawn an actor (local or remote) using a factory function, at current node using default config.
+   */
+  template <auto kCreateFn, class... Args>
+  AwaitableOf<ActorRef<FnReturnType<kCreateFn>>> auto Spawn(Args... args) {
+    return WrapSenderWithInlineScheduler(
+        backend_actor_ref_.SendLocal<&ActorRegistryBackend::SpawnWithCreateFn<kCreateFn, Args...>>(
+            ActorConfig {.node_id = this_node_id_}, std::move(args)...));
+  }
+
+  /**
+   * @brief Spawn an actor (local or remote) using a factory function, with a manually specified config.
+   */
+  template <auto kCreateFn, class... Args>
+  AwaitableOf<ActorRef<FnReturnType<kCreateFn>>> auto Spawn(ActorConfig config, Args... args) {
+    return WrapSenderWithInlineScheduler(
+        backend_actor_ref_.SendLocal<&ActorRegistryBackend::SpawnWithCreateFn<kCreateFn, Args...>>(config,
+                                                                                                   std::move(args)...));
   }
 
   template <class UserClass>
@@ -304,16 +303,16 @@ class ActorRegistry {
   // ------------deprecated APIs------------
 
   /// Backward-compatible alias for Spawn.
-  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  template <class UserClass, class... Args>
   [[deprecated("Use Spawn() instead of CreateActor().")]]
   AwaitableOf<ActorRef<UserClass>> auto CreateActor(Args... args) {
-    return Spawn<UserClass, kCreateFn>(std::move(args)...);
+    return Spawn<UserClass, Args...>(std::move(args)...);
   }
   /// Backward-compatible alias for Spawn.
-  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  template <class UserClass, class... Args>
   [[deprecated("Use Spawn() instead of CreateActor().")]]
   AwaitableOf<ActorRef<UserClass>> auto CreateActor(ActorConfig config, Args... args) {
-    return Spawn<UserClass, kCreateFn>(std::move(config), std::move(args)...);
+    return Spawn<UserClass, Args...>(std::move(config), std::move(args)...);
   }
 
  private:
@@ -375,19 +374,35 @@ void HoldResource(std::shared_ptr<void> resource);
 void Shutdown();
 
 /**
- * @brief Spawn an actor at current node using default config.
+ * @brief Spawn a local actor at current node using default config.
  */
-template <class UserClass, auto kCreateFn = nullptr, class... Args>
+template <class UserClass, class... Args>
 internal::AwaitableOf<ActorRef<UserClass>> auto Spawn(Args... args) {
-  return internal::GetGlobalDefaultRegistry().Spawn<UserClass, kCreateFn, Args...>(std::move(args)...);
+  return internal::GetGlobalDefaultRegistry().Spawn<UserClass, Args...>(std::move(args)...);
 }
 
 /**
- * @brief Spawn an actor with a manually specified config.
+ * @brief Spawn a local actor with a manually specified config.
  */
-template <class UserClass, auto kCreateFn = nullptr, class... Args>
+template <class UserClass, class... Args>
 internal::AwaitableOf<ActorRef<UserClass>> auto Spawn(ActorConfig config, Args... args) {
-  return internal::GetGlobalDefaultRegistry().Spawn<UserClass, kCreateFn, Args...>(config, std::move(args)...);
+  return internal::GetGlobalDefaultRegistry().Spawn<UserClass, Args...>(config, std::move(args)...);
+}
+
+/**
+ * @brief Spawn an actor (local or remote) using a factory function, at current node using default config.
+ */
+template <auto kCreateFn, class... Args>
+internal::AwaitableOf<ActorRef<internal::FnReturnType<kCreateFn>>> auto Spawn(Args... args) {
+  return internal::GetGlobalDefaultRegistry().Spawn<kCreateFn, Args...>(std::move(args)...);
+}
+
+/**
+ * @brief Spawn an actor (local or remote) using a factory function, with a manually specified config.
+ */
+template <auto kCreateFn, class... Args>
+internal::AwaitableOf<ActorRef<internal::FnReturnType<kCreateFn>>> auto Spawn(ActorConfig config, Args... args) {
+  return internal::GetGlobalDefaultRegistry().Spawn<kCreateFn, Args...>(config, std::move(args)...);
 }
 
 /**

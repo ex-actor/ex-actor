@@ -23,7 +23,7 @@ struct TestActor {
 TEST(StressTest, ActorShouldOnlyBeExecutedInOneThread) {
   ex_actor::WorkSharingThreadPool thread_pool(4);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
-  auto [actor] = stdexec::sync_wait(registry.CreateActor<TestActor>()).value();
+  auto [actor] = stdexec::sync_wait(registry.Spawn<TestActor>()).value();
   std::vector<std::jthread> threads;
   threads.reserve(10);
   for (int i = 0; i < 4; ++i) {

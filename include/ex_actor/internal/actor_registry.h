@@ -48,18 +48,18 @@ class ActorRegistryBackend {
   exec::task<void> AsyncDestroyAllActors();
 
   /**
-   * @brief Create actor at current node using default config.
+   * @brief Spawn an actor at current node using default config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  exec::task<ActorRef<UserClass>> CreateActor(Args... args) {
-    return CreateActor<UserClass, kCreateFn>(ActorConfig {.node_id = this_node_id_}, std::move(args)...);
+  exec::task<ActorRef<UserClass>> Spawn(Args... args) {
+    return Spawn<UserClass, kCreateFn>(ActorConfig {.node_id = this_node_id_}, std::move(args)...);
   }
 
   /**
-   * @brief Create an actor with a manually specified config.
+   * @brief Spawn an actor with a manually specified config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  exec::task<ActorRef<UserClass>> CreateActor(ActorConfig config, Args... args) {
+  exec::task<ActorRef<UserClass>> Spawn(ActorConfig config, Args... args) {
     if constexpr (kCreateFn != nullptr) {
       static_assert(std::is_invocable_v<decltype(kCreateFn), Args...>,
                     "Class can't be created by given args and create function");
@@ -81,8 +81,8 @@ class ActorRegistryBackend {
     }
 
     if constexpr (kCreateFn == nullptr) {
-      EXA_THROW << "CreateActor<UserClass> can only be used to create local actor, to create remote actor, use "
-                   "CreateActor<UserClass, kCreateFn> to provide a fixed signature for remote actor creation. node_id="
+      EXA_THROW << "Spawn<UserClass> can only be used to create local actor, to create remote actor, use "
+                   "Spawn<UserClass, kCreateFn> to provide a fixed signature for remote actor creation. node_id="
                 << config.node_id << ", this_node_id=" << this_node_id_ << ", actor_type=" << typeid(UserClass).name();
     }
 
@@ -119,6 +119,24 @@ class ActorRegistryBackend {
       auto actor_id = reader.template NextPrimitive<uint64_t>();
       co_return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, nullptr, message_broker_);
     }
+  }
+
+  /**
+   * @brief Backward-compatible alias for Spawn.
+   */
+  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  [[deprecated("Use Spawn() instead of CreateActor().")]]
+  exec::task<ActorRef<UserClass>> CreateActor(Args... args) {
+    return Spawn<UserClass, kCreateFn>(std::move(args)...);
+  }
+
+  /**
+   * @brief Backward-compatible alias for Spawn.
+   */
+  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  [[deprecated("Use Spawn() instead of CreateActor().")]]
+  exec::task<ActorRef<UserClass>> CreateActor(ActorConfig config, Args... args) {
+    return Spawn<UserClass, kCreateFn>(std::move(config), std::move(args)...);
   }
 
   template <class UserClass>
@@ -229,26 +247,24 @@ class ActorRegistry {
   ~ActorRegistry();
 
   /**
-   * @brief Create actor at current node using default config.
+   * @brief Spawn an actor at current node using default config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  AwaitableOf<ActorRef<UserClass>> auto CreateActor(Args... args) {
+  AwaitableOf<ActorRef<UserClass>> auto Spawn(Args... args) {
     // resolve overload ambiguity
     constexpr exec::task<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(Args...) =
-        &ActorRegistryBackend::CreateActor<UserClass, kCreateFn, Args...>;
-
+        &ActorRegistryBackend::Spawn<UserClass, kCreateFn, Args...>;
     return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(std::move(args)...));
   }
 
   /**
-   * @brief Create an actor with a manually specified config.
+   * @brief Spawn an actor with a manually specified config.
    */
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  AwaitableOf<ActorRef<UserClass>> auto CreateActor(ActorConfig config, Args... args) {
+  AwaitableOf<ActorRef<UserClass>> auto Spawn(ActorConfig config, Args... args) {
     // resolve overload ambiguity
     constexpr exec::task<ActorRef<UserClass>> (ActorRegistryBackend::*kProcessFn)(ActorConfig, Args...) =
-        &ActorRegistryBackend::CreateActor<UserClass, kCreateFn, Args...>;
-
+        &ActorRegistryBackend::Spawn<UserClass, kCreateFn, Args...>;
     return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(config, std::move(args)...));
   }
 
@@ -284,6 +300,21 @@ class ActorRegistry {
   }
 
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
+
+  // ------------deprecated APIs------------
+
+  /// Backward-compatible alias for Spawn.
+  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  [[deprecated("Use Spawn() instead of CreateActor().")]]
+  AwaitableOf<ActorRef<UserClass>> auto CreateActor(Args... args) {
+    return Spawn<UserClass, kCreateFn>(std::move(args)...);
+  }
+  /// Backward-compatible alias for Spawn.
+  template <class UserClass, auto kCreateFn = nullptr, class... Args>
+  [[deprecated("Use Spawn() instead of CreateActor().")]]
+  AwaitableOf<ActorRef<UserClass>> auto CreateActor(ActorConfig config, Args... args) {
+    return Spawn<UserClass, kCreateFn>(std::move(config), std::move(args)...);
+  }
 
  private:
   uint32_t this_node_id_;
@@ -324,26 +355,7 @@ void Init(uint32_t thread_pool_size);
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler);
 
-/**
- * @brief Init the global default registry in distributed mode, use the default work-sharing thread pool as the
- * scheduler. Not thread-safe.
- */
-[[deprecated(
-    "Deprecated: use `Init(uint32_t, const ClusterConfig&)` instead. "
-    "This API will be removed in the future.")]]
-void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
-
 void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config);
-
-/**
- * @brief Init the global default registry in distributed mode, use specified scheduler. Not thread-safe.
- */
-template <ex::scheduler Scheduler>
-[[deprecated(
-    "Deprecated: use cluster_config-based initialization: `Init(uint32_t, const ClusterConfig&)` "
-    "or `ActorRegistry(Scheduler, const ClusterConfig&)`. "
-    "This API will be removed in the future.")]]
-void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler, const ClusterConfig& cluster_config);
@@ -363,19 +375,19 @@ void HoldResource(std::shared_ptr<void> resource);
 void Shutdown();
 
 /**
- * @brief Create actor at current node using default config.
+ * @brief Spawn an actor at current node using default config.
  */
 template <class UserClass, auto kCreateFn = nullptr, class... Args>
 internal::AwaitableOf<ActorRef<UserClass>> auto Spawn(Args... args) {
-  return internal::GetGlobalDefaultRegistry().CreateActor<UserClass, kCreateFn, Args...>(std::move(args)...);
+  return internal::GetGlobalDefaultRegistry().Spawn<UserClass, kCreateFn, Args...>(std::move(args)...);
 }
 
 /**
- * @brief Create an actor with a manually specified config.
+ * @brief Spawn an actor with a manually specified config.
  */
 template <class UserClass, auto kCreateFn = nullptr, class... Args>
 internal::AwaitableOf<ActorRef<UserClass>> auto Spawn(ActorConfig config, Args... args) {
-  return internal::GetGlobalDefaultRegistry().CreateActor<UserClass, kCreateFn, Args...>(config, std::move(args)...);
+  return internal::GetGlobalDefaultRegistry().Spawn<UserClass, kCreateFn, Args...>(config, std::move(args)...);
 }
 
 /**
@@ -407,6 +419,21 @@ internal::AwaitableOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName
  * @brief Configure the logging of ex_actor. Not thread-safe, please call it only when no logs are printing.
  */
 void ConfigureLogging(const LogConfig& config = {});
+
+// -------------deprecated APIs-------------
+
+/// Init the global default registry in distributed mode, use specified scheduler. Not thread-safe.
+template <ex::scheduler Scheduler>
+[[deprecated(
+    "Deprecated: use cluster_config-based initialization: `Init(uint32_t, const ClusterConfig&)` "
+    "or `ActorRegistry(Scheduler, const ClusterConfig&)`. This API will be removed in the future.")]]
+void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
+/// Init the global default registry in distributed mode, use the default work-sharing thread pool as the scheduler. Not
+/// thread-safe.
+[[deprecated(
+    "Deprecated: use `Init(uint32_t, const ClusterConfig&)` instead. This API will be removed in the future.")]]
+void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
+
 }  // namespace ex_actor
 
 // -----------template function implementations-------------

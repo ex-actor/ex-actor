@@ -111,16 +111,16 @@ TEST(BasicApiTest, NestActorRefCase) {
   ex_actor::Shutdown();
 }
 
-TEST(BasicApiTest, CreateActorWithFullConfig) {
+TEST(BasicApiTest, SpawnWithFullConfig) {
   auto coroutine = []() -> exec::task<void> {
     /*
     before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
     here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
 
-    i.e. you can't `co_await CreateActor<X>(ActorConfig {.actor_name = "A"})`, instead, you should do this:
+    i.e. you can't `co_await Spawn<X>(ActorConfig {.actor_name = "A"})`, instead, you should do this:
     ```cpp
     ex_actor::ActorConfig a_config {.actor_name = "A"};
-    auto remote_a = co_await registry.CreateActor<A, &A::Create>(a_config);
+    auto remote_a = co_await registry.Spawn<A, &A::Create>(a_config);
     ```
 
     see https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html

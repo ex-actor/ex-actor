@@ -121,9 +121,9 @@ TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
     bool connected = co_await registry.WaitNodeAlive(remote_node_id, 5000);
     EXPECT_TRUE(connected);
-    auto ping_worker = co_await registry.CreateActor<PingWorker, &PingWorker::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id},
-        /*name=*/"Alice");
+    auto ping_worker =
+        co_await registry.Spawn<PingWorker, &PingWorker::Create>(ex_actor::ActorConfig {.node_id = remote_node_id},
+                                                                 /*name=*/"Alice");
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
     auto ping_res = co_await std::move(ping);
     EXPECT_EQ(ping_res, "ack from Alice, msg got: hello");
@@ -144,9 +144,9 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
 
     // test local creation
-    auto local_a = co_await registry.CreateActor<A>();
-    auto local_b = co_await registry.CreateActor<B>();
-    auto local_a2 = co_await registry.CreateActor<A>(ex_actor::ActorConfig {.node_id = this_node_id});
+    auto local_a = co_await registry.Spawn<A>();
+    auto local_b = co_await registry.Spawn<B>();
+    auto local_a2 = co_await registry.Spawn<A>(ex_actor::ActorConfig {.node_id = this_node_id});
 
     // test remote creation
     uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
@@ -158,45 +158,44 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
     here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
 
-    i.e. you can't `co_await CreateActor<X>(ActorConfig {.actor_name = "A"})`, instead, you should do this:
+    i.e. you can't `co_await Spawn<X>(ActorConfig {.actor_name = "A"})`, instead, you should do this:
     ```cpp
     ex_actor::ActorConfig a_config {.actor_name = "A"};
-    auto remote_a = co_await registry.CreateActor<A, &A::Create>(a_config);
+    auto remote_a = co_await registry.Spawn<A, &A::Create>(a_config);
     ```
 
     see https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
     */
     ex_actor::ActorConfig a_config {.node_id = remote_node_id, .actor_name = "A"};
-    auto remote_a = co_await registry.CreateActor<A, &A::Create>(a_config);
+    auto remote_a = co_await registry.Spawn<A, &A::Create>(a_config);
 
     logging::Info("node {} creating remote actor B", this_node_id);
     ex_actor::ActorConfig b_config {.node_id = remote_node_id};
-    auto remote_b = co_await registry.CreateActor<B, &B::Create>(b_config, 1, "asd", std::make_unique<int>());
+    auto remote_b = co_await registry.Spawn<B, &B::Create>(b_config, 1, "asd", std::make_unique<int>());
 
     logging::Info("creating remote actor C without registering with EXA_REMOTE");
     auto do_create = [&]() -> void {
-      stdexec::sync_wait(registry.CreateActor<C, &C::Create>(ex_actor::ActorConfig {.node_id = remote_node_id}));
+      stdexec::sync_wait(registry.Spawn<C, &C::Create>(ex_actor::ActorConfig {.node_id = remote_node_id}));
     };
     EXPECT_THAT(do_create, Throws<std::exception>(
                                Property(&std::exception::what, HasSubstr("forgot to register it with EXA_REMOTE"))));
 
     logging::Info("creating remote actor D without static create function");
     EXPECT_THAT(
-        [&]() { stdexec::sync_wait(registry.CreateActor<D>(ex_actor::ActorConfig {.node_id = remote_node_id})); },
+        [&]() { stdexec::sync_wait(registry.Spawn<D>(ex_actor::ActorConfig {.node_id = remote_node_id})); },
         Throws<std::exception>(Property(&std::exception::what, HasSubstr("can only be used to create local actor"))));
 
     // test remote creation error propagation
     auto do_create_error = [&]() -> void {
-      stdexec::sync_wait(
-          registry.CreateActor<Error, &Error::Create>(ex_actor::ActorConfig {.node_id = remote_node_id}));
+      stdexec::sync_wait(registry.Spawn<Error, &Error::Create>(ex_actor::ActorConfig {.node_id = remote_node_id}));
     };
     EXPECT_THAT(do_create_error, Throws<std::exception>(Property(&std::exception::what, HasSubstr("Just an error"))));
 
     // test remote call
     logging::Info("creating remote actor PingWorker");
-    auto ping_worker = co_await registry.CreateActor<PingWorker, &PingWorker::Create>(
-        ex_actor::ActorConfig {.node_id = remote_node_id},
-        /*name=*/"Alice");
+    auto ping_worker =
+        co_await registry.Spawn<PingWorker, &PingWorker::Create>(ex_actor::ActorConfig {.node_id = remote_node_id},
+                                                                 /*name=*/"Alice");
     logging::Info("calling PingWorker::Ping");
     auto sender = ping_worker.Send<&PingWorker::Ping>("hello");
     auto reply = co_await std::move(sender);
@@ -216,7 +215,7 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
 
     // test remote call with void as return value
     logging::Info("calling RetVoid::ReturnVoid and Retvoid::CoroutineReturnVoid");
-    auto empty_actor = co_await registry.CreateActor<RetVoid, &RetVoid::Create>({.node_id = remote_node_id});
+    auto empty_actor = co_await registry.Spawn<RetVoid, &RetVoid::Create>({.node_id = remote_node_id});
     co_await empty_actor.Send<&RetVoid::ReturnVoid>();
     co_await empty_actor.Send<&RetVoid::CoroutineReturnVoid>();
   };
@@ -243,7 +242,7 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
     bool connected = co_await registry.WaitNodeAlive(remote_node_id, 5000);
     EXPECT_TRUE(connected);
     ex_actor::ActorConfig echoer_config {.node_id = remote_node_id, .actor_name = "Alice"};
-    auto remote_actor = co_await registry.CreateActor<Echoer, &Echoer::Create>(echoer_config);
+    auto remote_actor = co_await registry.Spawn<Echoer, &Echoer::Create>(echoer_config);
     auto lookup_result = co_await registry.GetActorRefByName<Echoer>(remote_node_id, "Alice");
     auto lookup_error = co_await registry.GetActorRefByName<Echoer>(remote_node_id, "A");
 
@@ -280,12 +279,12 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     bool connected = co_await registry.WaitNodeAlive(remote_node_id, 5000);
     EXPECT_TRUE(connected);
 
-    auto local_actor_a = co_await registry.CreateActor<Echoer>();
-    auto local_actor_b = co_await registry.CreateActor<Echoer>();
+    auto local_actor_a = co_await registry.Spawn<Echoer>();
+    auto local_actor_b = co_await registry.Spawn<Echoer>();
     ex_actor::ActorConfig echoer_config_a {.node_id = remote_node_id, .actor_name = "Alice"};
     ex_actor::ActorConfig echoer_config_b {.node_id = remote_node_id, .actor_name = "Bob"};
-    auto remote_actor_a = co_await registry.CreateActor<Echoer, &Echoer::Create>(echoer_config_a);
-    auto remote_actor_b = co_await registry.CreateActor<Echoer, &Echoer::Create>(echoer_config_b);
+    auto remote_actor_a = co_await registry.Spawn<Echoer, &Echoer::Create>(echoer_config_a);
+    auto remote_actor_b = co_await registry.Spawn<Echoer, &Echoer::Create>(echoer_config_b);
     std::string msg = "hi";
 
     // Pass the local actor to remote actor
@@ -306,7 +305,7 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     EXPECT_EQ(vec_reply, expected_vec_reply);
 
     // Pass a local actor to the constructor of remote actor
-    auto proxy_echoer = co_await registry.CreateActor<ProxyEchoer, &ProxyEchoer::Create>(
+    auto proxy_echoer = co_await registry.Spawn<ProxyEchoer, &ProxyEchoer::Create>(
         ex_actor::ActorConfig {.node_id = remote_node_id}, local_actor_a);
     auto proxy_echoer_sender = proxy_echoer.Send<&ProxyEchoer::Echo>(msg);
     auto proxy_echoer_reply = co_await std::move(proxy_echoer_sender);

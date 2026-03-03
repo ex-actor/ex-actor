@@ -14,8 +14,11 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "ex_actor/internal/actor_config.h"
@@ -24,30 +27,14 @@
 
 namespace ex_actor::internal {
 
-enum class NetworkRequestType : uint8_t {
-  kActorCreationRequest = 0,
-  kActorMethodCallRequest,
-  kActorLookUpRequest,
-};
-
-enum class NetworkReplyType : uint8_t {
-  kActorCreationReturn = 0,
-  kActorCreationError,
-  kActorMethodCallReturn,
-  kActorMethodCallError,
-  kActorLookUpReturn,
-  kActorLookUpError,
-
-};
+// ===================================================
+// Payload structs (used inside serialized_args/serialized_result)
+// ===================================================
 
 template <class Tuple>
 struct ActorCreationArgs {
   ActorConfig actor_config;
   Tuple args_tuple;
-};
-
-struct ActorCreationError {
-  std::string error;
 };
 
 template <class Tuple>
@@ -59,17 +46,60 @@ template <class T>
 struct ActorMethodReturnValue {
   T return_value;
 };
-
-struct ActorMethodReturnError {
-  std::string error;
-};
-
 template <>
 struct ActorMethodReturnValue<void> {};
+
+// ===================================================
+// Typed network request messages (variant-based)
+// ===================================================
+
+struct ActorCreationRequest {
+  std::string handler_key;
+  ByteBuffer serialized_args;  // serialized ActorCreationArgs
+};
+
+struct ActorMethodCallRequest {
+  std::string handler_key;
+  uint64_t actor_id {};
+  ByteBuffer serialized_args;  // serialized ActorMethodCallArgs
+};
 
 struct ActorLookUpRequest {
   std::string actor_name;
 };
+
+struct NetworkRequest {
+  std::variant<ActorCreationRequest, ActorMethodCallRequest, ActorLookUpRequest> variant;
+};
+
+// ===================================================
+// Typed network reply messages (variant-based)
+// ===================================================
+
+struct ActorCreationReply {
+  bool success {};
+  uint64_t actor_id {};
+  std::string error;
+};
+
+struct ActorMethodCallReply {
+  bool success {};
+  ByteBuffer serialized_result;  // serialized ActorMethodReturnValue
+  std::string error;
+};
+
+struct ActorLookUpReply {
+  bool success {};
+  uint64_t actor_id {};
+};
+
+struct NetworkReply {
+  std::variant<ActorCreationReply, ActorMethodCallReply, ActorLookUpReply> variant;
+};
+
+// ===================================================
+// Node states and gossip message
+// ===================================================
 
 struct NodeState {
   enum class Liveness : uint8_t { kAlive = 0, kConnecting, kQuitting, kDead };
@@ -83,13 +113,17 @@ struct GossipMessage {
   std::vector<NodeState> node_states;
 };
 
+// ===================================================
+// Util functions
+// ===================================================
+
 template <auto kFn, class Ctx>
-auto DeserializeFnArgs(const uint8_t* data, size_t size, const Ctx& ctx) {
+auto DeserializeFnArgs(std::span<const std::byte> data, const Ctx& ctx) {
   using Sig = Signature<decltype(kFn)>;
   if constexpr (std::is_member_function_pointer_v<decltype(kFn)>) {
-    return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, size, ctx);
+    return Deserialize<ActorMethodCallArgs<typename Sig::DecayedArgsTupleType>>(data, ctx);
   } else {
-    return Deserialize<ActorCreationArgs<typename Sig::DecayedArgsTupleType>>(data, size, ctx);
+    return Deserialize<ActorCreationArgs<typename Sig::DecayedArgsTupleType>>(data, ctx);
   }
 }
 }  // namespace ex_actor::internal

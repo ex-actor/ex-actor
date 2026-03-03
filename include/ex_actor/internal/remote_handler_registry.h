@@ -23,7 +23,6 @@
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/actor_ref.h"
 #include "ex_actor/internal/message.h"
-#include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
 
@@ -38,22 +37,22 @@ class RemoteActorRequestHandlerRegistry {
 
   struct RemoteActorMethodCallHandlerContext {
     TypeErasedActor* actor;
-    BufferReader<ByteBufferType> request_buffer;
-    ActorRefSerdeContext info;
+    ByteBuffer serialized_args;
+    ActorRefSerdeContext actor_ref_serde_ctx;
   };
   struct RemoteActorCreationHandlerContext {
-    BufferReader<ByteBufferType> request_buffer;
+    ByteBuffer serialized_args;
     std::unique_ptr<TypeErasedActorScheduler> scheduler;
-    ActorRefSerdeContext info;
+    ActorRefSerdeContext actor_ref_serde_ctx;
   };
-  struct CreateActorResult {
+  struct ActorCreationResult {
     std::unique_ptr<TypeErasedActor> actor;
     std::optional<std::string> actor_name;
   };
 
   using RemoteActorMethodCallHandler =
-      std::function<exec::task<ByteBufferType>(RemoteActorMethodCallHandlerContext context)>;
-  using RemoteActorCreationHandler = std::function<CreateActorResult(RemoteActorCreationHandlerContext context)>;
+      std::function<exec::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
+  using RemoteActorCreationHandler = std::function<ActorCreationResult(RemoteActorCreationHandlerContext context)>;
 
   void RegisterRemoteActorMethodCallHandler(const std::string& key, RemoteActorMethodCallHandler func) {
     EXA_THROW_CHECK(!remote_actor_method_call_handler_.contains(key))
@@ -121,11 +120,11 @@ class RemoteFuncHandlerRegistrar {
 
  private:
   template <auto kCreateFn>
-  RemoteActorRequestHandlerRegistry::CreateActorResult DeserializeAndCreateActor(
+  RemoteActorRequestHandlerRegistry::ActorCreationResult DeserializeAndCreateActor(
       RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext context) {
     using ActorClass = Signature<decltype(kCreateFn)>::ReturnType;
-    ActorCreationArgs creation_args = DeserializeFnArgs<kCreateFn>(
-        context.request_buffer.Current(), context.request_buffer.RemainingSize(), context.info);
+    ActorCreationArgs creation_args =
+        DeserializeFnArgs<kCreateFn>(context.serialized_args, context.actor_ref_serde_ctx);
     std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, kCreateFn>::CreateUseArgTuple(
         std::move(context.scheduler), std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
     auto actor_name = actor->GetActorConfig().actor_name;
@@ -139,31 +138,25 @@ class RemoteFuncHandlerRegistrar {
    * @returns A coroutine carrying the serialized result of the actor method call.
    */
   template <auto kMethod>
-  exec::task<ByteBufferType> DeserializeAndInvokeActorMethod(
+  exec::task<NetworkReply> DeserializeAndInvokeActorMethod(
       RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
     EXA_THROW_CHECK(context.actor != nullptr);
     using Sig = Signature<decltype(kMethod)>;
     using UnwrappedType = decltype(UnwrapReturnSenderIfNested<kMethod>())::type;
 
-    ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args = DeserializeFnArgs<kMethod>(
-        context.request_buffer.Current(), context.request_buffer.RemainingSize(), context.info);
+    ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
+        DeserializeFnArgs<kMethod>(context.serialized_args, context.actor_ref_serde_ctx);
 
-    std::vector<char> serialized {};
     if constexpr (std::is_void_v<UnwrappedType>) {
       co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+      co_return NetworkReply {ActorMethodCallReply {.success = true}};
     } else {
       auto return_value =
           co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
-      serialized = Serialize(ActorMethodReturnValue<UnwrappedType> {std::move(return_value)});
+      co_return NetworkReply {ActorMethodCallReply {
+          .success = true,
+          .serialized_result = Serialize(ActorMethodReturnValue<UnwrappedType> {std::move(return_value)})}};
     }
-
-    BufferWriter writer(ByteBufferType {sizeof(NetworkRequestType) + serialized.size()});
-    // TODO optimize the copy here
-    writer.WritePrimitive(NetworkReplyType::kActorMethodCallReturn);
-    if constexpr (!std::is_void_v<UnwrappedType>) {
-      writer.CopyFrom(serialized.data(), serialized.size());
-    }
-    co_return std::move(writer).MoveBufferOut();
   };
 };
 
@@ -172,9 +165,7 @@ class RemoteFuncHandlerRegistrar {
 #define EXA_ANONYMOUS_VARIABLE(str) EXA_CONCATENATE(str, __LINE__, _, __COUNTER__)
 }  // namespace ex_actor::internal
 
-namespace ex_actor {
 #define EXA_REMOTE(...)                                                                        \
   /* NOLINTNEXTLINE(misc-use-internal-linkage) */                                              \
   inline ::ex_actor::internal::RemoteFuncHandlerRegistrar<__VA_ARGS__> EXA_ANONYMOUS_VARIABLE( \
       exa_remote_func_registrar_);
-};  // namespace ex_actor

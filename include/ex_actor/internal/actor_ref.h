@@ -138,32 +138,25 @@ class ActorRef {
     using Sig = Signature<decltype(kMethod)>;
     ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
         .args_tuple = typename Sig::DecayedArgsTupleType(std::move(args)...)};
-    auto serialized_args = Serialize(method_call_args);
-    std::string handler_key = GetUniqueNameForFunction<kMethod>();
-    BufferWriter buffer_writer(ByteBufferType {sizeof(NetworkRequestType) + sizeof(uint64_t) +
-                                               sizeof(handler_key.size()) + handler_key.size() + sizeof(actor_id_) +
-                                               serialized_args.size()});
-    // protocol: [request_type][handler_key_len][handler_key][actor_id][ActorMethodCallArgs]
 
-    buffer_writer.WritePrimitive(NetworkRequestType::kActorMethodCallRequest);
-    buffer_writer.WritePrimitive(handler_key.size());
-    buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
-    buffer_writer.WritePrimitive(actor_id_);
-    buffer_writer.CopyFrom(serialized_args.data(), serialized_args.size());
+    NetworkRequest request {ActorMethodCallRequest {
+        .handler_key = GetUniqueNameForFunction<kMethod>(),
+        .actor_id = actor_id_,
+        .serialized_args = Serialize(method_call_args),
+    }};
 
     using UnwrappedType = decltype(UnwrapReturnSenderIfNested<kMethod>())::type;
-    ByteBufferType response_buffer =
-        co_await message_broker_->SendRequest(node_id_, std::move(buffer_writer).MoveBufferOut());
-    BufferReader reader {std::move(response_buffer)};
-    auto type = reader.NextPrimitive<NetworkReplyType>();
-    if (type == NetworkReplyType::kActorMethodCallError) {
-      auto res = Deserialize<ActorMethodReturnError>(reader.Current(), reader.RemainingSize());
-      EXA_THROW << res.error;
+    ByteBuffer response_buf = co_await message_broker_->SendRequest(node_id_, Serialize(request));
+    auto reply = Deserialize<NetworkReply>(response_buf);
+
+    auto& ret = std::get<ActorMethodCallReply>(reply.variant);
+    if (!ret.success) {
+      EXA_THROW << ret.error;
     }
     if constexpr (std::is_void_v<UnwrappedType>) {
       co_return;
     } else {
-      auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(reader.Current(), reader.RemainingSize());
+      auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(ret.serialized_result);
       co_return res.return_value;
     }
   }

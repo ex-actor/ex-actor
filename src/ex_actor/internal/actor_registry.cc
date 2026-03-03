@@ -48,38 +48,28 @@ exec::task<void> ActorRegistryBackend::AsyncDestroyAllActors() {
   log::Info("All actors destroyed");
 }
 
-exec::task<void> ActorRegistryBackend::HandleNetworkRequest(uint64_t received_request_id,
-                                                            ByteBufferType request_buffer) {
-  BufferReader<ByteBufferType> reader(std::move(request_buffer));
-  auto message_type = reader.NextPrimitive<NetworkRequestType>();
+exec::task<void> ActorRegistryBackend::HandleNetworkRequest(uint64_t received_request_id, ByteBuffer request_buffer) {
+  auto request = Deserialize<NetworkRequest>(request_buffer);
 
-  if (message_type == NetworkRequestType::kActorCreationRequest) {
-    HandleActorCreationRequest(received_request_id, std::move(reader));
+  if (auto* msg = std::get_if<ActorCreationRequest>(&request.variant)) {
+    HandleActorCreationRequest(received_request_id, std::move(*msg));
     co_return;
   }
 
-  if (message_type == NetworkRequestType::kActorMethodCallRequest) {
-    co_await HandleActorMethodCallRequest(received_request_id, std::move(reader));
+  if (auto* msg = std::get_if<ActorMethodCallRequest>(&request.variant)) {
+    co_await HandleActorMethodCallRequest(received_request_id, std::move(*msg));
     co_return;
   }
 
-  if (message_type == NetworkRequestType::kActorLookUpRequest) {
-    auto actor_name = Deserialize<ActorLookUpRequest>(reader.Current(), reader.RemainingSize()).actor_name;
-
-    if (actor_name_to_id_.contains(actor_name)) {
-      BufferWriter<ByteBufferType> writer(ByteBufferType(sizeof(NetworkRequestType) + sizeof(uint64_t)));
-      auto actor_id = actor_name_to_id_.at(actor_name);
-      writer.WritePrimitive(NetworkReplyType::kActorLookUpReturn);
-      writer.WritePrimitive(actor_id);
-      message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
+  if (auto* msg = std::get_if<ActorLookUpRequest>(&request.variant)) {
+    if (actor_name_to_id_.contains(msg->actor_name)) {
+      ReplyToBroker(received_request_id, NetworkReply {ActorLookUpReply {
+                                             .success = true, .actor_id = actor_name_to_id_.at(msg->actor_name)}});
     } else {
-      BufferWriter writer(ByteBufferType(sizeof(NetworkRequestType)));
-      writer.WritePrimitive(NetworkReplyType::kActorLookUpError);
-      message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
+      ReplyToBroker(received_request_id, NetworkReply {ActorLookUpReply {.success = false}});
     }
     co_return;
   }
-  EXA_THROW << "Invalid message type: " << static_cast<int>(message_type);
 }
 
 void ActorRegistryBackend::InitRandomNumGenerator() {
@@ -96,26 +86,13 @@ uint64_t ActorRegistryBackend::GenerateRandomActorId() {
   }
 }
 
-NetworkRequestType ActorRegistryBackend::ParseMessageType(const ByteBufferType& buffer) {
-  EXA_THROW_CHECK_GE(buffer.size(), 1) << "Invalid buffer size, " << buffer.size();
-  return static_cast<NetworkRequestType>(*static_cast<const uint8_t*>(buffer.data()));
+void ActorRegistryBackend::ReplyToBroker(uint64_t received_request_id, const NetworkReply& reply) {
+  message_broker_->ReplyRequest(received_request_id, Serialize(reply));
 }
 
-void ActorRegistryBackend::ReplyError(uint64_t received_request_id, NetworkReplyType reply_type,
-                                      std::string error_msg) {
-  std::vector<char> serialized = Serialize(ActorMethodReturnError {std::move(error_msg)});
-  BufferWriter writer(ByteBufferType(sizeof(NetworkRequestType) + serialized.size()));
-  writer.WritePrimitive(reply_type);
-  writer.CopyFrom(serialized.data(), serialized.size());
-  message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
-}
-
-void ActorRegistryBackend::HandleActorCreationRequest(uint64_t received_request_id,
-                                                      BufferReader<ByteBufferType> reader) {
-  auto handler_key_len = reader.NextPrimitive<uint64_t>();
-  auto handler_key = reader.PullString(handler_key_len);
+void ActorRegistryBackend::HandleActorCreationRequest(uint64_t received_request_id, ActorCreationRequest msg) {
   try {
-    auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(handler_key);
+    auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(msg.handler_key);
     ActorRefSerdeContext info {.this_node_id = this_node_id_,
                                .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
                                  if (actor_id_to_actor_.contains(actor_id)) {
@@ -125,7 +102,9 @@ void ActorRegistryBackend::HandleActorCreationRequest(uint64_t received_request_
                                },
                                .message_broker = message_broker_};
     auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
-        .request_buffer = std::move(reader), .scheduler = scheduler_->Clone(), .info = info});
+        .serialized_args = std::move(msg.serialized_args),
+        .scheduler = scheduler_->Clone(),
+        .actor_ref_serde_ctx = info});
     uint64_t actor_id = GenerateRandomActorId();
     if (result.actor_name.has_value()) {
       EXA_THROW_CHECK(!actor_name_to_id_.contains(result.actor_name.value()))
@@ -133,55 +112,55 @@ void ActorRegistryBackend::HandleActorCreationRequest(uint64_t received_request_
       actor_name_to_id_[result.actor_name.value()] = actor_id;
     }
     actor_id_to_actor_[actor_id] = std::move(result.actor);
-    BufferWriter<ByteBufferType> writer(ByteBufferType(sizeof(NetworkReplyType) + sizeof(actor_id)));
-    writer.WritePrimitive(NetworkReplyType::kActorCreationReturn);
-    writer.WritePrimitive(actor_id);
-    message_broker_->ReplyRequest(received_request_id, std::move(writer).MoveBufferOut());
+    ReplyToBroker(received_request_id, NetworkReply {ActorCreationReply {.success = true, .actor_id = actor_id}});
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-    ReplyError(received_request_id, NetworkReplyType::kActorCreationError, std::move(error_msg));
+    ReplyToBroker(received_request_id,
+                  NetworkReply {ActorCreationReply {.success = false, .error = std::move(error_msg)}});
   }
 }
 
 exec::task<void> ActorRegistryBackend::HandleActorMethodCallRequest(uint64_t received_request_id,
-                                                                    BufferReader<ByteBufferType> reader) {
-  auto handler_key_len = reader.NextPrimitive<uint64_t>();
-  auto handler_key = reader.PullString(handler_key_len);
-  auto actor_id = reader.NextPrimitive<uint64_t>();
-  if (!actor_id_to_actor_.contains(actor_id)) {
-    ReplyError(
-        received_request_id, NetworkReplyType::kActorMethodCallError,
+                                                                    ActorMethodCallRequest msg) {
+  if (!actor_id_to_actor_.contains(msg.actor_id)) {
+    auto error_msg =
         fmt_lib::format("Can't find actor at remote node, actor_id={}, node_id={}, maybe it's already destroyed.",
-                        actor_id, this_node_id_));
+                        msg.actor_id, this_node_id_);
+    ReplyToBroker(received_request_id,
+                  NetworkReply {ActorMethodCallReply {.success = false, .error = std::move(error_msg)}});
     co_return;
   }
 
   RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandler handler = nullptr;
   try {
-    handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorMethodCallHandler(handler_key);
+    handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorMethodCallHandler(msg.handler_key);
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-    ReplyError(received_request_id, NetworkReplyType::kActorMethodCallError, std::move(error_msg));
+    ReplyToBroker(received_request_id,
+                  NetworkReply {ActorMethodCallReply {.success = false, .error = std::move(error_msg)}});
     co_return;
   }
 
   EXA_THROW_CHECK(handler != nullptr);
   ActorRefSerdeContext info {.this_node_id = this_node_id_,
-                             .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
-                               if (actor_id_to_actor_.contains(actor_id)) {
-                                 return actor_id_to_actor_.at(actor_id).get();
+                             .actor_look_up_fn = [&](uint64_t aid) -> TypeErasedActor* {
+                               if (actor_id_to_actor_.contains(aid)) {
+                                 return actor_id_to_actor_.at(aid).get();
                                }
                                return nullptr;
                              },
                              .message_broker = message_broker_};
   try {
     auto task = handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
-        .actor = actor_id_to_actor_.at(actor_id).get(), .request_buffer = std::move(reader), .info = info});
-    auto buffer = co_await std::move(task);
-    message_broker_->ReplyRequest(received_request_id, std::move(buffer));
+        .actor = actor_id_to_actor_.at(msg.actor_id).get(),
+        .serialized_args = std::move(msg.serialized_args),
+        .actor_ref_serde_ctx = info});
+    auto reply = co_await std::move(task);
+    ReplyToBroker(received_request_id, reply);
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-    ReplyError(received_request_id, NetworkReplyType::kActorMethodCallError, std::move(error_msg));
+    ReplyToBroker(received_request_id,
+                  NetworkReply {ActorMethodCallReply {.success = false, .error = std::move(error_msg)}});
   }
 }
 
@@ -217,7 +196,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
         return std::make_unique<MessageBroker>(
             cluster_config,
             /*request_handler=*/
-            [this](uint64_t received_request_id, ByteBufferType data) {
+            [this](uint64_t received_request_id, ByteBuffer data) {
               auto task = backend_actor_.CallActorMethod<&ActorRegistryBackend::HandleNetworkRequest>(
                   received_request_id, std::move(data));
               async_scope_.spawn(std::move(task));

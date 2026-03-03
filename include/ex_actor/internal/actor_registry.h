@@ -79,31 +79,22 @@ class ActorRegistryBackend {
 
     using CreateFnSig = Signature<decltype(kCreateFn)>;
 
-    // protocol: [message_type][handler_key_len][handler_key][ActorCreationArgs]
     typename CreateFnSig::DecayedArgsTupleType args_tuple {std::move(args)...};
     ActorCreationArgs<typename CreateFnSig::DecayedArgsTupleType> actor_creation_args {config, std::move(args_tuple)};
-    std::vector<char> serialized = Serialize(actor_creation_args);
-    std::string handler_key = GetUniqueNameForFunction<kCreateFn>();
-    BufferWriter buffer_writer(
-        ByteBufferType {serialized.size() + sizeof(uint64_t) + handler_key.size() + sizeof(NetworkRequestType)});
-    buffer_writer.WritePrimitive(NetworkRequestType::kActorCreationRequest);
-    buffer_writer.WritePrimitive(handler_key.size());
-    // TODO optimize the copy here
-    buffer_writer.CopyFrom(handler_key.data(), handler_key.size());
-    buffer_writer.CopyFrom(serialized.data(), serialized.size());
-    EXA_THROW_CHECK(buffer_writer.EndReached()) << "Buffer writer not ended";
 
-    // send to remote
-    auto response_buffer =
-        co_await message_broker_->SendRequest(config.node_id, std::move(buffer_writer).MoveBufferOut());
-    BufferReader reader(std::move(response_buffer));
-    auto type = reader.template NextPrimitive<NetworkReplyType>();
-    if (type == NetworkReplyType::kActorCreationError) {
-      EXA_THROW << "Got actor creation error from remote node:"
-                << Deserialize<ActorCreationError>(reader.Current(), reader.RemainingSize()).error;
+    NetworkRequest request {ActorCreationRequest {
+        .handler_key = GetUniqueNameForFunction<kCreateFn>(),
+        .serialized_args = Serialize(actor_creation_args),
+    }};
+
+    ByteBuffer response_buf = co_await message_broker_->SendRequest(config.node_id, Serialize(request));
+    auto reply = Deserialize<NetworkReply>(response_buf);
+
+    auto& ret = std::get<ActorCreationReply>(reply.variant);
+    if (!ret.success) {
+      EXA_THROW << "Got actor creation error from remote node:" << ret.error;
     }
-    auto actor_id = reader.template NextPrimitive<uint64_t>();
-    co_return ActorRef<UserClass>(this_node_id_, config.node_id, actor_id, nullptr, message_broker_);
+    co_return ActorRef<UserClass>(this_node_id_, config.node_id, ret.actor_id, nullptr, message_broker_);
   }
 
   template <class UserClass>
@@ -137,28 +128,18 @@ class ActorRegistryBackend {
       co_return GetActorRefByName<UserClass>(name);
     }
 
-    std::vector<char> serialized = Serialize(ActorLookUpRequest {name});
-    BufferWriter<ByteBufferType> writer(ByteBufferType(sizeof(NetworkRequestType) + serialized.size()));
-    writer.WritePrimitive(NetworkRequestType::kActorLookUpRequest);
-    writer.CopyFrom(serialized.data(), serialized.size());
+    NetworkRequest request {ActorLookUpRequest {.actor_name = name}};
+    ByteBuffer response_buf = co_await message_broker_->SendRequest(node_id, Serialize(request));
+    auto reply = Deserialize<NetworkReply>(response_buf);
 
-    auto response_buffer =
-        co_await message_broker_->SendRequest(node_id, ByteBufferType {std::move(writer).MoveBufferOut()});
-
-    std::optional<uint64_t> actor_id = std::nullopt;
-    BufferReader<ByteBufferType> reader(std::move(response_buffer));
-    auto type = reader.NextPrimitive<NetworkReplyType>();
-    if (type == NetworkReplyType::kActorLookUpReturn) {
-      actor_id = reader.NextPrimitive<uint64_t>();
-    }
-
-    if (actor_id.has_value()) {
-      co_return ActorRef<UserClass>(this_node_id_, node_id, actor_id.value(), nullptr, message_broker_);
+    auto& ret = std::get<ActorLookUpReply>(reply.variant);
+    if (ret.success) {
+      co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, nullptr, message_broker_);
     }
     co_return std::nullopt;
   }
 
-  exec::task<void> HandleNetworkRequest(uint64_t received_request_id, ByteBufferType request_buffer);
+  exec::task<void> HandleNetworkRequest(uint64_t received_request_id, ByteBuffer request_buffer);
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
@@ -185,10 +166,9 @@ class ActorRegistryBackend {
 
   void InitRandomNumGenerator();
   uint64_t GenerateRandomActorId();
-  NetworkRequestType ParseMessageType(const ByteBufferType& buffer);
-  void ReplyError(uint64_t received_request_id, NetworkReplyType reply_type, std::string error_msg);
-  void HandleActorCreationRequest(uint64_t received_request_id, BufferReader<ByteBufferType> reader);
-  exec::task<void> HandleActorMethodCallRequest(uint64_t received_request_id, BufferReader<ByteBufferType> reader);
+  void ReplyToBroker(uint64_t received_request_id, const NetworkReply& reply);
+  void HandleActorCreationRequest(uint64_t received_request_id, ActorCreationRequest msg);
+  exec::task<void> HandleActorMethodCallRequest(uint64_t received_request_id, ActorMethodCallRequest msg);
 };
 
 /**

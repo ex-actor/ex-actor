@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -65,7 +66,6 @@ struct ClusterConfig {
 }  // namespace ex_actor
 
 namespace ex_actor::internal {
-using ByteBufferType = zmq::message_t;
 
 enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kGossip };
 
@@ -112,7 +112,7 @@ class NodeInfoManager {
 class MessageBroker {
  public:
   explicit MessageBroker(const ClusterConfig& cluster_config,
-                         std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler);
+                         std::function<void(uint64_t received_request_id, ByteBuffer data)> request_handler);
 
   ~MessageBroker();
 
@@ -121,19 +121,19 @@ class MessageBroker {
   // -------- std::execution sender adaption start--------
   struct TypeErasedSendOperation {
     virtual ~TypeErasedSendOperation() = default;
-    virtual void Complete(ByteBufferType /*response_data*/) = 0;
+    virtual void Complete(ByteBuffer /*response_data*/) = 0;
 
     virtual void SetError(std::exception_ptr /*error*/) = 0;
 
-    TypeErasedSendOperation(Identifier identifier, ByteBufferType data, MessageBroker* message_broker)
+    TypeErasedSendOperation(Identifier identifier, ByteBuffer data, MessageBroker* message_broker)
         : identifier(identifier), data(std::move(data)), message_broker(message_broker) {}
     Identifier identifier;
-    ByteBufferType data;
+    ByteBuffer data;
     MessageBroker* message_broker {};
   };
   template <ex::receiver R>
   struct SendRequestOperation : TypeErasedSendOperation {
-    SendRequestOperation(Identifier identifier, ByteBufferType data, MessageBroker* message_broker, R receiver)
+    SendRequestOperation(Identifier identifier, ByteBuffer data, MessageBroker* message_broker, R receiver)
         : TypeErasedSendOperation(identifier, std::move(data), message_broker), receiver(std::move(receiver)) {}
     R receiver;
     std::atomic_bool started = false;
@@ -146,14 +146,14 @@ class MessageBroker {
       }
       message_broker->PushOperation(this);
     }
-    void Complete(ByteBufferType response_data) override { receiver.set_value(std::move(response_data)); }
+    void Complete(ByteBuffer response_data) override { receiver.set_value(std::move(response_data)); }
     void SetError(std::exception_ptr error) override { receiver.set_error(std::move(error)); };
   };
   struct SendRequestSender : ex::sender_t {
     using completion_signatures =
-        ex::completion_signatures<ex::set_value_t(ByteBufferType), ex::set_error_t(std::exception_ptr)>;
+        ex::completion_signatures<ex::set_value_t(ByteBuffer), ex::set_error_t(std::exception_ptr)>;
     Identifier identifier;
-    ByteBufferType data;
+    ByteBuffer data;
     MessageBroker* message_broker;
     template <ex::receiver R>
     SendRequestOperation<R> connect(R receiver) {
@@ -166,9 +166,9 @@ class MessageBroker {
    * @brief Send buffer to the remote node.
    * @return A sender containing raw response buffer.
    */
-  SendRequestSender SendRequest(uint32_t to_node_id, ByteBufferType data, MessageFlag flag = MessageFlag::kNormal);
+  SendRequestSender SendRequest(uint32_t to_node_id, ByteBuffer data, MessageFlag flag = MessageFlag::kNormal);
 
-  void ReplyRequest(uint64_t received_request_id, ByteBufferType data);
+  void ReplyRequest(uint64_t received_request_id, ByteBuffer data);
 
   bool CheckNodeConnected(uint32_t node_id);
 
@@ -185,7 +185,7 @@ class MessageBroker {
 
   struct ReplyOperation {
     Identifier identifier;
-    ByteBufferType data;
+    ByteBuffer data;
   };
 
   class DeferredOperations {
@@ -210,7 +210,7 @@ class MessageBroker {
   };
 
   NodeInfo this_node_ {};
-  std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler_;
+  std::function<void(uint64_t received_request_id, ByteBuffer data)> request_handler_;
   NetworkConfig network_config_;
   std::atomic_uint64_t send_request_id_counter_ = 0;
   std::atomic_uint64_t received_request_id_counter_ = 0;

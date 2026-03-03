@@ -15,7 +15,10 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -85,6 +88,8 @@ Result<internal::wrap_in_rfl_array_t<T>> read(const concepts::ByteLike auto* byt
 // ===================================================
 namespace ex_actor::internal {
 
+using ByteBuffer = std::vector<std::byte>;
+
 template <class T>
 static auto GetCachedSchema() {
   thread_local auto schema = rfl::capnproto::to_schema<T>();
@@ -92,18 +97,25 @@ static auto GetCachedSchema() {
 }
 
 template <class T>
-std::vector<char> Serialize(const T& obj) {
-  return rfl::capnproto::write(obj, GetCachedSchema<T>());
+ByteBuffer Serialize(const T& obj) {
+  std::vector<char> chars = rfl::capnproto::write(obj, GetCachedSchema<T>());
+  ByteBuffer result(chars.size());
+  // TODO: a copy here, optimize it in the future. Find a way to convert the vector<char> to vector<std::byte> without
+  // copy and not causing undefined behavior(don't violating strict aliasing rules, specifically).
+  std::memcpy(result.data(), chars.data(), chars.size());
+  return result;
 }
 
 template <class T>
-T Deserialize(const uint8_t* data, size_t size) {
-  return rfl::capnproto::read<T>(data, size, GetCachedSchema<T>()).value();
+T Deserialize(std::span<const std::byte> data) {
+  return rfl::capnproto::read<T>(reinterpret_cast<const char*>(data.data()), data.size(), GetCachedSchema<T>()).value();
 }
 
 template <class T, class Ctx>
-T Deserialize(const uint8_t* data, size_t size, const Ctx& ctx) {
-  return rfl::capnproto::read<T, Ctx>(data, size, GetCachedSchema<T>(), ctx).value();
+T Deserialize(std::span<const std::byte> data, const Ctx& ctx) {
+  return rfl::capnproto::read<T, Ctx>(reinterpret_cast<const char*>(data.data()), data.size(), GetCachedSchema<T>(),
+                                      ctx)
+      .value();
 }
 
 struct MemoryBuf : std::streambuf {
@@ -175,6 +187,9 @@ class BufferWriter {
     offset_ += size;
   }
   void CopyFrom(const char* data, size_t size) { CopyFrom(reinterpret_cast<const uint8_t*>(data), size); }
+  void CopyFrom(std::span<const std::byte> data) {
+    CopyFrom(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+  }
 
   const B& GetBuffer() const { return buffer_; }
 

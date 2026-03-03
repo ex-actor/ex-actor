@@ -22,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -38,6 +39,23 @@ namespace {
 inline uint64_t GetTimeMs() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
       .count();
+}
+
+std::span<const std::byte> ZmqMsgBytes(const zmq::message_t& msg) {
+  return {static_cast<const std::byte*>(msg.data()), msg.size()};
+}
+
+ex_actor::internal::ByteBuffer ZmqMsgToBytes(zmq::message_t&& msg) {
+  auto span = ZmqMsgBytes(msg);
+  // TODO: a copy here, optimize it in the future
+  return {span.begin(), span.end()};
+}
+
+zmq::message_t BytesToZmqMsg(ex_actor::internal::ByteBuffer&& bytes) {
+  if (bytes.empty()) return {};
+  auto* owned = new ex_actor::internal::ByteBuffer(std::move(bytes));
+  auto deleter = [](void*, void* hint) { delete static_cast<ex_actor::internal::ByteBuffer*>(hint); };
+  return zmq::message_t(owned->data(), owned->size(), deleter, owned);
 }
 }  // namespace
 
@@ -228,7 +246,7 @@ void NodeInfoManager::CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms) {
 }
 
 MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
-                             std::function<void(uint64_t received_request_id, ByteBufferType data)> request_handler)
+                             std::function<void(uint64_t received_request_id, ByteBuffer data)> request_handler)
     : this_node_(cluster_config.this_node),
       request_handler_(std::move(request_handler)),
       node_manager_(cluster_config.this_node.node_id),
@@ -264,7 +282,7 @@ void MessageBroker::ClusterAlignedStop() {
 
   for (const auto& node : node_list) {
     if (node.node_id != this_node_.node_id) {
-      auto sender = SendRequest(node.node_id, ByteBufferType {}, MessageFlag::kQuit) | ex::then([](auto empty) {});
+      auto sender = SendRequest(node.node_id, ByteBuffer {}, MessageFlag::kQuit) | ex::then([](const auto&) {});
       async_scope_.spawn(std::move(sender));
     }
   }
@@ -304,8 +322,7 @@ void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
   node_manager_.NotifyWaiters(node_id);
 }
 
-MessageBroker::SendRequestSender MessageBroker::SendRequest(uint32_t to_node_id, ByteBufferType data,
-                                                            MessageFlag flag) {
+MessageBroker::SendRequestSender MessageBroker::SendRequest(uint32_t to_node_id, ByteBuffer data, MessageFlag flag) {
   EXA_THROW_CHECK_NE(to_node_id, this_node_.node_id) << "Cannot send message to current node";
   Identifier identifier {
       .request_node_id = this_node_.node_id,
@@ -320,7 +337,7 @@ MessageBroker::SendRequestSender MessageBroker::SendRequest(uint32_t to_node_id,
   };
 }
 
-void MessageBroker::ReplyRequest(uint64_t received_request_id, ByteBufferType data) {
+void MessageBroker::ReplyRequest(uint64_t received_request_id, ByteBuffer data) {
   auto identifier = received_request_id_to_identifier_.At(received_request_id);
   received_request_id_to_identifier_.Erase(received_request_id);
 
@@ -346,12 +363,12 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         auto serialized_identifier = Serialize(operation->identifier);
         zmq::multipart_t multi;
         multi.addmem(serialized_identifier.data(), serialized_identifier.size());
-        multi.add(std::move(operation->data));
+        multi.add(BytesToZmqMsg(std::move(operation->data)));
         auto& send_socket = node_id_to_send_socket_.At(operation->identifier.response_node_id);
         EXA_THROW_CHECK(multi.send(send_socket));
         if (operation->identifier.flag == MessageFlag::kQuit || operation->identifier.flag == MessageFlag::kGossip) {
           send_request_id_to_operation_.Erase(operation->identifier.request_id_in_node);
-          operation->Complete(ByteBufferType {});
+          operation->Complete(ByteBuffer {});
         }
         any_item_pulled = true;
       } else {
@@ -370,7 +387,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         auto serialized_identifier = Serialize(reply_operation.identifier);
         zmq::multipart_t multi;
         multi.addmem(serialized_identifier.data(), serialized_identifier.size());
-        multi.add(std::move(reply_operation.data));
+        multi.add(BytesToZmqMsg(std::move(reply_operation.data)));
         EXA_THROW_CHECK(multi.send(send_socket));
         any_item_pulled = true;
       } else {
@@ -414,7 +431,7 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   zmq::message_t identifier_bytes = multi.pop();
   zmq::message_t data_bytes = multi.pop();
 
-  auto identifier = Deserialize<Identifier>(identifier_bytes.data<uint8_t>(), identifier_bytes.size());
+  auto identifier = Deserialize<Identifier>(ZmqMsgBytes(identifier_bytes));
 
   // all received messages will update the last seen time;
   // For responses, the peer is response_node_id.
@@ -439,12 +456,12 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
     // Response from remote node
     TypeErasedSendOperation* operation = send_request_id_to_operation_.At(identifier.request_id_in_node);
     send_request_id_to_operation_.Erase(identifier.request_id_in_node);
-    operation->Complete(std::move(data_bytes));
+    operation->Complete(ZmqMsgToBytes(std::move(data_bytes)));
   } else if (identifier.response_node_id == this_node_.node_id) {
     // Request from remote node - pass to handler, which will send response back
     auto received_request_id = received_request_id_counter_.fetch_add(1);
     received_request_id_to_identifier_.Insert(received_request_id, identifier);
-    request_handler_(received_request_id, std::move(data_bytes));
+    request_handler_(received_request_id, ZmqMsgToBytes(std::move(data_bytes)));
   } else {
     EXA_THROW << "Invalid identifier, " << EXA_DUMP_VARS(identifier);
   }
@@ -459,16 +476,10 @@ void MessageBroker::SendGossip() {
                                    .last_seen = GetTimeMs(),
                                    .node_id = this_node_.node_id,
                                    .address = this_node_.address});
-    auto serialized_message = Serialize(message);
-    BufferWriter writer {ByteBufferType(serialized_message.size())};
-    writer.CopyFrom(serialized_message.data(), serialized_message.size());
-    auto payload = std::move(writer).MoveBufferOut();
+    auto payload = Serialize(message);
 
     for (const auto& node : node_list) {
-      ByteBufferType per_node_payload;
-      per_node_payload.copy(payload);
-      auto gossip =
-          SendRequest(node.node_id, std::move(per_node_payload), MessageFlag::kGossip) | ex::then([](auto&& null) {});
+      auto gossip = SendRequest(node.node_id, ByteBuffer(payload), MessageFlag::kGossip) | ex::then([](auto&& null) {});
       async_scope_.spawn(std::move(gossip));
     }
     last_heartbeat_ms_ = GetTimeMs();
@@ -476,7 +487,7 @@ void MessageBroker::SendGossip() {
 }
 
 void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
-  const auto message = Deserialize<GossipMessage>(gossip_msg.data<uint8_t>(), gossip_msg.size());
+  const auto message = Deserialize<GossipMessage>(ZmqMsgBytes(gossip_msg));
   for (const auto& state : message.node_states) {
     if (state.node_id == this_node_.node_id) {
       if (state.address != this_node_.address) {

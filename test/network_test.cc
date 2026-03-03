@@ -15,7 +15,7 @@
 
 #include "ex_actor/api.h"
 
-using ex_actor::internal::ByteBufferType;
+using ex_actor::internal::ByteBuffer;
 using ex_actor::internal::NodeInfoManager;
 using Liveness = ex_actor::internal::NodeState::Liveness;
 namespace logging = ex_actor::internal::log;
@@ -125,17 +125,20 @@ TEST(NetworkTest, MessageBrokerClusterConfigTest) {
         config.contact_node = node_list.front();
       }
       ex_actor::internal::MessageBroker message_broker(
-          config, [&message_broker](uint64_t received_request_id, ByteBufferType data) {
+          config, [&message_broker](uint64_t received_request_id, ByteBuffer data) {
             message_broker.ReplyRequest(received_request_id, std::move(data));
           });
       uint32_t to_node_id = (node_id + 1) % node_list.size();
       // Waiting all the nodes find its contact node
       stdexec::sync_wait(message_broker.WaitNodeAlive(to_node_id, 500));
       exec::async_scope scope;
+      auto str = std::to_string(node_id);
       for (int i = 0; i < 5; ++i) {
-        scope.spawn(message_broker.SendRequest(to_node_id, ByteBufferType(std::to_string(node_id))) |
-                    stdexec::then([node_id](ByteBufferType data) {
-                      std::string data_str(static_cast<char*>(data.data()), data.size());
+        auto bytes = ByteBuffer(reinterpret_cast<const std::byte*>(str.data()),
+                                reinterpret_cast<const std::byte*>(str.data() + str.size()));
+        scope.spawn(message_broker.SendRequest(to_node_id, std::move(bytes)) |
+                    stdexec::then([node_id](ByteBuffer data) {
+                      std::string data_str(reinterpret_cast<const char*>(data.data()), data.size());
                       logging::Info("got response data, node id: {}, data: {}", node_id, data_str);
                       ASSERT_EQ(data_str, std::to_string(node_id));
                     }));
@@ -156,7 +159,7 @@ TEST(NetworkTest, MessageBrokerClusterConfigTest) {
 }
 
 TEST(NetworkTest, MessageBrokerDuplicateContactNodeTest) {
-  auto request_handler = [](uint64_t /*received_request_id*/, ByteBufferType /*data*/) {};
+  auto request_handler = [](uint64_t /*received_request_id*/, const ByteBuffer& /*data*/) {};
 
   auto make_cluster_config = [](std::string this_address, std::string contact_address) {
     ex_actor::ClusterConfig config;
@@ -180,7 +183,7 @@ TEST(NetworkTest, MessageBrokerDuplicateContactNodeTest) {
 }
 
 TEST(NetworkTest, MessageBrokerDuplicateClusterNodesTest) {
-  auto request_handler = [](uint64_t /*received_request_id*/, ByteBufferType /*data*/) {};
+  auto request_handler = [](uint64_t /*received_request_id*/, const ByteBuffer& /*data*/) {};
 
   std::vector<ex_actor::NodeInfo> nodes {ex_actor::NodeInfo {.node_id = 0, .address = "tcp://127.0.0.1:5000"},
                                          ex_actor::NodeInfo {.node_id = 2, .address = "tcp://127.0.0.1:5001"},
@@ -221,7 +224,7 @@ TEST(NetworkTest, MessageBrokerDuplicateClusterNodesTest) {
 }
 
 TEST(NetworkTest, MessageBrokerUnknownNodesTest) {
-  auto request_handler = [](uint64_t /*received_request_id*/, ByteBufferType /*data*/) {};
+  auto request_handler = [](uint64_t /*received_request_id*/, const ByteBuffer& /*data*/) {};
 
   auto send_msg_to_unconnected_node = [&]() {
     ex_actor::ClusterConfig cluster_config {.this_node = {.node_id = 0, .address = "tcp://127.0.0.1:5000"},

@@ -29,8 +29,7 @@ exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
   EXA_THROW_CHECK(connected) << "Cannot connected to node " << remote_node_id;
 
   // 2. Specify the factory function in Spawn
-  auto ping_worker = co_await ex_actor::Spawn<&PingWorker::FactoryCreate>(
-      ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
+  auto ping_worker = co_await ex_actor::Spawn<&PingWorker::FactoryCreate>(/*name=*/"Alice").ToNode(remote_node_id);
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
   (void)ping_res;  // clang-tidy false positive

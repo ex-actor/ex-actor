@@ -104,7 +104,7 @@ struct TestActor {
 exec::task<void> MainCoroutine() {
   ex_actor::PriorityThreadPool thread_pool(1);
   ex_actor::Init(thread_pool.GetScheduler());
-  auto actor = co_await ex_actor::Spawn<TestActor>(ex_actor::ActorConfig {
+  auto actor = co_await ex_actor::Spawn<TestActor>().WithConfig({
     .priority = 1 // smaller number means higher priority
   });
   ex_actor::Shutdown();
@@ -144,9 +144,9 @@ exec::task<void> MainCoroutine() {
   });
   // 3. initialize the runtime with the scheduler union
   ex_actor::Init(scheduler_union.GetScheduler());
-  // 4. create two actors, specify the scheduler index in ActorConfig.
-  auto actor1 = co_await ex_actor::Spawn<TestActor>(ex_actor::ActorConfig {.scheduler_index = 0});
-  auto actor2 = co_await ex_actor::Spawn<TestActor>(ex_actor::ActorConfig {.scheduler_index = 1});
+  // 4. create two actors, specify the scheduler index using .WithConfig().
+  auto actor1 = co_await ex_actor::Spawn<TestActor>().WithConfig({.scheduler_index = 0});
+  auto actor2 = co_await ex_actor::Spawn<TestActor>().WithConfig({.scheduler_index = 1});
 
   uint64_t thread_id1 = co_await actor1.Send<&TestActor::GetThreadId>();
   uint64_t thread_id2 = co_await actor2.Send<&TestActor::GetThreadId>();

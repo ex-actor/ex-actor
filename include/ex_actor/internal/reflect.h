@@ -95,8 +95,8 @@ template <stdexec::sender Sender>
 using CoAwaitType =
     decltype(std::declval<exec::task<void>::promise_type>().await_transform(std::declval<Sender>()).await_resume());
 
-template <class Awaitable, class T>
-concept AwaitableOf = std::is_same_v<CoAwaitType<Awaitable>, T>;
+template <class Sender, class... Ts>
+concept SenderOf = stdexec::sender_of<Sender, stdexec::set_value_t(Ts...)>;
 
 template <auto kMethod>
 constexpr auto UnwrapReturnSenderIfNested() {

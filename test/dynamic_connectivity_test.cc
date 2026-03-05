@@ -101,7 +101,7 @@ class DynamicConnectivityTest {
     auto [method_calling_return_val] = stdexec::sync_wait(std::move(actor_method_calling_sender)).value();
     EXA_THROW_CHECK(method_calling_return_val == str) << ex_actor::fmt_lib::format("Error: local method calling error");
 
-    auto remote_actor_creation_sender = ex_actor::Spawn<&Echoer::Create>({.node_id = target_node_id});
+    auto remote_actor_creation_sender = ex_actor::Spawn<&Echoer::Create>().ToNode(target_node_id);
     auto [remote_actor_ref] = stdexec::sync_wait(std::move(remote_actor_creation_sender)).value();
     auto remote_actor_calling_sender = remote_actor_ref.Send<&Echoer::Echo>(str);
     auto [remote_method_calling_return_val] = stdexec::sync_wait(std::move(remote_actor_calling_sender)).value();

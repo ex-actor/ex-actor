@@ -88,8 +88,8 @@ TEST(SchedulerTest, SchedulerUnionTest) {
 
   auto coroutine = [&]() -> exec::task<void> {
     // create two actors, specify the scheduler index in ActorConfig.
-    auto actor1 = co_await ex_actor::Spawn<TestActor2>(ex_actor::ActorConfig {.scheduler_index = 0});
-    auto actor2 = co_await ex_actor::Spawn<TestActor2>(ex_actor::ActorConfig {.scheduler_index = 1});
+    auto actor1 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 0});
+    auto actor2 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 1});
 
     uint64_t thread_id1 = co_await actor1.Send<&TestActor2::GetThreadId>();
     uint64_t thread_id2 = co_await actor2.Send<&TestActor2::GetThreadId>();
@@ -113,8 +113,8 @@ TEST(SchedulerTest, TestResourceHolder) {
   ex_actor::HoldResource(std::move(union_pool));
   auto coroutine = [&]() -> exec::task<void> {
     // create two actors, specify the scheduler index in ActorConfig.
-    auto actor1 = co_await ex_actor::Spawn<TestActor2>(ex_actor::ActorConfig {.scheduler_index = 0});
-    auto actor2 = co_await ex_actor::Spawn<TestActor2>(ex_actor::ActorConfig {.scheduler_index = 1});
+    auto actor1 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 0});
+    auto actor2 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 1});
 
     uint64_t thread_id1 = co_await actor1.Send<&TestActor2::GetThreadId>();
     uint64_t thread_id2 = co_await actor2.Send<&TestActor2::GetThreadId>();

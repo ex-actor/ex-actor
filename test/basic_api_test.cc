@@ -117,27 +117,28 @@ TEST(BasicApiTest, SpawnWithFullConfig) {
     before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
     here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
 
-    i.e. you can't `co_await Spawn<X>(ActorConfig {.actor_name = "A"})`, instead, you should do this:
+    i.e. you can't `co_await Spawn<X>().WithConfig({.actor_name = "A"})` with a temporary config containing
+    heap-allocated fields, instead, you should define a separate named variable for the config:
     ```cpp
     ex_actor::ActorConfig a_config {.actor_name = "A"};
-    auto remote_a = co_await registry.Spawn<&A::Create>(a_config);
+    auto remote_a = co_await registry.Spawn<&A::Create>().WithConfig(a_config);
     ```
 
     see https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
     */
     ex_actor::ActorConfig config1 {.max_message_executed_per_activation = 10, .actor_name = "counter1"};
-    auto counter = co_await ex_actor::Spawn<Counter>(config1);
+    auto counter = co_await ex_actor::Spawn<Counter>().WithConfig(config1);
 
     ex_actor::ActorConfig config2 {.actor_name = "counter2"};
-    co_await ex_actor::Spawn<Counter>(config2);
+    co_await ex_actor::Spawn<Counter>().WithConfig(config2);
 
-    co_await ex_actor::Spawn<Counter>(ex_actor::ActorConfig {.scheduler_index = 0, .priority = 1});
+    co_await ex_actor::Spawn<Counter>().WithConfig({.scheduler_index = 0, .priority = 1});
 
     static_assert(rfl::internal::has_read_reflector<ex_actor::ActorRef<Counter>>);
     static_assert(rfl::internal::has_write_reflector<ex_actor::ActorRef<Counter>>);
     // test pass by lvalue
     ex_actor::ActorConfig config = {.max_message_executed_per_activation = 10};
-    co_await ex_actor::Spawn<Proxy>(config, counter);
+    co_await ex_actor::Spawn<Proxy>(counter).WithConfig(config);
     co_await ex_actor::DestroyActor(counter);
   };
   ex_actor::Init(/*thread_pool_size=*/10);
@@ -155,7 +156,7 @@ class TestActorWithNamedLookup {
 TEST(BasicApiTest, LookUpNamedActor) {
   auto coroutine = []() -> exec::task<void> {
     ex_actor::ActorConfig config {.actor_name = "counter"};
-    co_await ex_actor::Spawn<Counter>(config);
+    co_await ex_actor::Spawn<Counter>().WithConfig(config);
     auto test_retriever_actor = co_await ex_actor::Spawn<TestActorWithNamedLookup>();
 
     auto lookup_sender = test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();

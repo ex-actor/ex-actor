@@ -26,7 +26,7 @@ In the `EXA_REMOTE` macro, the first argument is a factory function to create yo
 
 This is used to generate a serialization schema for network communication.
 
-Then instead of calling `ex_actor::Spawn<YourClass>()`, you need to call `ex_actor::Spawn<&CreateFn>()`. Or an exception will be thrown.
+Then instead of calling `ex_actor::Spawn<YourClass>()`, you need to call `ex_actor::Spawn<&CreateFn>()`, and specify the target node using `.ToNode(node_id)`.
 
 Such boilerplate is caused by the lack of reflection before C++26. It can be simplified in C++26 using reflection, we'll add a new set of APIs for C++26 in the future, stay tuned!
 
@@ -43,7 +43,7 @@ class PingWorker {
   explicit PingWorker(std::string name) : name_(std::move(name)) {}
 
   // You can also put this outside the class if you don't want to modify your class
-  static PingWorker FactoryCreate(std::string name) { return PingWorker(std::move(name)); }
+  static PingWorker CreateFn(std::string name) { return PingWorker(std::move(name)); }
 
   std::string Ping(const std::string& message) { return "ack from " + name_ + ", msg got: " + message; }
 
@@ -52,14 +52,14 @@ class PingWorker {
 };
 
 // 1. Register the class & methods using EXA_REMOTE
-EXA_REMOTE(&PingWorker::FactoryCreate, &PingWorker::Ping);
+EXA_REMOTE(&PingWorker::CreateFn, &PingWorker::Ping);
 
 exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
   uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
 
-  // 2. Specify the factory function in ex_actor::Spawn
-  auto ping_worker = co_await ex_actor::Spawn<&PingWorker::FactoryCreate>(
-      ex_actor::ActorConfig {.node_id = remote_node_id}, /*name=*/"Alice");
+  // 2. Specify the create function in ex_actor::Spawn, and use .ToNode() to set the target node.
+  auto ping_worker =
+      co_await ex_actor::Spawn<&PingWorker::CreateFn>(/*name=*/"Alice").ToNode(remote_node_id);
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
 }

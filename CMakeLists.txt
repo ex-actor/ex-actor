@@ -83,6 +83,7 @@ add_library(
   STATIC
   src/ex_actor/internal/network.cc
   src/ex_actor/internal/actor_registry.cc
+  src/ex_actor/internal/global_registry.cc
   src/ex_actor/internal/logging.cc
 )
 target_include_directories(ex_actor PUBLIC
@@ -101,9 +102,9 @@ target_link_libraries(
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_link_libraries(ex_actor PUBLIC atomic)
 endif()
-# to suppress subobject linkage warnings in stdexec
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-  target_compile_options(ex_actor INTERFACE -Wno-subobject-linkage)
+  # stdexec's warnings, not our fault
+  target_compile_options(ex_actor PUBLIC -Wno-subobject-linkage)
 endif()
 add_library(ex_actor::ex_actor ALIAS ex_actor)
 

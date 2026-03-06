@@ -2,7 +2,7 @@
 
 !!! Note
 
-    This feature is currently in alpha stage. While it's fully functional and ready for use, it's not massively tested in production yet. Bugs, performance issues and API changes should be expected. Welcome to have a try and build together with us!
+    This feature is currently experimental. While it's fully functional and ready for use, it's not massively tested in production yet. Bugs, performance issues and API changes should be expected. Welcome to have a try and build together with us!
 
 
 Distributed mode enables you to create actors at remote nodes. When calling a remote actor, all arguments will be
@@ -32,10 +32,11 @@ Such boilerplate is caused by the lack of reflection before C++26. It can be sim
 
 ## Example
 
-<!-- doc test start, wrapper_script: test/multi_process_test.sh -->
+<!-- doc test start, wrapper_script: test/multi_process_test.py -->
 ```cpp
 #include <cassert>
 #include <cstdlib>
+#include <iostream>
 #include "ex_actor/api.h"
 
 class PingWorker {
@@ -54,32 +55,36 @@ class PingWorker {
 // 1. Register the class & methods using EXA_REMOTE
 EXA_REMOTE(&PingWorker::CreateFn, &PingWorker::Ping);
 
-exec::task<void> MainCoroutine(uint32_t this_node_id, size_t total_nodes) {
-  uint32_t remote_node_id = (this_node_id + 1) % total_nodes;
+exec::task<void> MainCoroutine(int argc, char** argv) {
+  uint32_t this_node_id = std::atoi(argv[1]);
+  std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
+                                                       {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
+  ex_actor::Init(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
+
+  uint32_t remote_node_id = (this_node_id + 1) % cluster_node_info.size();
 
   // 2. Specify the create function in ex_actor::Spawn, and use .ToNode() to set the target node.
   auto ping_worker =
       co_await ex_actor::Spawn<&PingWorker::CreateFn>(/*name=*/"Alice").ToNode(remote_node_id);
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
-}
+  std::cout << "All work done, node id: " << this_node_id << std::endl;
 
-int main(int argc, char** argv) {
-  uint32_t this_node_id = std::atoi(argv[1]);
-  std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
-                                                       {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
-  ex_actor::Init(/*thread_pool_size=*/4, this_node_id, cluster_node_info);
-
-  stdexec::sync_wait(MainCoroutine(this_node_id, cluster_node_info.size()));
-
+  // NOTE: Wait for OS exit signal before shutting down, otherwise the process will exit immediately,
+  // which might before the other node finish its work, causing error in the other node.
+  co_await ex_actor::WaitOsExitSignal();
   ex_actor::Shutdown();
 }
+
+int main(int argc, char** argv) { stdexec::sync_wait(MainCoroutine(argc, argv)); }
 ```
 <!-- doc test end -->
 
 Compile this program into a binary, let's say `distributed_node`.
 
-In one shell, run: `./distributed_node 0`, in another shell, run: `./distributed_node 1`. Both processes should exit normally.
+In one shell, run: `./distributed_node 0`, in another shell, run: `./distributed_node 1`. Both processes should print "All work done" log.
+
+The process will block on `ex_actor::WaitOsExitSignal()` until OS exit signal is received. You should kill them manually by CTRL+C or kill command.
 
 ## Serialization
 

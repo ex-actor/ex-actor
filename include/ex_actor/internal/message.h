@@ -102,7 +102,7 @@ struct NetworkReply {
 // ===================================================
 
 struct NodeState {
-  enum class Liveness : uint8_t { kAlive = 0, kConnecting, kQuitting, kDead };
+  enum class Liveness : uint8_t { kAlive = 0, kConnecting, kDead };
   Liveness liveness {Liveness::kAlive};
   uint64_t last_seen = 0;
   uint32_t node_id = 0;

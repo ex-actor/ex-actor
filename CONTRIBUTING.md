@@ -42,16 +42,16 @@ cd ex-actor
 
 pushd build
 # Build
-cmake --build . --config Debug
+cmake --build . --config Release
 
 # Run all tests
-ctest -C Debug --output-on-failure
+ctest -C Release --output-on-failure
 
 # Run specific test
 # option 1, handy for test without arguments
-./test/Debug/basic_api_test
+./test/Release/basic_api_test
 # option 2, for test with arguments/wrapper script
-ctest -C Debug --output-on-failure -R multi_process_test
+ctest -C Release --output-on-failure -R multi_process_test
 
 # Format code
 ./scripts/format.sh

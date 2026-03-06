@@ -1,3 +1,4 @@
+#include <barrier>
 #include <exception>
 #include <memory>
 #include <thread>
@@ -109,7 +110,8 @@ struct RetVoid {
 EXA_REMOTE(&RetVoid::Create, &RetVoid::ReturnVoid, &RetVoid::CoroutineReturnVoid);
 
 TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
-  auto node_main = [](uint32_t this_node_id) -> exec::task<void> {
+  std::barrier bar {2};
+  auto node_main = [&bar](uint32_t this_node_id) -> exec::task<void> {
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
     ex_actor::ClusterConfig cluster_config {.this_node = cluster_node_info.at(this_node_id)};
@@ -125,13 +127,15 @@ TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
     auto ping_res = co_await std::move(ping);
     EXPECT_EQ(ping_res, "ack from Alice, msg got: hello");
+    bar.arrive_and_wait();
   };
   std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });
   std::jthread node_1([&] { stdexec::sync_wait(node_main(1)); });
 }
 
 TEST(DistributedTest, ConstructionInDistributedMode) {
-  auto node_main = [](uint32_t this_node_id) -> exec::task<void> {
+  std::barrier bar {2};
+  auto node_main = [&bar](uint32_t this_node_id) -> exec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
@@ -212,6 +216,7 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto empty_actor = co_await registry.Spawn<&RetVoid::Create>().ToNode(remote_node_id);
     co_await empty_actor.Send<&RetVoid::ReturnVoid>();
     co_await empty_actor.Send<&RetVoid::CoroutineReturnVoid>();
+    bar.arrive_and_wait();
   };
 
   std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });
@@ -222,7 +227,8 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
 }
 
 TEST(DistributedTest, ActorLookUpInDistributeMode) {
-  auto node_main = [](uint32_t this_node_id) -> exec::task<void> {
+  std::barrier bar {2};
+  auto node_main = [&bar](uint32_t this_node_id) -> exec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
@@ -249,6 +255,7 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
     auto sender = actor.Send<&Echoer::Echo>(msg);
     auto reply_msg = co_await std::move(sender);
     EXPECT_EQ(reply_msg, msg);
+    bar.arrive_and_wait();
   };
 
   std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });
@@ -259,7 +266,8 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
 }
 
 TEST(DistributedTest, ActorRefSerializationTest) {
-  auto node_main = [](uint32_t this_node_id) -> exec::task<void> {
+  std::barrier bar {2};
+  auto node_main = [&bar](uint32_t this_node_id) -> exec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
                                                          {.node_id = 1, .address = "tcp://127.0.0.1:5302"}};
@@ -303,6 +311,7 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     auto proxy_echoer_sender = proxy_echoer.Send<&ProxyEchoer::Echo>(msg);
     auto proxy_echoer_reply = co_await std::move(proxy_echoer_sender);
     EXPECT_EQ(proxy_echoer_reply, msg);
+    bar.arrive_and_wait();
   };
 
   std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });

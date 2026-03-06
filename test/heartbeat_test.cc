@@ -1,10 +1,16 @@
+#include <chrono>
+#include <exception>
+#include <thread>
+
 #include "ex_actor/api.h"
+#include "ex_actor/internal/logging.h"
+
+namespace logging = ex_actor::internal::log;
 
 class PingWorker {
  public:
   explicit PingWorker(std::string name) : name_(std::move(name)) {}
 
-  // Boilerplate 1, the Create method
   static PingWorker Create(std::string name) { return PingWorker(std::move(name)); }
 
   std::string Ping(const std::string& message) { return "ack from " + name_ + ", msg got: " + message; }
@@ -16,6 +22,7 @@ class PingWorker {
 EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping);
 
 int main(int /*argc*/, char** argv) {
+  ex_actor::internal::InstallFallbackExceptionHandler();
   uint32_t this_node_id = std::atoi(argv[1]);
   auto coroutine = [](uint32_t this_node_id) -> exec::task<void> {
     std::vector<ex_actor::NodeInfo> cluster_node_info = {{.node_id = 0, .address = "tcp://127.0.0.1:5301"},
@@ -29,11 +36,17 @@ int main(int /*argc*/, char** argv) {
     bool connected = co_await ex_actor::WaitNodeAlive(remote_node_id, 5000);
     EXA_THROW_CHECK(connected) << "Cannot connect to node " << remote_node_id;
     auto ping_worker = co_await ex_actor::Spawn<&PingWorker::Create>(/*name=*/"Alice").ToNode(remote_node_id);
-    // Loop forever
     while (true) {
-      auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
-      std::ignore = co_await std::move(ping);
+      try {
+        auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
+        std::ignore = co_await std::move(ping);
+      } catch (const std::exception& e) {
+        logging::Error("Node {} caught exception during ping: {}", this_node_id, e.what());
+        break;
+      }
     }
+    co_await ex_actor::WaitOsExitSignal();
+    ex_actor::Shutdown();
   };
   stdexec::sync_wait(coroutine(this_node_id));
 }

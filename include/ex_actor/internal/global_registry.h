@@ -70,10 +70,19 @@ template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler, const ClusterConfig& cluster_config);
 
 /**
- * @brief Shutdown the global default registry. Must be called explicitly before `main` exits. Not thread-safe.
+ * @brief Shutdown the global default registry. Must be called explicitly before `main` exits.
  * @note Not thread-safe
  */
 void Shutdown();
+
+/**
+ * @brief Register signal handlers for SIGINT and SIGTERM, and return a task that completes when one of them is
+ * received. Useful for long-running server processes that should stay alive until interrupted.
+ * @note Your original signal handler won't be lost, we'll call yours after our code. When this function
+ * finishes, we'll restore your original signal handler.
+ * @warning Don't set signal handlers during the middle of this function, we don't promise safety in such case.
+ */
+exec::task<void> WaitOsExitSignal();
 
 /**
  * @brief Wait for the node to be alive.

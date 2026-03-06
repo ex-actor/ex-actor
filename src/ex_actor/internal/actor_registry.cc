@@ -172,7 +172,7 @@ exec::task<bool> ActorRegistryBackend::WaitNodeAlive(uint32_t node_id, uint64_t 
 ActorRegistry::~ActorRegistry() {
   log::Info("Start to shutdown actor registry");
   if (message_broker_ != nullptr) {
-    message_broker_->ClusterAlignedStop();
+    message_broker_->Stop();
   }
   ex::sync_wait(backend_actor_.CallActorMethod<&ActorRegistryBackend::AsyncDestroyAllActors>());
   ex::sync_wait(backend_actor_.AsyncDestroy());

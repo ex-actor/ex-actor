@@ -26,7 +26,6 @@
 
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/actor_ref.h"
-#include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"

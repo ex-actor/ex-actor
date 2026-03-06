@@ -61,8 +61,8 @@ TEST(NetworkTest, NodeInfoManagerBasicTest) {
 
   manager.DeactivateNode(1);
   manager.DeactivateNode(2);
-  EXPECT_TRUE(manager.Connected(1));
-  EXPECT_TRUE(manager.Connected(2));
+  EXPECT_TRUE(manager.Contains(1));
+  EXPECT_TRUE(manager.Contains(2));
   EXPECT_TRUE(manager.GenerateGossipMessage().node_states.empty());
 
   manager.Add(4, {.liveness = Liveness::kAlive, .last_seen = 100, .node_id = 4, .address = "tcp://127.0.0.1:7301"});
@@ -145,6 +145,7 @@ TEST(NetworkTest, MessageBrokerClusterConfigTest) {
       }
       stdexec::sync_wait(scope.on_empty());
       bar.arrive_and_wait();
+      message_broker.Stop();
     };
 
     std::jthread node_0(node_main, node_list, 0);

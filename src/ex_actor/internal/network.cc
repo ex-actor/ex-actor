@@ -109,24 +109,6 @@ bool NodeInfoManager::Contains(uint32_t node_id) {
   return node_id_to_state_.contains(node_id);
 }
 
-void NodeInfoManager::DeactivateNode(uint32_t node_id) {
-  std::lock_guard lock(mutex_);
-  auto& state = node_id_to_state_.at(node_id);
-  if (state.liveness == NodeState::Liveness::kAlive) {
-    state.liveness = NodeState::Liveness::kQuitting;
-    alive_peers_ -= 1;
-  }
-
-  if (alive_peers_ == 0) {
-    cv_.notify_all();
-  }
-}
-
-void NodeInfoManager::WaitAllNodesExit() {
-  std::unique_lock lock(mutex_);
-  cv_.wait(lock, [this]() { return alive_peers_ == 0; });
-}
-
 std::vector<NodeInfo> NodeInfoManager::GetHealthyNodeList() {
   std::vector<NodeInfo> node_list {};
   std::lock_guard lock(mutex_);
@@ -214,23 +196,35 @@ void NodeInfoManager::NotifyWaiters(uint32_t node_id) {
   }
 }
 
-void NodeInfoManager::CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms) {
+void NodeInfoManager::DeactivateNode(uint32_t node_id) {
+  auto it = node_id_to_state_.find(node_id);
+  if (it == node_id_to_state_.end() || it->second.liveness != NodeState::Liveness::kAlive) {
+    return;
+  }
+  it->second.liveness = NodeState::Liveness::kDead;
+  alive_peers_ -= 1;
+}
+
+std::vector<uint32_t> NodeInfoManager::CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms) {
   std::vector<std::shared_ptr<Waiter>> expired;
+  std::vector<uint32_t> newly_dead;
 
   {
     std::lock_guard lock(mutex_);
-    for (const auto& pair : node_id_to_state_) {
-      const auto& state = pair.second;
+    for (auto& pair : node_id_to_state_) {
+      auto& state = pair.second;
       if (state.liveness == NodeState::Liveness::kAlive && GetTimeMs() - state.last_seen >= timeout_ms) {
-        log::Error("Node {} detects that node {} is dead, try to exit", this_node_id_, pair.first);
-        // don't call static variables' destructors, or the program will hang in MessageBroker's destructor
-        std::quick_exit(1);
+        log::Warn(
+            "Node {} detects that node {} is dead(no heartbeat in last {}ms), all requests to this node will be failed",
+            this_node_id_, pair.first, timeout_ms);
+        DeactivateNode(pair.first);
+        newly_dead.push_back(pair.first);
       }
     }
     auto now_ms = GetTimeMs();
     for (auto& pair : node_id_to_waiters_) {
       auto& vec = pair.second;
-      std::erase_if(vec, [&](auto& waiter) {
+      std::erase_if(vec, [&expired, now_ms](auto& waiter) {
         if (waiter->deadline_ms <= now_ms) {
           expired.push_back(std::move(waiter));
           return true;
@@ -243,6 +237,7 @@ void NodeInfoManager::CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms) {
   for (auto& waiter : expired) {
     waiter->sem.Acquire(1);
   }
+  return newly_dead;
 }
 
 MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
@@ -271,33 +266,19 @@ MessageBroker::MessageBroker(const ClusterConfig& cluster_config,
 
 MessageBroker::~MessageBroker() {
   if (!stopped_.load(std::memory_order_acquire)) {
-    ClusterAlignedStop();
+    Stop();
   }
 }
 
-void MessageBroker::ClusterAlignedStop() {
-  // tell all other nodes: I'm going to quit
-  log::Info("[Cluster Aligned Stop] Node {} sending quit message to all other nodes", this_node_.node_id);
-  const auto node_list = node_manager_.GetHealthyNodeList();
-
-  for (const auto& node : node_list) {
-    if (node.node_id != this_node_.node_id) {
-      auto sender = SendRequest(node.node_id, ByteBuffer {}, MessageFlag::kQuit) | ex::then([](const auto&) {});
-      async_scope_.spawn(std::move(sender));
-    }
-  }
-
-  // This will stop gossip
+void MessageBroker::Stop() {
+  log::Info("Node {} stopping message broker", this_node_.node_id);
   stopped_.store(true, std::memory_order_release);
-  node_manager_.WaitAllNodesExit();
   ex::sync_wait(async_scope_.on_empty());
-  log::Info("[Cluster Aligned Stop] All nodes are going to quit, stopping node {}'s io threads.", this_node_.node_id);
-  // stop io threads first
   send_thread_.request_stop();
   recv_thread_.request_stop();
   send_thread_.join();
   recv_thread_.join();
-  log::Info("[Cluster Aligned Stop] Node {}'s io threads stopped, cluster aligned stop completed", this_node_.node_id);
+  log::Info("Node {}'s message broker stopped", this_node_.node_id);
 }
 
 void MessageBroker::EstablishConnectionTo(const NodeInfo& node_info) {
@@ -366,7 +347,7 @@ void MessageBroker::SendProcessLoop(const std::stop_token& stop_token) {
         multi.add(BytesToZmqMsg(std::move(operation->data)));
         auto& send_socket = node_id_to_send_socket_.At(operation->identifier.response_node_id);
         EXA_THROW_CHECK(multi.send(send_socket));
-        if (operation->identifier.flag == MessageFlag::kQuit || operation->identifier.flag == MessageFlag::kGossip) {
+        if (operation->identifier.flag == MessageFlag::kGossip) {
           send_request_id_to_operation_.Erase(operation->identifier.request_id_in_node);
           operation->Complete(ByteBuffer {});
         }
@@ -414,7 +395,10 @@ void MessageBroker::ReceiveProcessLoop(const std::stop_token& stop_token) {
   recv_socket_.set(zmq::sockopt::rcvtimeo, 100);
 
   while (!stop_token.stop_requested()) {
-    node_manager_.CheckHeartbeatAndExpireWaiters(network_config_.heartbeat_timeout_ms);
+    auto dead_nodes = node_manager_.CheckHeartbeatAndExpireWaiters(network_config_.heartbeat_timeout_ms);
+    for (auto dead_node_id : dead_nodes) {
+      ErrorOutPendingOperations(dead_node_id);
+    }
     zmq::multipart_t multi;
     if (!multi.recv(recv_socket_)) {
       continue;
@@ -438,14 +422,6 @@ void MessageBroker::HandleReceivedMessage(zmq::multipart_t multi) {
   uint32_t peer_node_id =
       (identifier.request_node_id == this_node_.node_id) ? identifier.response_node_id : identifier.request_node_id;
   node_manager_.RefreshLastSeen(peer_node_id, GetTimeMs());
-
-  if (identifier.flag == MessageFlag::kQuit) {
-    EXA_THROW_CHECK_EQ(data_bytes.size(), 0) << "Quit message should not have data";
-    log::Info("[Cluster Aligned Stop] Node {} detects node {} is going to quit", this_node_.node_id,
-              identifier.request_node_id);
-    node_manager_.DeactivateNode(identifier.request_node_id);
-    return;
-  }
 
   if (identifier.flag == MessageFlag::kGossip) {
     HandleGossip(std::move(data_bytes));
@@ -501,6 +477,43 @@ void MessageBroker::HandleGossip(zmq::message_t gossip_msg) {
     }
     node_manager_.RefreshLastSeen(state.node_id, state.last_seen);
   }
+}
+
+void MessageBroker::ErrorOutPendingOperations(uint32_t dead_node_id) {
+  std::vector<TypeErasedSendOperation*> to_error;
+  {
+    std::lock_guard lock(send_request_id_to_operation_.GetMutex());
+    auto& map = send_request_id_to_operation_.GetMap();
+    for (auto it = map.begin(); it != map.end();) {
+      if (it->second->identifier.response_node_id == dead_node_id) {
+        to_error.push_back(it->second);
+        it = map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (auto* op : to_error) {
+    op->SetError(std::make_exception_ptr(ThrowStream()
+                                         << fmt_lib::format("Node {} is dead, cannot complete request", dead_node_id)));
+  }
+
+  // Clean up received requests from the dead node that we haven't replied to yet.
+  // The dead node will never read the reply, so keeping these leaks memory.
+  {
+    std::lock_guard lock(received_request_id_to_identifier_.GetMutex());
+    auto& map = received_request_id_to_identifier_.GetMap();
+    for (auto it = map.begin(); it != map.end();) {
+      if (it->second.request_node_id == dead_node_id) {
+        it = map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  // Discard deferred replies queued for the dead node.
+  node_id_to_pending_replies_.TryMoveOut(dead_node_id);
 }
 
 bool MessageBroker::CheckNodeConnected(const uint32_t node_id) { return node_manager_.Connected(node_id); }

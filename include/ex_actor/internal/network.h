@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -67,7 +66,7 @@ struct ClusterConfig {
 
 namespace ex_actor::internal {
 
-enum class MessageFlag : uint8_t { kNormal = 0, kQuit, kGossip };
+enum class MessageFlag : uint8_t { kNormal = 0, kGossip };
 
 struct Identifier {
   uint32_t request_node_id;
@@ -90,20 +89,18 @@ class NodeInfoManager {
   void RefreshLastSeen(uint32_t node_id, uint64_t last_seen);
   bool Connected(uint32_t node_id, const std::string& address = "");
   bool Contains(uint32_t node_id);
-  void DeactivateNode(uint32_t node_id);
-  void WaitAllNodesExit();
   std::vector<NodeInfo> GetHealthyNodeList();
   GossipMessage GenerateGossipMessage();
   std::vector<NodeInfo> GetRandomPeers(size_t size);
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
   void NotifyWaiters(uint32_t node_id);
-  void CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms);
+  void DeactivateNode(uint32_t node_id);
+  std::vector<uint32_t> CheckHeartbeatAndExpireWaiters(uint64_t timeout_ms);
 
  private:
   uint32_t this_node_id_;
   std::unordered_map<uint32_t, NodeState> node_id_to_state_;
   std::unordered_map<uint32_t, std::vector<std::shared_ptr<Waiter>>> node_id_to_waiters_;
-  std::condition_variable cv_;
   std::mutex mutex_;
   std::mt19937 rng_ {std::random_device {}()};
   uint32_t alive_peers_ = 0;
@@ -116,7 +113,7 @@ class MessageBroker {
 
   ~MessageBroker();
 
-  void ClusterAlignedStop();
+  void Stop();
 
   // -------- std::execution sender adaption start--------
   struct TypeErasedSendOperation {
@@ -182,6 +179,7 @@ class MessageBroker {
   void HandleReceivedMessage(zmq::multipart_t multi);
   void SendGossip();
   void HandleGossip(zmq::message_t gossip_msg);
+  void ErrorOutPendingOperations(uint32_t dead_node_id);
 
   struct ReplyOperation {
     Identifier identifier;

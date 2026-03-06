@@ -14,6 +14,7 @@
 
 #include "ex_actor/internal/global_registry.h"
 
+#include <csignal>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -21,12 +22,41 @@
 #include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
+#include "ex_actor/internal/util.h"
 
 // ----------------------Global Default Registry--------------------------
 
 namespace {
 std::vector<std::shared_ptr<void>> resource_holder;
 std::unique_ptr<ex_actor::ActorRegistry> global_default_registry;
+
+ex_actor::Semaphore* signal_semaphore = nullptr;
+
+void (*prev_sigint_handler)(int) = SIG_DFL;
+void (*prev_sigterm_handler)(int) = SIG_DFL;
+
+void InvokePreviousHandler(void (*handler)(int), int sig) {
+  if (handler != SIG_DFL && handler != SIG_IGN && handler != nullptr) {
+    handler(sig);
+  }
+}
+
+void ShutdownSignalHandler(int sig) {
+  if (signal_semaphore != nullptr) {
+    signal_semaphore->Acquire(1);
+  }
+
+  switch (sig) {
+    case SIGINT:
+      InvokePreviousHandler(prev_sigint_handler, sig);
+      break;
+    case SIGTERM:
+      InvokePreviousHandler(prev_sigterm_handler, sig);
+      break;
+    default:
+      break;
+  }
+}
 }  // namespace
 
 namespace ex_actor::internal {
@@ -139,9 +169,23 @@ exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
   co_return co_await global_default_registry->WaitNodeAlive(node_id, timeout_ms);
 }
 
+exec::task<void> WaitOsExitSignal() {
+  Semaphore sem(1);
+  signal_semaphore = &sem;
+
+  prev_sigint_handler = std::signal(SIGINT, ShutdownSignalHandler);
+  prev_sigterm_handler = std::signal(SIGTERM, ShutdownSignalHandler);
+
+  co_await sem.OnDrained();
+
+  std::signal(SIGINT, prev_sigint_handler);
+  std::signal(SIGTERM, prev_sigterm_handler);
+  signal_semaphore = nullptr;
+}
+
 void Shutdown() {
-  internal::log::Info("Shutting down ex_actor.");
   EXA_THROW_CHECK(internal::IsGlobalDefaultRegistryInitialized()) << "Not initialized.";
+  internal::log::Info("Shutting down ex_actor.");
   global_default_registry.reset();
   resource_holder.clear();
 }

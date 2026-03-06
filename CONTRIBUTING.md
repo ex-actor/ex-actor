@@ -23,9 +23,9 @@ If you have your own ideas:
 
 ## Understand the code structure
 
-It's AI Era bro, we recommend you use AI tools like [Ask DeepWiki](https://deepwiki.com/ex-actor/ex-actor), or ask chat bot like ChatGPT&Gemini directly, which really helps.
+For quick glance without cloning the code, you can use [Ask DeepWiki](https://deepwiki.com/ex-actor/ex-actor).
 
-When coding, we also highly recommend you to use AI coding tools like Cursor, VSCode Copilot, Claude Code etc, which can help you ramp up much faster.
+For deeper dive we recommend you to use AI IDE like Cursor, VSCode Copilot etc, which can help you ramp up much faster.
 
 **If AI is not smart enough to help you, feel free to ask in [discussions](https://github.com/ex-actor/ex-actor/discussions), we're pleased to help you :-).**
 

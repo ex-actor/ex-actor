@@ -25,7 +25,7 @@ If you have your own ideas:
 
 For quick glance without cloning the code, you can use [Ask DeepWiki](https://deepwiki.com/ex-actor/ex-actor).
 
-For deeper dive we recommend you to use AI IDE like Cursor, VSCode Copilot etc, which can help you ramp up very fast.
+For deeper dive we recommend you to use AI coding tools like [Cursor](https://cursor.com/) and [VSCode Copilot](https://code.visualstudio.com/docs/copilot/overview), which can help you ramp up very fast.
 
 **If AI is not smart enough to help you, feel free to ask in [discussions](https://github.com/ex-actor/ex-actor/discussions), we're pleased to help you :-).**
 

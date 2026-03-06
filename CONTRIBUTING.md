@@ -23,7 +23,7 @@ If you have your own ideas:
 
 ## Understand the code structure
 
-For quick glance without cloning the code, you can use [Ask DeepWiki](https://deepwiki.com/ex-actor/ex-actor).
+For quick glance without cloning the code, you can use [Ask DeepWiki](https://deepwiki.com/ex-actor/ex-actor) (might not be up-to-date).
 
 For deeper dive we recommend you to use AI coding tools like [Cursor](https://cursor.com/) and [VSCode Copilot](https://code.visualstudio.com/docs/copilot/overview), which can help you ramp up very fast.
 
@@ -62,10 +62,10 @@ ctest -C Release --output-on-failure -R multi_process_test
 ```powershell
 cd ex-actor
 cmake -S . -B build -G "Visual Studio 17 2022"
-cmake --build build --config Debug
+cmake --build build --config Release
 
 # Run all tests
-ctest -C Debug --output-on-failure
+ctest -C Release --output-on-failure
 ```
 
 ## Clangd related

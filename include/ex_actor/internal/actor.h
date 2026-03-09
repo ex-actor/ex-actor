@@ -182,8 +182,9 @@ class Actor : public TypeErasedActor {
   /// Async destroy the actor, if there are still messages in the mailbox, they might not be processed.
   exec::task<void> AsyncDestroy() override {
     bool expected = false;
-    bool changed = pending_to_be_destroyed_.compare_exchange_strong(expected, true, std::memory_order_release,
-                                                                    std::memory_order_acquire);
+    bool changed = pending_to_be_destroyed_.compare_exchange_strong(expected, /*desired=*/true,
+                                                                    /*success=*/std::memory_order_release,
+                                                                    /*failure=*/std::memory_order_acquire);
     if (!changed) {
       co_return;
     }

@@ -199,7 +199,7 @@ class SpawnBuilder : public ex::sender_t {
   using completion_signatures = ex::completion_signatures<ex::set_value_t(ActorRef<UserClass>),
                                                           ex::set_error_t(std::exception_ptr), ex::set_stopped_t()>;
 
-  explicit SpawnBuilder(ActorRef<ActorRegistryBackend> backend_ref, Args... args)
+  explicit SpawnBuilder(LocalActorRef<ActorRegistryBackend> backend_ref, Args... args)
       : backend_ref_(std::move(backend_ref)), args_(std::move(args)...) {}
 
   SpawnBuilder& ToNode(uint32_t node_id) & {
@@ -251,7 +251,7 @@ class SpawnBuilder : public ex::sender_t {
         std::forward<Tuple>(args));
   }
 
-  ActorRef<ActorRegistryBackend> backend_ref_;
+  LocalActorRef<ActorRegistryBackend> backend_ref_;
   uint32_t node_id_ = 0;
   ActorConfig config_ {};
   std::tuple<Args...> args_;
@@ -375,7 +375,7 @@ class ActorRegistry {
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   std::unique_ptr<MessageBroker> message_broker_;
   Actor<ActorRegistryBackend> backend_actor_;
-  ActorRef<ActorRegistryBackend> backend_actor_ref_;
+  LocalActorRef<ActorRegistryBackend> backend_actor_ref_;
   exec::async_scope async_scope_;
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,

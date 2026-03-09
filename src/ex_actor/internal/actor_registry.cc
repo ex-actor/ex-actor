@@ -204,14 +204,13 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
       }()),
 
       backend_actor_(scheduler_->Clone(), ActorConfig {}, scheduler_->Clone(), cluster_config, message_broker_.get()),
-      backend_actor_ref_(this_node_id_, this_node_id_, /*actor_id=*/UINT64_MAX, &backend_actor_,
-                         message_broker_.get()) {}
+      backend_actor_ref_(/*actor_id=*/UINT64_MAX, &backend_actor_) {}
 
 exec::task<bool> ActorRegistry::WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
   if (node_id == this_node_id_) {
     co_return true;
   }
-  co_return co_await backend_actor_ref_.Send<&ActorRegistryBackend::WaitNodeAlive>(node_id, timeout_ms);
+  co_return co_await backend_actor_ref_.SendLocal<&ActorRegistryBackend::WaitNodeAlive>(node_id, timeout_ms);
 }
 
 }  // namespace ex_actor::internal

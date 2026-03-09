@@ -19,7 +19,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "ex_actor/internal/actor.h"
+#include "ex_actor/internal/local_actor_ref.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/message.h"
 #include "ex_actor/internal/network.h"
@@ -28,17 +28,15 @@
 
 namespace ex_actor::internal {
 template <class UserClass>
-class ActorRef {
+class ActorRef : public LocalActorRef<UserClass> {
  public:
-  ActorRef() : is_empty_(true) {}
+  ActorRef() : LocalActorRef<UserClass>() {}
 
   ActorRef(uint32_t this_node_id, uint32_t node_id, uint64_t actor_id, TypeErasedActor* actor,
            MessageBroker* message_broker)
-      : is_empty_(false),
+      : LocalActorRef<UserClass>(actor_id, actor),
         this_node_id_(this_node_id),
         node_id_(node_id),
-        actor_id_(actor_id),
-        type_erased_actor_(actor),
         message_broker_(message_broker) {}
 
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
@@ -50,7 +48,7 @@ class ActorRef {
 
   void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor, MessageBroker* message_broker) {
     this_node_id_ = this_node_id;
-    type_erased_actor_ = actor;
+    this->type_erased_actor_ = actor;
     message_broker_ = message_broker;
   }
 
@@ -60,22 +58,20 @@ class ActorRef {
   friend class ActorRef;
 
   // Converting constructor from ActorRef<U> where U* is convertible to UserClass*
-  template <class U>
-    requires std::is_convertible_v<U*, UserClass*>
+  template <class Other>
+    requires std::is_convertible_v<Other*, UserClass*>
   // NOLINTNEXTLINE(google-explicit-constructor) - implicit conversion is intentional for polymorphism support
-  ActorRef(const ActorRef<U>& other)
-      : is_empty_(other.is_empty_),
+  ActorRef(const ActorRef<Other>& other)
+      : LocalActorRef<UserClass>(other),
         this_node_id_(other.this_node_id_),
         node_id_(other.node_id_),
-        actor_id_(other.actor_id_),
-        type_erased_actor_(other.type_erased_actor_),
         message_broker_(other.message_broker_) {}
 
   // Converting assignment operator - delegates to converting constructor
-  template <class U>
-    requires std::is_convertible_v<U*, UserClass*>
-  ActorRef& operator=(const ActorRef<U>& other) {
-    *this = ActorRef(other);
+  template <class Other>
+    requires std::is_convertible_v<Other*, UserClass*>
+  ActorRef<UserClass>& operator=(const ActorRef<Other>& other) {
+    *this = ActorRef<UserClass>(other);
     return *this;
   }
 
@@ -99,26 +95,15 @@ class ActorRef {
    */
   template <auto kMethod, class... Args>
   [[nodiscard]] ex::sender auto SendLocal(Args... args) const {
-    static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
-                  "method is not invocable with the provided arguments");
-    if (IsEmpty()) [[unlikely]] {
-      throw std::runtime_error("Empty ActorRef, cannot call method on it.");
-    }
     EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
-    return type_erased_actor_->template CallActorMethod<kMethod>(std::move(args)...);
+    return LocalActorRef<UserClass>::template SendLocal<kMethod>(std::move(args)...);
   }
 
-  bool IsEmpty() const { return is_empty_; }
-
   uint32_t GetNodeId() const { return node_id_; }
-  uint64_t GetActorId() const { return actor_id_; }
 
  private:
-  bool is_empty_;
   uint32_t this_node_id_ = 0;
   uint32_t node_id_ = 0;
-  uint64_t actor_id_ = 0;
-  TypeErasedActor* type_erased_actor_ = nullptr;
   MessageBroker* message_broker_ = nullptr;
 
   template <auto kMethod, class... Args>
@@ -126,7 +111,7 @@ class ActorRef {
       -> exec::task<typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type> {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
-    if (IsEmpty()) [[unlikely]] {
+    if (this->IsEmpty()) [[unlikely]] {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
     if (node_id_ == this_node_id_) {
@@ -141,7 +126,7 @@ class ActorRef {
 
     NetworkRequest request {ActorMethodCallRequest {
         .handler_key = GetUniqueNameForFunction<kMethod>(),
-        .actor_id = actor_id_,
+        .actor_id = this->actor_id_,
         .serialized_args = Serialize(method_call_args),
     }};
 
@@ -202,7 +187,10 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
   };
 
   static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
-    ex_actor::internal::ActorRef<U> actor(0, rfl_type.node_id, rfl_type.actor_id, nullptr, nullptr);
+    // this_node_id(0) and TypeErasedActor*(nullptr) are placeholders;
+    // filled later in the Parser::read below.
+    ex_actor::internal::ActorRef<U> actor(/*this_node_id=*/0, rfl_type.node_id, rfl_type.actor_id, /*actor=*/nullptr,
+                                          /*message_broker=*/nullptr);
     return actor;
   }
 

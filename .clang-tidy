@@ -92,6 +92,7 @@ Checks: >
   -performance-avoid-endl,
   -readability-isolate-declaration,
   -readability-convert-member-functions-to-static,
+  -readability-make-member-function-const,
 
 FormatStyle: file
 CheckOptions:

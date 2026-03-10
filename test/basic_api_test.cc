@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
+#include <tuple>
 
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
@@ -162,7 +163,7 @@ TEST(BasicApiTest, LookUpNamedActor) {
     auto lookup_sender = test_retriever_actor.Send<&TestActorWithNamedLookup::LookUpActor>();
     auto lookup_reply = co_await std::move(lookup_sender);
 
-    auto actor = lookup_reply;
+    const auto& actor = lookup_reply;
     auto getvalue_sender = actor.Send<&Counter::GetValue>();
     auto getvalue_reply = co_await std::move(getvalue_sender);
     EXPECT_EQ(getvalue_reply, 0);
@@ -170,6 +171,16 @@ TEST(BasicApiTest, LookUpNamedActor) {
   ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
   ex_actor::Shutdown();
+}
+
+TEST(BasicApiTest, RemoteActorRefSlicedToLocalActorRefShouldThrowOnUse) {
+  ex_actor::internal::ActorRef<Counter> remote_ref(
+      /*this_node_id=*/1, /*node_id=*/2, /*actor_id=*/42, /*actor=*/nullptr, /*message_broker=*/nullptr);
+  // Slicing a remote ActorRef to LocalActorRef is allowed at the type level (due to inheritance),
+  // but calling SendLocal on it will throw because type_erased_actor_ is nullptr.
+  ex_actor::LocalActorRef<Counter> local_ref = remote_ref;
+  EXPECT_THAT([&] { std::ignore = local_ref.SendLocal<&Counter::GetValue>(); },
+              Throws<std::exception>(Property(&std::exception::what, HasSubstr("Local actor instance not set"))));
 }
 
 struct Base {

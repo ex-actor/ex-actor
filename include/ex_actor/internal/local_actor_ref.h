@@ -15,7 +15,6 @@
 #pragma once
 
 #include <cstdint>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -68,7 +67,8 @@ class LocalActorRef {
     static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
                   "method is not invocable with the provided arguments");
     EXA_THROW_CHECK(!IsEmpty()) << "Empty LocalActorRef, cannot call method on it.";
-    EXA_THROW_CHECK(type_erased_actor_ != nullptr) << "TypeErasedActor not set";
+    EXA_THROW_CHECK(type_erased_actor_ != nullptr)
+        << "Local actor instance not set, it's typically because you converted a remote ActorRef to LocalActorRef.";
     return type_erased_actor_->template CallActorMethod<kMethod>(std::move(args)...);
   }
 

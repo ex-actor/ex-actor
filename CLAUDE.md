@@ -9,3 +9,8 @@ when debugging tests, do not simplify the test code unless you are very confiden
 Based on Google Style Guide, with the following additions:
 
 - For all args that can't get its meaning from the variable name, add a `/*arg_name=*/` comment before the arg.
+- No one-line if/while/for/switch statements. Always use the `{}` block.
+- Don't std::pair, first/second is hard to read, always define a struct for better readability.
+- When using std::pair or iterators, don't use first/second or iterator->first/second, instead use struct binding like `auto& [key, value] = pair` for better readability.
+- Don't use placeholder `_` in struct binding. Always use meaningful variable names even it's not used.
+- In maps, when you can't get the key/value meaning from the variable name, add comments like `map</*key_meaning*/KeyType, /*value_meaning*/ValueType/>` for better readability. No "=" sign.

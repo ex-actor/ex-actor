@@ -22,6 +22,8 @@ constexpr uint64_t kDefaultHeartbeatTimeoutMs = 5000;
 constexpr uint64_t kDefaultGossipIntervalMs = 500;
 constexpr uint64_t kDefaultWaitNodeAliveTimeoutMs = 4000;
 constexpr size_t kDefaultGossipFanout = 3;
+constexpr uint64_t kDefaultHeartbeatCheckIntervalMs = 100;
+constexpr uint64_t kDefaultWaiterExpirationCheckIntervalMs = 100;
 
 }  // namespace internal
 }  // namespace ex_actor

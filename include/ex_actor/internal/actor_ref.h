@@ -33,11 +33,11 @@ class ActorRef : public LocalActorRef<UserClass> {
   ActorRef() : LocalActorRef<UserClass>() {}
 
   ActorRef(uint32_t this_node_id, uint32_t node_id, uint64_t actor_id, TypeErasedActor* actor,
-           MessageBroker* message_broker)
+           const LocalActorRef<MessageBroker>& broker_actor_ref)
       : LocalActorRef<UserClass>(actor_id, actor),
         this_node_id_(this_node_id),
         node_id_(node_id),
-        message_broker_(message_broker) {}
+        broker_actor_ref_(broker_actor_ref) {}
 
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
     if (lhs.is_empty_ && rhs.is_empty_) {
@@ -46,10 +46,11 @@ class ActorRef : public LocalActorRef<UserClass> {
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
   }
 
-  void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor, MessageBroker* message_broker) {
+  void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor,
+                           const LocalActorRef<MessageBroker>& broker_actor_ref) {
     this_node_id_ = this_node_id;
     this->type_erased_actor_ = actor;
-    message_broker_ = message_broker;
+    broker_actor_ref_ = broker_actor_ref;
   }
 
   friend rfl::Reflector<ActorRef<UserClass>>;
@@ -65,7 +66,7 @@ class ActorRef : public LocalActorRef<UserClass> {
       : LocalActorRef<UserClass>(other),
         this_node_id_(other.this_node_id_),
         node_id_(other.node_id_),
-        message_broker_(other.message_broker_) {}
+        broker_actor_ref_(other.broker_actor_ref_) {}
 
   // Converting assignment operator - delegates to converting constructor
   template <class Other>
@@ -104,7 +105,7 @@ class ActorRef : public LocalActorRef<UserClass> {
  private:
   uint32_t this_node_id_ = 0;
   uint32_t node_id_ = 0;
-  MessageBroker* message_broker_ = nullptr;
+  LocalActorRef<MessageBroker> broker_actor_ref_;
 
   template <auto kMethod, class... Args>
   [[nodiscard]] auto SendInternal(Args... args) const
@@ -119,7 +120,7 @@ class ActorRef : public LocalActorRef<UserClass> {
     }
 
     // remote call
-    EXA_THROW_CHECK(message_broker_ != nullptr) << "Message broker not set";
+    EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
     using Sig = Signature<decltype(kMethod)>;
     ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
         .args_tuple = typename Sig::DecayedArgsTupleType(std::move(args)...)};
@@ -131,7 +132,8 @@ class ActorRef : public LocalActorRef<UserClass> {
     }};
 
     using UnwrappedType = decltype(UnwrapReturnSenderIfNested<kMethod>())::type;
-    ByteBuffer response_buf = co_await message_broker_->SendRequest(node_id_, Serialize(request));
+    ByteBuffer response_buf =
+        co_await broker_actor_ref_.SendLocal<&MessageBroker::SendRequest>(node_id_, Serialize(request));
     auto reply = Deserialize<NetworkReply>(response_buf);
 
     auto& ret = std::get<ActorMethodCallReply>(reply.variant);
@@ -147,6 +149,21 @@ class ActorRef : public LocalActorRef<UserClass> {
   }
 };
 
+template <class UserClass>
+void NotifyOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref) {
+  if constexpr (requires(UserClass& user_class, ActorRef<UserClass> self_ref) { user_class.OnSpawned(self_ref); }) {
+    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(self_ref);
+  }
+}
+
+template <class UserClass>
+void NotifyOnSpawned(TypeErasedActor* actor, const LocalActorRef<UserClass>& self_ref) {
+  if constexpr (requires(UserClass& user_class, LocalActorRef<UserClass> self_ref) {
+                  user_class.OnSpawned(self_ref);
+                }) {
+    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(self_ref);
+  }
+}
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
@@ -173,7 +190,7 @@ namespace ex_actor::internal {
 struct ActorRefSerdeContext {
   uint32_t this_node_id = 0;
   std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
-  MessageBroker* message_broker = nullptr;
+  LocalActorRef<MessageBroker> broker_actor_ref;
 };
 }  // namespace ex_actor::internal
 
@@ -190,7 +207,7 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
     // this_node_id(0) and TypeErasedActor*(nullptr) are placeholders;
     // filled later in the Parser::read below.
     ex_actor::internal::ActorRef<U> actor(/*this_node_id=*/0, rfl_type.node_id, rfl_type.actor_id, /*actor=*/nullptr,
-                                          /*message_broker=*/nullptr);
+                                          /*broker_actor_ref=*/ {});
     return actor;
   }
 
@@ -221,7 +238,7 @@ struct Parser<capnproto::ReaderWithContext<ex_actor::internal::ActorRefSerdeCont
     auto actor_ref = parse_res.value();
     const auto& info = reader.info;
     actor_ref.SetLocalRuntimeInfo(info.this_node_id, info.actor_look_up_fn(actor_ref.GetActorId()),
-                                  info.message_broker);
+                                  info.broker_actor_ref);
     return actor_ref;
   }
 

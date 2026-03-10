@@ -49,6 +49,7 @@ class TypeErasedActor {
   ex::sender auto CallActorMethodUseTuple(std::tuple<Args...> args_tuple);
 
   const ActorConfig& GetActorConfig() const { return actor_config_; }
+  void* GetUserClassInstanceAddress() const { return cached_user_class_instance_address_; }
 
   virtual void PullMailboxAndRun() = 0;
 

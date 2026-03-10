@@ -43,7 +43,7 @@ namespace ex_actor::internal {
 class ActorRegistryBackend {
  public:
   explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                                const ClusterConfig& cluster_config, MessageBroker* message_broker);
+                                const ClusterConfig& cluster_config, LocalActorRef<MessageBroker> broker_actor_ref);
 
   exec::task<void> AsyncDestroyAllActors();
 
@@ -73,9 +73,7 @@ class ActorRegistryBackend {
       co_return co_await SpawnLocal<UserClass, kCreateFn>(node_id, std::move(config), std::move(args)...);
     }
 
-    if (message_broker_ != nullptr) {
-      EXA_THROW_CHECK(message_broker_->CheckNodeConnected(node_id)) << "Can't find node " << node_id;
-    }
+    EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
 
     using CreateFnSig = Signature<decltype(kCreateFn)>;
 
@@ -87,14 +85,15 @@ class ActorRegistryBackend {
         .serialized_args = Serialize(actor_creation_args),
     }};
 
-    ByteBuffer response_buf = co_await message_broker_->SendRequest(node_id, Serialize(request));
+    ByteBuffer response_buf =
+        co_await broker_actor_ref_.SendLocal<&MessageBroker::SendRequest>(node_id, Serialize(request));
     auto reply = Deserialize<NetworkReply>(response_buf);
 
     auto& ret = std::get<ActorCreationReply>(reply.variant);
     if (!ret.success) {
       EXA_THROW << "Got actor creation error from remote node:" << ret.error;
     }
-    co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, nullptr, message_broker_);
+    co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, /*actor=*/nullptr, broker_actor_ref_);
   }
 
   template <class UserClass>
@@ -116,7 +115,7 @@ class ActorRegistryBackend {
     if (actor_name_to_id_.contains(name)) {
       const auto actor_id = actor_name_to_id_.at(name);
       const auto& actor = actor_id_to_actor_.at(actor_id);
-      return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id, actor.get(), message_broker_);
+      return ActorRef<UserClass>(this_node_id_, this_node_id_, actor_id, actor.get(), broker_actor_ref_);
     }
     return std::nullopt;
   }
@@ -128,18 +127,24 @@ class ActorRegistryBackend {
       co_return GetActorRefByName<UserClass>(name);
     }
 
+    EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
+
     NetworkRequest request {ActorLookUpRequest {.actor_name = name}};
-    ByteBuffer response_buf = co_await message_broker_->SendRequest(node_id, Serialize(request));
+    ByteBuffer response_buf =
+        co_await broker_actor_ref_.SendLocal<&MessageBroker::SendRequest>(node_id, Serialize(request));
     auto reply = Deserialize<NetworkReply>(response_buf);
 
     auto& ret = std::get<ActorLookUpReply>(reply.variant);
     if (ret.success) {
-      co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, nullptr, message_broker_);
+      co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, /*actor=*/nullptr, broker_actor_ref_);
     }
     co_return std::nullopt;
   }
 
-  exec::task<void> HandleNetworkRequest(uint64_t received_request_id, ByteBuffer request_buffer);
+  /**
+   * @brief Handle a network request. Returns the serialized reply data.
+   */
+  exec::task<ByteBuffer> HandleNetworkRequest(ByteBuffer request_buffer);
   exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
@@ -147,7 +152,8 @@ class ActorRegistryBackend {
   exec::task<ActorRef<UserClass>> SpawnLocal(uint32_t node_id, ActorConfig config, Args... args) {
     auto actor_id = GenerateRandomActorId();
     auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::move(args)...);
-    auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor.get(), message_broker_);
+    auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor.get(), broker_actor_ref_);
+    NotifyOnSpawned<UserClass>(actor.get(), handle);
     if (config.actor_name.has_value()) {
       std::string& name = *config.actor_name;
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists, name=" << name;
@@ -160,15 +166,15 @@ class ActorRegistryBackend {
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   uint32_t this_node_id_ = 0;
-  MessageBroker* message_broker_ = nullptr;
+  LocalActorRef<MessageBroker> broker_actor_ref_;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
 
   void InitRandomNumGenerator();
   uint64_t GenerateRandomActorId();
-  void ReplyToBroker(uint64_t received_request_id, const NetworkReply& reply);
-  void HandleActorCreationRequest(uint64_t received_request_id, ActorCreationRequest msg);
-  exec::task<void> HandleActorMethodCallRequest(uint64_t received_request_id, ActorMethodCallRequest msg);
+  ByteBuffer SerializeReply(const NetworkReply& reply);
+  void HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out);
+  exec::task<ByteBuffer> HandleActorMethodCallRequest(ActorMethodCallRequest msg);
 };
 
 // -----------SpawnBuilder: a builder-style sender for actor spawning-----------
@@ -373,10 +379,10 @@ class ActorRegistry {
   uint32_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
-  std::unique_ptr<MessageBroker> message_broker_;
+  std::unique_ptr<Actor<MessageBroker>> broker_actor_;
+  LocalActorRef<MessageBroker> broker_actor_ref_;
   Actor<ActorRegistryBackend> backend_actor_;
   LocalActorRef<ActorRegistryBackend> backend_actor_ref_;
-  exec::async_scope async_scope_;
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                          const ClusterConfig& cluster_config);

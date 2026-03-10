@@ -175,7 +175,7 @@ TEST(BasicApiTest, LookUpNamedActor) {
 
 TEST(BasicApiTest, RemoteActorRefSlicedToLocalActorRefShouldThrowOnUse) {
   ex_actor::internal::ActorRef<Counter> remote_ref(
-      /*this_node_id=*/1, /*node_id=*/2, /*actor_id=*/42, /*actor=*/nullptr, /*message_broker=*/nullptr);
+      /*this_node_id=*/1, /*node_id=*/2, /*actor_id=*/42, /*actor=*/nullptr, /*broker_actor_ref=*/ {});
   // Slicing a remote ActorRef to LocalActorRef is allowed at the type level (due to inheritance),
   // but calling SendLocal on it will throw because type_erased_actor_ is nullptr.
   ex_actor::LocalActorRef<Counter> local_ref = remote_ref;

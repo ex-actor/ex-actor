@@ -102,9 +102,8 @@ struct NetworkReply {
 // ===================================================
 
 struct NodeState {
-  enum class Liveness : uint8_t { kAlive = 0, kDead };
-  Liveness liveness {Liveness::kAlive};
-  uint64_t last_seen = 0;
+  bool alive = true;
+  uint64_t last_seen_timestamp_ms = 0;
   uint32_t node_id = 0;
   std::string address;
 };

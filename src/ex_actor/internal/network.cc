@@ -33,6 +33,8 @@
 #include "ex_actor/internal/serialization.h"
 #include "ex_actor/internal/util.h"
 
+namespace ex_actor::internal {
+
 namespace {
 inline uint64_t GetTimeMs() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
@@ -55,9 +57,9 @@ zmq::message_t BytesToZmqMsg(ex_actor::internal::ByteBuffer&& bytes) {
   auto deleter = [](void*, void* hint) { delete static_cast<ex_actor::internal::ByteBuffer*>(hint); };
   return zmq::message_t(owned->data(), owned->size(), deleter, owned);
 }
+
 }  // namespace
 
-namespace ex_actor::internal {
 // ----------------------RecvSocketPuller--------------------------
 
 RecvSocketPuller::RecvSocketPuller(zmq::socket_t recv_socket, Callback callback)
@@ -147,27 +149,43 @@ void PeriodicalTaskScheduler::Loop(const std::stop_token& stop_token) {
 // ----------------------MessageBroker--------------------------
 
 MessageBroker::MessageBroker(const ClusterConfig& cluster_config)
-    : this_node_(cluster_config.this_node),
-      network_config_(cluster_config.network_config),
-      last_heartbeat_ms_(GetTimeMs()) {
-  node_id_to_state_[this_node_.node_id] = {.liveness = NodeState::Liveness::kAlive,
-                                           .last_seen = GetTimeMs(),
+    : this_node_(cluster_config.this_node), network_config_(cluster_config.network_config) {
+  EXA_THROW_CHECK(!this_node_.address.empty()) << "this node's address must not be empty";
+  node_id_to_state_[this_node_.node_id] = {.alive = true,
+                                           .last_seen_timestamp_ms = GetTimeMs(),
                                            .node_id = this_node_.node_id,
                                            .address = this_node_.address};
-  if (!this_node_.address.empty()) {
-    if (!cluster_config.contact_node.address.empty()) {
-      EXA_THROW_CHECK(this_node_.address != cluster_config.contact_node.address &&
-                      this_node_.node_id != cluster_config.contact_node.node_id)
-          << "The local node has the same node ID or address as the contact node.";
-      EstablishConnection(cluster_config.contact_node);
-    }
+  if (cluster_config.contact_node.address.empty()) {
+    // the first node in the cluster, no contact node to connect to
+    return;
   }
+  // insert contact node
+  EXA_THROW_CHECK(!cluster_config.contact_node.address.empty()) << "contact_node's address must not be empty";
+  EXA_THROW_CHECK_NE(cluster_config.contact_node.node_id, this_node_.node_id)
+      << "contact_node's node_id must not be the same as this node's node_id";
+  EXA_THROW_CHECK_NE(cluster_config.contact_node.address, cluster_config.this_node.address)
+      << "contact_node's node_id must not be the same as this node's node_id";
+  node_id_to_state_[cluster_config.contact_node.node_id] = {.alive = true,
+                                                            .last_seen_timestamp_ms = GetTimeMs(),
+                                                            .node_id = cluster_config.contact_node.node_id,
+                                                            .address = cluster_config.contact_node.address};
+  OnNodeAlive(cluster_config.contact_node.node_id);
 }
 
 MessageBroker::~MessageBroker() {
   if (!stopped_) {
     log::Critical("MessageBroker destroyed without calling Stop() first, node_id={}", this_node_.node_id);
   }
+}
+
+void MessageBroker::OnSpawned(LocalActorRef<MessageBroker> self_actor_ref) { self_actor_ref_ = self_actor_ref; }
+
+void MessageBroker::Start(const std::string& address, RequestHandler request_handler) {
+  EXA_THROW_CHECK(!self_actor_ref_.IsEmpty()) << "OnSpawned() must be called before Start()";
+  EXA_THROW_CHECK(request_handler != nullptr) << "request_handler must not be null";
+  request_handler_ = std::move(request_handler);
+  StartRecvSocketPuller(address);
+  StartPeriodicalTaskScheduler();
 }
 
 exec::task<void> MessageBroker::Stop() {
@@ -184,14 +202,107 @@ exec::task<void> MessageBroker::Stop() {
   stopped_ = true;
 }
 
-void MessageBroker::OnSpawned(LocalActorRef<MessageBroker> self_actor_ref) { self_actor_ref_ = self_actor_ref; }
+exec::task<void> MessageBroker::DispatchReceivedMessage(zmq::multipart_t multi) {
+  EXA_THROW_CHECK_EQ(multi.size(), 2) << "Expected 2-part message, got " << multi.size() << " parts";
 
-void MessageBroker::Start(const std::string& address, RequestHandler request_handler) {
-  EXA_THROW_CHECK(!self_actor_ref_.IsEmpty()) << "OnSpawned() must be called before Start()";
-  EXA_THROW_CHECK(request_handler != nullptr) << "request_handler must not be null";
-  request_handler_ = std::move(request_handler);
-  StartRecvSocketPuller(address);
-  StartPeriodicalTaskScheduler();
+  auto identifier_bytes_span =
+      std::span<const std::byte>(static_cast<const std::byte*>(multi[0].data()), multi[0].size());
+  auto identifier = Deserialize<Identifier>(identifier_bytes_span);
+
+  multi.pop();  // identifier frame already parsed above
+  zmq::message_t data_msg = multi.pop();
+  auto data = ByteBuffer(static_cast<const std::byte*>(data_msg.data()),
+                         static_cast<const std::byte*>(data_msg.data()) + data_msg.size());
+
+  if (identifier.flag == MessageFlag::kGossip) {
+    HandleGossipMessage(data);
+  } else if (identifier.request_node_id == this_node_.node_id) {
+    HandleRepliedResponse(identifier.request_id, std::move(data));
+  } else if (identifier.response_node_id == this_node_.node_id) {
+    co_await HandleIncomingRequest(identifier, std::move(data));
+  } else {
+    EXA_THROW << "Invalid identifier in received message";
+  }
+}
+
+exec::task<ByteBuffer> MessageBroker::SendRequest(uint32_t to_node_id, ByteBuffer data) {
+  EXA_THROW_CHECK_NE(to_node_id, this_node_.node_id) << "Cannot send message to current node";
+  uint64_t request_id = SendToNode(to_node_id, MessageFlag::kNormal, std::move(data));
+  auto [iter, inserted] = outstanding_requests_.try_emplace(request_id);
+  EXA_THROW_CHECK(inserted);
+  auto& outstanding_request = iter->second;
+  outstanding_request.response_node_id = to_node_id;
+
+  co_await outstanding_request.sem.OnDrained();
+
+  auto response_bytes = std::move(outstanding_request.response_bytes);
+  auto exception_ptr = outstanding_request.exception_ptr;
+  outstanding_requests_.erase(iter);
+
+  if (exception_ptr) {
+    std::rethrow_exception(exception_ptr);
+  }
+  co_return std::move(response_bytes);
+}
+
+exec::task<bool> MessageBroker::WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
+  if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
+    auto& [found_node_id, node_state] = *iter;
+    if (node_state.alive) {
+      co_return true;
+    }
+  }
+  auto& waiters = node_id_to_waiters_[node_id];
+  auto waiter = waiters.emplace(waiters.end(), GetTimeMs() + timeout_ms);
+
+  co_await waiter->sem.OnDrained();
+  bool arrived = waiter->arrived;
+  waiters.erase(waiter);
+  co_return arrived;
+}
+
+void MessageBroker::BroadcastGossip() {
+  // update last seen timestamp for ourselves to current time
+  MapAt(node_id_to_state_, this_node_.node_id).last_seen_timestamp_ms = GetTimeMs();
+
+  // broadcast all known node states(include ourselves) to random peers
+  std::vector<uint32_t> node_ids = GetRandomPeers(network_config_.gossip_fanout);
+  GossipMessage gossip_message;
+  gossip_message.node_states.reserve(node_id_to_state_.size());
+  for (const auto& [node_id, node_state] : node_id_to_state_) {
+    gossip_message.node_states.emplace_back(node_state);
+  }
+  auto serialized_gossip_message = Serialize(gossip_message);
+
+  for (uint32_t node_id : node_ids) {
+    SendToNode(node_id, MessageFlag::kGossip, serialized_gossip_message);
+  }
+}
+
+void MessageBroker::CheckHeartbeatTimeout() {
+  for (auto& [node_id, state] : node_id_to_state_) {
+    if (!state.alive                                                                          // already dead
+        || node_id == this_node_.node_id                                                      // ourselves
+        || GetTimeMs() - state.last_seen_timestamp_ms < network_config_.heartbeat_timeout_ms  // not timeout yet
+    ) {
+      continue;
+    }
+    MapAt(node_id_to_state_, node_id).alive = false;
+    OnNodeDead(node_id);
+  }
+}
+
+void MessageBroker::CheckNodeAlivenessWaiterTimeout() {
+  auto now_ms = GetTimeMs();
+  for (auto& [node_id, waiters] : node_id_to_waiters_) {
+    for (auto it = waiters.begin(); it != waiters.end();) {
+      auto& waiter = *it;
+      ++it;  // advance before signaling -- the coroutine may erase this node on resume
+      if (!waiter.arrived && waiter.deadline_ms <= now_ms) {
+        waiter.sem.Acquire(1);
+      }
+    }
+  }
 }
 
 void MessageBroker::StartRecvSocketPuller(const std::string& address) {
@@ -218,37 +329,143 @@ void MessageBroker::StartPeriodicalTaskScheduler() {
       kDefaultWaiterExpirationCheckIntervalMs);
 }
 
-exec::task<void> MessageBroker::DispatchReceivedMessage(zmq::multipart_t multi) {
-  EXA_THROW_CHECK_EQ(multi.size(), 2) << "Expected 2-part message, got " << multi.size() << " parts";
+std::vector<uint32_t> MessageBroker::GetRandomPeers(size_t fanout) {
+  EXA_THROW_CHECK_GT(fanout, 0);
 
-  auto identifier_bytes_span =
-      std::span<const std::byte>(static_cast<const std::byte*>(multi[0].data()), multi[0].size());
-  auto identifier = Deserialize<Identifier>(identifier_bytes_span);
+  // get all alive nodes except ourselves
+  std::vector<uint32_t> node_ids;
+  node_ids.reserve(node_id_to_state_.size());
+  for (const auto& [node_id, node_state] : node_id_to_state_) {
+    if (node_id != this_node_.node_id && node_state.alive) {
+      node_ids.emplace_back(node_id);
+    }
+  }
 
-  multi.pop();  // identifier frame already parsed above
-  zmq::message_t data_msg = multi.pop();
-  auto data = ByteBuffer(static_cast<const std::byte*>(data_msg.data()),
-                         static_cast<const std::byte*>(data_msg.data()) + data_msg.size());
+  // shuffle and truncate to fanout size
+  std::shuffle(node_ids.begin(), node_ids.end(), rng_);
+  if (fanout < node_ids.size()) {
+    node_ids.resize(fanout);
+  }
+  return node_ids;
+}
 
-  if (identifier.flag == MessageFlag::kGossip) {
-    HandleGossipMessage(data);
-  } else if (identifier.request_node_id == this_node_.node_id) {
-    HandleRepliedResponse(identifier.request_id_in_node, std::move(data));
-  } else if (identifier.response_node_id == this_node_.node_id) {
-    co_await HandleIncomingRequest(identifier, std::move(data));
-  } else {
-    EXA_THROW << "Invalid identifier in received message";
+void MessageBroker::HandleGossipMessage(const ByteBuffer& gossip_data) {
+  const auto gossip_message = Deserialize<GossipMessage>(gossip_data);
+
+  for (const auto& incoming_node_state : gossip_message.node_states) {
+    auto [iter, inserted] = node_id_to_state_.try_emplace(incoming_node_state.node_id, incoming_node_state);
+    if (inserted) {
+      // new node found
+      OnNodeAlive(incoming_node_state.node_id);
+      continue;
+    }
+    // update existing node state
+    auto& cur_node_state = iter->second;
+    EXA_THROW_CHECK_EQ(cur_node_state.address, incoming_node_state.address)
+        << fmt_lib::format("Node {} has conflicting address, {} vs {}.", cur_node_state.node_id, cur_node_state.address,
+                           incoming_node_state.address);
+    if (incoming_node_state.alive) {
+      EXA_THROW_CHECK(cur_node_state.alive)
+          << "Can't transform from dead to alive now, will support in the future once failover is implemented";
+    }
+    bool new_node_dead = cur_node_state.alive && !incoming_node_state.alive;
+    cur_node_state.alive = incoming_node_state.alive;
+    cur_node_state.last_seen_timestamp_ms =
+        std::max(cur_node_state.last_seen_timestamp_ms, incoming_node_state.last_seen_timestamp_ms);
+    if (new_node_dead) {
+      OnNodeDead(incoming_node_state.node_id);
+    }
   }
 }
 
-void MessageBroker::FlushDeferredReplies(uint32_t node_id) {
-  auto node_handle = deferred_replies_.extract(node_id);
+void MessageBroker::HandleRepliedResponse(uint64_t request_id_in_node, ByteBuffer data) {
+  auto it = outstanding_requests_.find(request_id_in_node);
+  if (it == outstanding_requests_.end()) {
+    log::Critical("Received response for unknown request id {}", request_id_in_node);
+    return;
+  }
+  auto& [request_id, pending] = *it;
+  pending.response_bytes = std::move(data);
+  pending.sem.Acquire(1);
+}
+
+exec::task<void> MessageBroker::HandleIncomingRequest(Identifier identifier, ByteBuffer data) {
+  EXA_THROW_CHECK(request_handler_ != nullptr) << "Request handler not set";
+  ByteBuffer reply_data = co_await request_handler_(std::move(data));
+  SendReply(identifier, std::move(reply_data));
+}
+
+void MessageBroker::OnNodeAlive(uint32_t node_id) {
+  const auto& new_node = MapAt(node_id_to_state_, node_id);
+  log::Info("[Gossip] Node {} found node {}, connecting to it at {}", this_node_.node_id, new_node.node_id,
+            new_node.address);
+
+  // Create send socket
+  auto [socket_iter, socket_inserted] =
+      node_id_to_send_socket_.try_emplace(new_node.node_id, zmq::socket_t(zmq_context_, zmq::socket_type::dealer));
+  EXA_THROW_CHECK(socket_inserted) << "Node " << new_node.node_id << " already has a send socket";
+  auto& [socket_node_id, socket] = *socket_iter;
+  socket.set(zmq::sockopt::linger, 0);
+  socket.connect(new_node.address);
+
+  // Notify waiters
+  auto waiter_iter = node_id_to_waiters_.find(node_id);
+  if (waiter_iter != node_id_to_waiters_.end()) {
+    auto& [waiter_node_id, waiters] = *waiter_iter;
+    for (auto waiter_iter = waiters.begin(); waiter_iter != waiters.end();) {
+      auto& waiter = *waiter_iter;
+      ++waiter_iter;  // advance before signaling -- the coroutine may erase this node on resume
+      waiter.arrived = true;
+      waiter.sem.Acquire(1);
+    }
+  }
+
+  // flush deferred replies
+  auto node_handle = deferred_replies_.extract(new_node.node_id);
   if (node_handle.empty()) {
     return;
   }
   for (auto&& reply : node_handle.mapped()) {
     SendReply(reply.identifier, std::move(reply.data));
   }
+}
+
+void MessageBroker::OnNodeDead(uint32_t node_id) {
+  log::Warn("Node {} detects that node {} is dead, all requests to this node will be failed, heartbeat timeout is {}ms",
+            this_node_.node_id, node_id, network_config_.heartbeat_timeout_ms);
+  // Error out waiting outstanding requests
+  for (auto it = outstanding_requests_.begin(); it != outstanding_requests_.end();) {
+    auto& [request_id, request] = *it;
+    ++it;  // advance before signaling -- the coroutine may erase this entry on resume
+    if (request.response_node_id == node_id) {
+      request.exception_ptr = std::make_exception_ptr(
+          ThrowStream() << fmt_lib::format("Node {} is dead, cannot complete request", node_id));
+      request.sem.Acquire(1);
+    }
+  }
+  deferred_replies_.erase(node_id);
+}
+
+uint64_t MessageBroker::SendToNode(uint32_t node_id, MessageFlag flag, ByteBuffer data) {
+  auto request_id = send_request_id_counter_++;
+  Identifier identifier {
+      .request_node_id = this_node_.node_id,
+      .response_node_id = node_id,
+      .request_id = request_id,
+      .flag = flag,
+  };
+  auto socket_it = node_id_to_send_socket_.find(node_id);
+  if (socket_it == node_id_to_send_socket_.end()) {
+    EXA_THROW << fmt_lib::format("Node {} is trying to send request to an unconnected node {}", this_node_.node_id,
+                                 node_id);
+  }
+  auto& [target_node_id, socket] = *socket_it;
+  auto serialized_identifier = Serialize(identifier);
+  zmq::multipart_t multi;
+  multi.addmem(serialized_identifier.data(), serialized_identifier.size());
+  multi.add(BytesToZmqMsg(std::move(data)));
+  EXA_THROW_CHECK(multi.send(socket));
+  return request_id;
 }
 
 void MessageBroker::SendReply(const Identifier& identifier, ByteBuffer data) {
@@ -277,257 +494,4 @@ void MessageBroker::SendReply(const Identifier& identifier, ByteBuffer data) {
   EXA_THROW_CHECK(multi.send(socket));
 }
 
-exec::task<ByteBuffer> MessageBroker::SendRequest(uint32_t to_node_id, ByteBuffer data) {
-  EXA_THROW_CHECK_NE(to_node_id, this_node_.node_id) << "Cannot send message to current node";
-
-  Identifier identifier {
-      .request_node_id = this_node_.node_id,
-      .response_node_id = to_node_id,
-      .request_id_in_node = send_request_id_counter_++,
-      .flag = MessageFlag::kNormal,
-  };
-
-  auto socket_it = node_id_to_send_socket_.find(to_node_id);
-  if (socket_it == node_id_to_send_socket_.end()) {
-    EXA_THROW << fmt_lib::format("Node {} is trying to send request to an unconnected node {}", this_node_.node_id,
-                                 to_node_id);
-  }
-
-  auto& [target_node_id, socket] = *socket_it;
-  auto serialized_identifier = Serialize(identifier);
-  zmq::multipart_t multi;
-  multi.addmem(serialized_identifier.data(), serialized_identifier.size());
-  multi.add(BytesToZmqMsg(std::move(data)));
-  EXA_THROW_CHECK(multi.send(socket));
-
-  auto [iter, inserted] = outstanding_requests_.try_emplace(identifier.request_id_in_node);
-  auto& [request_id, pending] = *iter;
-  pending.response_node_id = to_node_id;
-
-  co_await pending.sem.OnDrained();
-
-  auto response = std::move(pending.response);
-  auto error = pending.error;
-  outstanding_requests_.erase(iter);
-
-  if (error) {
-    std::rethrow_exception(error);
-  }
-  co_return std::move(response);
-}
-
-void MessageBroker::HandleRepliedResponse(uint64_t request_id_in_node, ByteBuffer data) {
-  auto it = outstanding_requests_.find(request_id_in_node);
-  if (it == outstanding_requests_.end()) {
-    log::Critical("Received response for unknown request id {}", request_id_in_node);
-    return;
-  }
-  auto& [request_id, pending] = *it;
-  pending.response = std::move(data);
-  pending.sem.Acquire(1);
-}
-
-exec::task<void> MessageBroker::HandleIncomingRequest(Identifier identifier, ByteBuffer data) {
-  EXA_THROW_CHECK(request_handler_ != nullptr) << "Request handler not set";
-  ByteBuffer reply_data = co_await request_handler_(std::move(data));
-  SendReply(identifier, std::move(reply_data));
-}
-
-void MessageBroker::HandleGossipMessage(const ByteBuffer& gossip_data) {
-  const auto message = Deserialize<GossipMessage>(gossip_data);
-
-  for (const auto& state : message.node_states) {
-    CheckAddressConflict(state.node_id, state.address);
-    if (!IsNodeConnected(state.node_id) && state.liveness == NodeState::Liveness::kAlive) {
-      EstablishConnection({.node_id = state.node_id, .address = state.address});
-      FlushDeferredReplies(state.node_id);
-    }
-    // update last seen time
-    auto& node_state = node_id_to_state_.at(state.node_id);
-    node_state.last_seen = std::max(node_state.last_seen, state.last_seen);
-  }
-}
-
-void MessageBroker::BroadcastGossip() {
-  const auto node_list = GetRandomPeers(network_config_.gossip_fanout);
-  auto message = GenerateGossipMessage();
-  auto payload = Serialize(message);
-
-  for (const auto& node : node_list) {
-    Identifier identifier {
-        .request_node_id = this_node_.node_id,
-        .response_node_id = node.node_id,
-        .request_id_in_node = send_request_id_counter_++,
-        .flag = MessageFlag::kGossip,
-    };
-
-    auto socket_it = node_id_to_send_socket_.find(node.node_id);
-    if (socket_it != node_id_to_send_socket_.end()) {
-      auto& [target_node_id, socket] = *socket_it;
-      auto serialized_identifier = Serialize(identifier);
-      zmq::multipart_t multi;
-      multi.addmem(serialized_identifier.data(), serialized_identifier.size());
-      multi.add(BytesToZmqMsg(ByteBuffer(payload)));
-      EXA_THROW_CHECK(multi.send(socket));
-    }
-  }
-  last_heartbeat_ms_ = GetTimeMs();
-}
-
-void MessageBroker::CheckHeartbeatTimeout() {
-  node_id_to_state_[this_node_.node_id].last_seen = GetTimeMs();
-
-  for (auto& [node_id, state] : node_id_to_state_) {
-    if (state.liveness != NodeState::Liveness::kAlive ||
-        GetTimeMs() - state.last_seen < network_config_.heartbeat_timeout_ms) {
-      continue;
-    }
-    log::Warn(
-        "Node {} detects that node {} is dead(no heartbeat in last {}ms), all requests to this node will be failed",
-        this_node_.node_id, node_id, network_config_.heartbeat_timeout_ms);
-    DeactivateNode(node_id);
-
-    // Error out waiting outstanding requests
-    for (auto it = outstanding_requests_.begin(); it != outstanding_requests_.end();) {
-      auto& [request_id, request] = *it;
-      ++it;  // advance before signaling -- the coroutine may erase this entry on resume
-      if (request.response_node_id == node_id) {
-        request.error = std::make_exception_ptr(
-            ThrowStream() << fmt_lib::format("Node {} is dead, cannot complete request", node_id));
-        request.sem.Acquire(1);
-      }
-    }
-
-    deferred_replies_.erase(node_id);
-  }
-}
-
-void MessageBroker::CheckNodeAlivenessWaiterTimeout() {
-  auto now_ms = GetTimeMs();
-  for (auto& [node_id, waiters] : node_id_to_waiters_) {
-    for (auto it = waiters.begin(); it != waiters.end();) {
-      auto& waiter = *it;
-      ++it;  // advance before signaling -- the coroutine may erase this node on resume
-      if (!waiter.arrive && waiter.deadline_ms <= now_ms) {
-        waiter.sem.Acquire(1);
-      }
-    }
-  }
-}
-
-bool MessageBroker::IsNodeConnected(const uint32_t node_id) {
-  if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
-    auto& [found_node_id, node_state] = *iter;
-    auto liveness = node_state.liveness;
-    return liveness != NodeState::Liveness::kDead;
-  }
-  return false;
-}
-
-exec::task<bool> MessageBroker::WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
-  if (auto iter = node_id_to_state_.find(node_id); iter != node_id_to_state_.end()) {
-    auto& [found_node_id, node_state] = *iter;
-    auto liveness = node_state.liveness;
-    if (liveness != NodeState::Liveness::kDead) {
-      co_return true;
-    }
-  }
-  auto& waiters = node_id_to_waiters_[node_id];
-  auto waiter = waiters.emplace(waiters.end(), GetTimeMs() + timeout_ms);
-
-  co_await waiter->sem.OnDrained();
-  bool arrived = waiter->arrive;
-  waiters.erase(waiter);
-  co_return arrived;
-}
-
-void MessageBroker::CheckAddressConflict(uint32_t node_id, const std::string& address) {
-  auto iter = node_id_to_state_.find(node_id);
-  if (iter != node_id_to_state_.end()) {
-    auto& [found_node_id, node_state] = *iter;
-    if (!node_state.address.empty() && address != node_state.address) {
-      EXA_THROW << "Nodes with the same node ID but different addresses exist in the cluster.";
-    }
-  }
-}
-
-GossipMessage MessageBroker::GenerateGossipMessage() {
-  GossipMessage message;
-  message.node_states.reserve(node_id_to_state_.size());
-  for (const auto& [node_id, node_state] : node_id_to_state_) {
-    if (node_state.liveness == NodeState::Liveness::kAlive) {
-      message.node_states.push_back({.liveness = NodeState::Liveness::kAlive,
-                                     .last_seen = node_state.last_seen,
-                                     .node_id = node_id,
-                                     .address = node_state.address});
-    }
-  }
-  return message;
-}
-
-std::vector<NodeInfo> MessageBroker::GetRandomPeers(size_t size) {
-  std::vector<NodeInfo> nodes;
-  if (node_id_to_state_.empty()) {
-    return nodes;
-  }
-  size = std::clamp(size, size_t {1}, node_id_to_state_.size());
-  nodes.reserve(node_id_to_state_.size());
-  for (const auto& [node_id, node_state] : node_id_to_state_) {
-    if (node_id != this_node_.node_id && node_state.liveness == NodeState::Liveness::kAlive) {
-      nodes.emplace_back(node_id, node_state.address);
-    }
-  }
-
-  std::shuffle(nodes.begin(), nodes.end(), rng_);
-  nodes.resize(std::min(nodes.size(), size));
-  return nodes;
-}
-
-void MessageBroker::DeactivateNode(uint32_t node_id) {
-  auto it = node_id_to_state_.find(node_id);
-  if (it == node_id_to_state_.end()) {
-    return;
-  }
-  auto& [found_node_id, node_state] = *it;
-  if (node_state.liveness != NodeState::Liveness::kAlive) {
-    return;
-  }
-  node_state.liveness = NodeState::Liveness::kDead;
-}
-
-void MessageBroker::EstablishConnection(const NodeInfo& node_info) {
-  log::Info("[Gossip] Node {} found node {}, connecting to it at {}", this_node_.node_id, node_info.node_id,
-            node_info.address);
-
-  // Create send socket
-  auto [socket_iter, socket_inserted] =
-      node_id_to_send_socket_.try_emplace(node_info.node_id, zmq::socket_t(zmq_context_, zmq::socket_type::dealer));
-  EXA_THROW_CHECK(socket_inserted) << "Node " << node_info.node_id << " already has a send socket";
-  auto& [socket_node_id, socket] = *socket_iter;
-  socket.set(zmq::sockopt::linger, 0);
-  socket.connect(node_info.address);
-
-  // Add node state
-  NodeState state {.liveness = NodeState::Liveness::kAlive,
-                   .last_seen = GetTimeMs(),
-                   .node_id = node_info.node_id,
-                   .address = node_info.address};
-  auto [node_state_iter, state_inserted] = node_id_to_state_.try_emplace(node_info.node_id, state);
-  auto& [state_node_id, node_state] = *node_state_iter;
-  if (!state_inserted) {
-    EXA_THROW << fmt_lib::format("Attempted to add an already-connected node, node_id={}", node_info.node_id);
-  }
-
-  // Notify waiters
-  auto waiter_iter = node_id_to_waiters_.find(node_info.node_id);
-  if (waiter_iter != node_id_to_waiters_.end()) {
-    auto& [waiter_node_id, waiters] = *waiter_iter;
-    for (auto waiter_iter = waiters.begin(); waiter_iter != waiters.end();) {
-      auto& waiter = *waiter_iter;
-      ++waiter_iter;  // advance before signaling -- the coroutine may erase this node on resume
-      waiter.arrive = true;
-      waiter.sem.Acquire(1);
-    }
-  }
-}
 }  // namespace ex_actor::internal

@@ -12,9 +12,9 @@
 #include <spdlog/spdlog.h>
 
 #include "ex_actor/internal/serialization.h"
+#include "ex_actor/internal/util.h"
 
 using ex_actor::internal::ByteBuffer;
-using Liveness = ex_actor::internal::NodeState::Liveness;
 
 namespace {
 
@@ -50,7 +50,7 @@ void DispatchGossip(ex_actor::internal::MessageBroker& broker,
   ex_actor::internal::Identifier gossip_id {
       .request_node_id = sender_node_id,
       .response_node_id = 0,
-      .request_id_in_node = 0,
+      .request_id = 0,
       .flag = ex_actor::internal::MessageFlag::kGossip,
   };
   auto id_bytes = ex_actor::internal::Serialize(gossip_id);
@@ -71,27 +71,24 @@ TEST(MessageBrokerTest, ConstructorRejectsSameNodeIdAsContact) {
   auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7201",
                            /*contact_node_id=*/0, /*contact_address=*/"tcp://127.0.0.1:7202");
   EXPECT_THAT([&]() { ex_actor::internal::MessageBroker broker(config); },
-              testing::Throws<std::exception>(testing::Property(
-                  &std::exception::what,
-                  testing::HasSubstr("The local node has the same node ID or address as the contact node."))));
+              testing::Throws<std::exception>(
+                  testing::Property(&std::exception::what, testing::HasSubstr("not be the same as this node"))));
 }
 
 TEST(MessageBrokerTest, ConstructorRejectsSameAddressAsContact) {
   auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7201",
                            /*contact_node_id=*/1, /*contact_address=*/"tcp://127.0.0.1:7201");
   EXPECT_THAT([&]() { ex_actor::internal::MessageBroker broker(config); },
-              testing::Throws<std::exception>(testing::Property(
-                  &std::exception::what,
-                  testing::HasSubstr("The local node has the same node ID or address as the contact node."))));
+              testing::Throws<std::exception>(
+                  testing::Property(&std::exception::what, testing::HasSubstr("not be the same as this node"))));
 }
 
 TEST(MessageBrokerTest, ConstructorRejectsSameNodeIdAndAddressAsContact) {
   auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7201",
                            /*contact_node_id=*/0, /*contact_address=*/"tcp://127.0.0.1:7201");
   EXPECT_THAT([&]() { ex_actor::internal::MessageBroker broker(config); },
-              testing::Throws<std::exception>(testing::Property(
-                  &std::exception::what,
-                  testing::HasSubstr("The local node has the same node ID or address as the contact node."))));
+              testing::Throws<std::exception>(
+                  testing::Property(&std::exception::what, testing::HasSubstr("not be the same as this node"))));
 }
 
 TEST(MessageBrokerTest, ConstructorSucceedsWithNoContactNode) {
@@ -196,7 +193,7 @@ TEST(MessageBrokerTest, WaitNodeAliveResolvesOnGossipDiscovery) {
               stdexec::then([&result](bool alive) { result.store(alive, std::memory_order_relaxed); }));
 
   DispatchGossip(broker,
-                 {{.liveness = Liveness::kAlive, .last_seen = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7241"}});
+                 {{.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7241"}});
 
   stdexec::sync_wait(scope.on_empty());
   EXPECT_TRUE(result.load(std::memory_order_relaxed));
@@ -213,9 +210,9 @@ TEST(MessageBrokerTest, DuplicateGossipForSameNodeDoesNotThrow) {
   ex_actor::internal::MessageBroker broker(config);
 
   DispatchGossip(broker,
-                 {{.liveness = Liveness::kAlive, .last_seen = 100, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
+                 {{.alive = true, .last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
   DispatchGossip(broker,
-                 {{.liveness = Liveness::kAlive, .last_seen = 200, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
+                 {{.alive = true, .last_seen_timestamp_ms = 200, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
 
   stdexec::sync_wait(broker.Stop());
 }
@@ -229,17 +226,15 @@ TEST(MessageBrokerTest, GossipWithConflictingAddressThrows) {
   ex_actor::internal::MessageBroker broker(config);
 
   DispatchGossip(broker,
-                 {{.liveness = Liveness::kAlive, .last_seen = 100, .node_id = 1, .address = "tcp://127.0.0.1:7261"}});
+                 {{.alive = true, .last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7261"}});
 
   EXPECT_THAT(
       [&]() {
         DispatchGossip(
-            broker,
-            {{.liveness = Liveness::kAlive, .last_seen = 100, .node_id = 1, .address = "tcp://127.0.0.1:7262"}});
+            broker, {{.alive = true, .last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7262"}});
       },
-      testing::Throws<std::exception>(testing::Property(
-          &std::exception::what,
-          testing::HasSubstr("Nodes with the same node ID but different addresses exist in the cluster."))));
+      testing::Throws<std::exception>(
+          testing::Property(&std::exception::what, testing::HasSubstr("Node 1 has conflicting address"))));
 
   stdexec::sync_wait(broker.Stop());
 }
@@ -254,20 +249,21 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutDeactivatesTimedOutNodes) {
                            /*heartbeat_timeout_ms=*/1);
   ex_actor::internal::MessageBroker broker(config);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  // now node 1 should be dead
   broker.CheckHeartbeatTimeout();
 
   exec::async_scope scope;
-  std::atomic<bool> result = true;
-  scope.spawn(broker.WaitNodeAlive(/*node_id=*/1, /*timeout_ms=*/0) |
-              stdexec::then([&result](bool alive) { result.store(alive, std::memory_order_relaxed); }));
+  std::atomic<bool> wait_result = true;
+  scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
+      broker.WaitNodeAlive(/*node_id=*/1, /*timeout_ms=*/0) |
+      stdexec::then([&wait_result](bool alive) { wait_result = alive; })));
 
-  broker.CheckNodeAlivenessWaiterTimeout();
-  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
   broker.CheckNodeAlivenessWaiterTimeout();
 
   stdexec::sync_wait(scope.on_empty());
-  EXPECT_FALSE(result.load(std::memory_order_relaxed));
+  EXPECT_FALSE(wait_result);
 
   stdexec::sync_wait(broker.Stop());
 }
@@ -319,7 +315,7 @@ TEST(MessageBrokerTest, HandleRepliedResponseResolvesOutstandingRequest) {
   ex_actor::internal::Identifier reply_id {
       .request_node_id = 0,
       .response_node_id = 1,
-      .request_id_in_node = 0,
+      .request_id = 0,
       .flag = ex_actor::internal::MessageFlag::kNormal,
   };
   auto id_bytes = ex_actor::internal::Serialize(reply_id);
@@ -350,7 +346,7 @@ TEST(MessageBrokerTest, DispatchReceivedMessageRejectsInvalidIdentifier) {
   ex_actor::internal::Identifier bad_id {
       .request_node_id = 5,
       .response_node_id = 6,
-      .request_id_in_node = 0,
+      .request_id = 0,
       .flag = ex_actor::internal::MessageFlag::kNormal,
   };
   auto id_bytes = ex_actor::internal::Serialize(bad_id);
@@ -401,7 +397,7 @@ TEST(MessageBrokerTest, MultipleWaitersNotifiedOnGossipDiscovery) {
   }
 
   DispatchGossip(broker,
-                 {{.liveness = Liveness::kAlive, .last_seen = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7321"}});
+                 {{.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7321"}});
 
   stdexec::sync_wait(scope.on_empty());
   EXPECT_EQ(success_count.load(std::memory_order_relaxed), 3);
@@ -429,8 +425,8 @@ TEST(MessageBrokerTest, GossipIntroducesMultipleNodesAtOnce) {
               }));
 
   DispatchGossip(broker,
-                 {{.liveness = Liveness::kAlive, .last_seen = 100, .node_id = 1, .address = "tcp://127.0.0.1:7331"},
-                  {.liveness = Liveness::kAlive, .last_seen = 200, .node_id = 2, .address = "tcp://127.0.0.1:7332"}});
+                 {{.alive = true, .last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7331"},
+                  {.alive = true, .last_seen_timestamp_ms = 200, .node_id = 2, .address = "tcp://127.0.0.1:7332"}});
 
   stdexec::sync_wait(scope.on_empty());
   EXPECT_EQ(success_count.load(std::memory_order_relaxed), 2);
@@ -481,8 +477,8 @@ TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
   uint64_t now_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
           .count();
-  DispatchGossip(
-      broker, {{.liveness = Liveness::kAlive, .last_seen = now_ms, .node_id = 1, .address = "tcp://127.0.0.1:7361"}});
+  DispatchGossip(broker,
+                 {{.alive = true, .last_seen_timestamp_ms = now_ms, .node_id = 1, .address = "tcp://127.0.0.1:7361"}});
 
   // The node should NOT be timed out since we just refreshed it
   broker.CheckHeartbeatTimeout();
@@ -521,8 +517,8 @@ TEST(MessageBrokerTest, BroadcastGossipAfterDiscovery) {
   ex_actor::internal::MessageBroker broker(config);
 
   DispatchGossip(broker,
-                 {{.liveness = Liveness::kAlive, .last_seen = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7381"},
-                  {.liveness = Liveness::kAlive, .last_seen = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7382"}});
+                 {{.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7381"},
+                  {.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7382"}});
 
   // BroadcastGossip picks random peers from the discovered set and sends to them
   EXPECT_NO_THROW(broker.BroadcastGossip());

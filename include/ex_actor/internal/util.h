@@ -298,6 +298,16 @@ inline void SetThreadName(const std::string&) {}
 inline auto WrapSenderWithInlineScheduler(auto task) {
   return std::move(task) | stdexec::write_env(ex::prop {stdexec::get_scheduler, stdexec::inline_scheduler {}});
 }
+
+template <typename Map, typename Key>
+auto& MapAt(Map& map, const Key& key, std::source_location loc = std::source_location::current()) {
+  auto it = map.find(key);
+  if (it == map.end()) {
+    throw std::out_of_range(
+        fmt_lib::format("{}:{} in {}: map key '{}' not found", loc.file_name(), loc.line(), loc.function_name(), key));
+  }
+  return it->second;
+}
 }  // namespace ex_actor::internal
 
 // Backward-compatibility alias — this namespace was removed in favor of ex_actor.

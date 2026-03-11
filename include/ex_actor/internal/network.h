@@ -71,7 +71,7 @@ enum class MessageFlag : uint8_t { kNormal = 0, kGossip };
 struct Identifier {
   uint32_t request_node_id;
   uint32_t response_node_id;
-  uint64_t request_id_in_node;
+  uint64_t request_id;
   MessageFlag flag;
 };
 
@@ -79,7 +79,7 @@ struct NodeAlivenessWaiter {
   explicit NodeAlivenessWaiter(uint64_t deadline_ms) : sem(1), deadline_ms(deadline_ms) {}
   ex_actor::Semaphore sem;
   uint64_t deadline_ms;
-  bool arrive = false;
+  bool arrived = false;
 };
 
 /**
@@ -182,26 +182,25 @@ class MessageBroker {
   void CheckNodeAlivenessWaiterTimeout();
 
  private:
-  void FlushDeferredReplies(uint32_t node_id);
-  void SendReply(const Identifier& identifier, ByteBuffer data);
   void StartRecvSocketPuller(const std::string& address);
   void StartPeriodicalTaskScheduler();
-  bool IsNodeConnected(uint32_t node_id);
 
-  void CheckAddressConflict(uint32_t node_id, const std::string& address);
-  GossipMessage GenerateGossipMessage();
-  std::vector<NodeInfo> GetRandomPeers(size_t size);
-  void DeactivateNode(uint32_t node_id);
-  void EstablishConnection(const NodeInfo& node_info);
+  std::vector<uint32_t> GetRandomPeers(size_t fanout);
 
   void HandleRepliedResponse(uint64_t request_id_in_node, ByteBuffer data);
   exec::task<void> HandleIncomingRequest(Identifier identifier, ByteBuffer data);
   void HandleGossipMessage(const ByteBuffer& gossip_data);
 
+  void OnNodeAlive(uint32_t node_id);
+  void OnNodeDead(uint32_t node_id);
+
+  uint64_t SendToNode(uint32_t node_id, MessageFlag flag, ByteBuffer data);
+  void SendReply(const Identifier& identifier, ByteBuffer data);
+
   struct OutstandingRequest {
     Semaphore sem;
-    ByteBuffer response;
-    std::exception_ptr error;
+    ByteBuffer response_bytes;
+    std::exception_ptr exception_ptr;
     uint32_t response_node_id {};
     OutstandingRequest() : sem(1) {}
   };
@@ -219,7 +218,6 @@ class MessageBroker {
   std::unordered_map</*request_id*/ uint64_t, OutstandingRequest> outstanding_requests_;
 
   bool stopped_ = false;
-  uint64_t last_heartbeat_ms_;
 
   std::unordered_map<uint32_t, NodeState> node_id_to_state_;
   std::unordered_map<uint32_t, std::list<NodeAlivenessWaiter>> node_id_to_waiters_;

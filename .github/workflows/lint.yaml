@@ -41,6 +41,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          verbosity: "debug"
           style: "file" # Use .clang-format config file
           tidy-checks: "" # Use .clang-tidy config file
           version: "20"

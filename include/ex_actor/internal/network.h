@@ -31,7 +31,6 @@
 #include <exec/async_scope.hpp>
 #include <exec/task.hpp>
 #include <zmq.hpp>
-#include <zmq_addon.hpp>
 
 #include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/local_actor_ref.h"
@@ -66,15 +65,6 @@ struct ClusterConfig {
 
 namespace ex_actor::internal {
 
-enum class MessageFlag : uint8_t { kNormal = 0, kGossip };
-
-struct Identifier {
-  uint32_t request_node_id;
-  uint32_t response_node_id;
-  uint64_t request_id;
-  MessageFlag flag;
-};
-
 struct NodeAlivenessWaiter {
   explicit NodeAlivenessWaiter(uint64_t deadline_ms) : sem(1), deadline_ms(deadline_ms) {}
   ex_actor::Semaphore sem;
@@ -87,7 +77,7 @@ struct NodeAlivenessWaiter {
  */
 class RecvSocketPuller {
  public:
-  using Callback = std::function<void(zmq::multipart_t)>;
+  using Callback = std::function<void(ByteBuffer)>;
 
   RecvSocketPuller(zmq::socket_t recv_socket, Callback callback);
   ~RecvSocketPuller();
@@ -154,7 +144,7 @@ class MessageBroker {
    * @brief Start the recv socket puller and periodical task scheduler.
    * @param request_handler Called to process incoming network requests and produce a response.
    */
-  void Start(const std::string& address, RequestHandler request_handler);
+  void Start(RequestHandler request_handler);
 
   /**
    * @brief Stop the RecvSocketPuller and PeriodicalTaskScheduler, then wait for all in-flight tasks to complete.
@@ -174,7 +164,7 @@ class MessageBroker {
   exec::task<ByteBuffer> SendRequest(uint32_t to_node_id, ByteBuffer data);
 
   // Called by RecvSocketPuller
-  exec::task<void> DispatchReceivedMessage(zmq::multipart_t multi);
+  exec::task<void> DispatchReceivedMessage(ByteBuffer raw);
 
   // ------------- periodical tasks scheduled in PeriodicalTaskScheduler -------------
   void BroadcastGossip();
@@ -182,20 +172,20 @@ class MessageBroker {
   void CheckNodeAlivenessWaiterTimeout();
 
  private:
-  void StartRecvSocketPuller(const std::string& address);
+  void StartRecvSocketPuller();
   void StartPeriodicalTaskScheduler();
 
   std::vector<uint32_t> GetRandomPeers(size_t fanout);
 
-  void HandleRepliedResponse(uint64_t request_id_in_node, ByteBuffer data);
-  exec::task<void> HandleIncomingRequest(Identifier identifier, ByteBuffer data);
-  void HandleGossipMessage(const ByteBuffer& gossip_data);
+  void HandleRepliedResponse(BrokerTwoWayMessage response_msg);
+  exec::task<void> HandleIncomingRequest(BrokerTwoWayMessage request_msg);
+  void HandleGossipMessage(const BrokerGossipMessage& gossip_message);
 
   void OnNodeAlive(uint32_t node_id);
   void OnNodeDead(uint32_t node_id);
 
-  uint64_t SendToNode(uint32_t node_id, MessageFlag flag, ByteBuffer data);
-  void SendReply(const Identifier& identifier, ByteBuffer data);
+  uint64_t SendToNode(uint32_t node_id, ByteBuffer data);
+  void SendReply(uint32_t request_node_id, uint64_t request_id, ByteBuffer data);
 
   struct OutstandingRequest {
     Semaphore sem;
@@ -206,7 +196,8 @@ class MessageBroker {
   };
 
   struct ReplyOperation {
-    Identifier identifier;
+    uint32_t request_node_id;
+    uint64_t request_id;
     ByteBuffer data;
   };
 

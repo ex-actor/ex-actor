@@ -108,8 +108,20 @@ struct NodeState {
   std::string address;
 };
 
-struct GossipMessage {
+struct BrokerGossipMessage {
+  uint32_t from_node_id;
   std::vector<NodeState> node_states;
+};
+
+struct BrokerTwoWayMessage {
+  uint32_t request_node_id;
+  uint32_t response_node_id;
+  uint64_t request_id;  // the request id in the request node
+  ByteBuffer payload;
+};
+
+struct BrokerMessage {
+  std::variant<BrokerTwoWayMessage, BrokerGossipMessage> variant;
 };
 
 // ===================================================

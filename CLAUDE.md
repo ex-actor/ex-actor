@@ -4,6 +4,8 @@ refer "How to build from source" part in CONTRIBUTING.md for how to build&test.
 
 when debugging tests, do not simplify the test code unless you are very confident the test is not correct.
 
+when refactoring, do not remove original comments unless they are stale.
+
 # Code Style
 
 Based on Google Style Guide, with the following additions:

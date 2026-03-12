@@ -184,14 +184,9 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
-      broker_actor_([&cluster_config, this]() -> std::unique_ptr<Actor<MessageBroker>> {
-        if (cluster_config.this_node.address.empty()) {
-          EXA_THROW_CHECK(cluster_config.contact_node.address.empty())
-              << "Local address is empty while contact node address is non-empty.";
-          return nullptr;
-        }
-        return std::make_unique<Actor<MessageBroker>>(scheduler_->Clone(), ActorConfig {}, cluster_config);
-      }()),
+      broker_actor_(cluster_config.this_node.address.empty()
+                        ? nullptr
+                        : std::make_unique<Actor<MessageBroker>>(scheduler_->Clone(), ActorConfig {}, cluster_config)),
       broker_actor_ref_(broker_actor_ ? LocalActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get())
                                       : LocalActorRef<MessageBroker> {}),
       backend_actor_(scheduler_->Clone(), ActorConfig {}, scheduler_->Clone(), cluster_config, broker_actor_ref_),
@@ -202,9 +197,9 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
         [ref = backend_actor_ref_](ByteBuffer data) -> exec::task<ByteBuffer> {
       co_return co_await ref.SendLocal<&ActorRegistryBackend::HandleNetworkRequest>(std::move(data));
     };
-    ex::sync_wait(broker_actor_ref_.SendLocal<&MessageBroker::Start>(cluster_config.this_node.address,
-                                                                     std::move(request_handler)));
+    ex::sync_wait(broker_actor_ref_.SendLocal<&MessageBroker::Start>(std::move(request_handler)));
   }
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
 
 exec::task<bool> ActorRegistry::WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {

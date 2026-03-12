@@ -94,6 +94,7 @@ Checks: >
   -readability-convert-member-functions-to-static,
   -readability-make-member-function-const,
 
+HeaderFilterRegex: 'ex_actor/.*'
 FormatStyle: file
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase, value: lower_case }

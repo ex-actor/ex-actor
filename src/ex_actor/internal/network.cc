@@ -45,18 +45,14 @@ std::span<const std::byte> ZmqMsgBytes(const zmq::message_t& msg) {
   return {static_cast<const std::byte*>(msg.data()), msg.size()};
 }
 
-ex_actor::internal::ByteBuffer ZmqMsgToBytes(zmq::message_t&& msg) {
+ByteBuffer ZmqMsgToByteBuffer(zmq::message_t&& msg) {
   auto span = ZmqMsgBytes(msg);
   // TODO: a copy here, optimize it in the future
   return {span.begin(), span.end()};
 }
 
-zmq::message_t BytesToZmqMsg(ex_actor::internal::ByteBuffer&& bytes) {
-  if (bytes.empty()) return {};
-  auto* owned = new ex_actor::internal::ByteBuffer(std::move(bytes));
-  auto deleter = [](void*, void* hint) { delete static_cast<ex_actor::internal::ByteBuffer*>(hint); };
-  return zmq::message_t(owned->data(), owned->size(), deleter, owned);
-}
+/// non-copy, return a view of the ByteBuffer
+zmq::const_buffer ByteBufferToZmqBuffer(const ByteBuffer& bytes) { return zmq::buffer(bytes.data(), bytes.size()); }
 
 }  // namespace
 
@@ -84,11 +80,12 @@ void RecvSocketPuller::Loop(const std::stop_token& stop_token) {
   recv_socket_.set(zmq::sockopt::rcvtimeo, 100);
 
   while (!stop_token.stop_requested()) {
-    zmq::multipart_t multi;
-    if (!multi.recv(recv_socket_)) {
+    zmq::message_t msg;
+    auto result = recv_socket_.recv(msg);
+    if (!result.has_value()) {
       continue;
     }
-    callback_(std::move(multi));
+    callback_(ZmqMsgToByteBuffer(std::move(msg)));
   }
 }
 
@@ -180,11 +177,11 @@ MessageBroker::~MessageBroker() {
 
 void MessageBroker::OnSpawned(LocalActorRef<MessageBroker> self_actor_ref) { self_actor_ref_ = self_actor_ref; }
 
-void MessageBroker::Start(const std::string& address, RequestHandler request_handler) {
+void MessageBroker::Start(RequestHandler request_handler) {
   EXA_THROW_CHECK(!self_actor_ref_.IsEmpty()) << "OnSpawned() must be called before Start()";
   EXA_THROW_CHECK(request_handler != nullptr) << "request_handler must not be null";
   request_handler_ = std::move(request_handler);
-  StartRecvSocketPuller(address);
+  StartRecvSocketPuller();
   StartPeriodicalTaskScheduler();
 }
 
@@ -202,32 +199,26 @@ exec::task<void> MessageBroker::Stop() {
   stopped_ = true;
 }
 
-exec::task<void> MessageBroker::DispatchReceivedMessage(zmq::multipart_t multi) {
-  EXA_THROW_CHECK_EQ(multi.size(), 2) << "Expected 2-part message, got " << multi.size() << " parts";
+exec::task<void> MessageBroker::DispatchReceivedMessage(ByteBuffer raw) {
+  auto broker_msg = Deserialize<BrokerMessage>(raw);
 
-  auto identifier_bytes_span =
-      std::span<const std::byte>(static_cast<const std::byte*>(multi[0].data()), multi[0].size());
-  auto identifier = Deserialize<Identifier>(identifier_bytes_span);
-
-  multi.pop();  // identifier frame already parsed above
-  zmq::message_t data_msg = multi.pop();
-  auto data = ByteBuffer(static_cast<const std::byte*>(data_msg.data()),
-                         static_cast<const std::byte*>(data_msg.data()) + data_msg.size());
-
-  if (identifier.flag == MessageFlag::kGossip) {
-    HandleGossipMessage(data);
-  } else if (identifier.request_node_id == this_node_.node_id) {
-    HandleRepliedResponse(identifier.request_id, std::move(data));
-  } else if (identifier.response_node_id == this_node_.node_id) {
-    co_await HandleIncomingRequest(identifier, std::move(data));
+  if (auto* gossip = std::get_if<BrokerGossipMessage>(&broker_msg.variant)) {
+    HandleGossipMessage(*gossip);
+    co_return;
+  }
+  auto& two_way = std::get<BrokerTwoWayMessage>(broker_msg.variant);
+  if (two_way.request_node_id == this_node_.node_id) {
+    HandleRepliedResponse(std::move(two_way));
+  } else if (two_way.response_node_id == this_node_.node_id) {
+    co_await HandleIncomingRequest(std::move(two_way));
   } else {
-    EXA_THROW << "Invalid identifier in received message";
+    EXA_THROW << "Received two-way message not addressed to this node";
   }
 }
 
 exec::task<ByteBuffer> MessageBroker::SendRequest(uint32_t to_node_id, ByteBuffer data) {
   EXA_THROW_CHECK_NE(to_node_id, this_node_.node_id) << "Cannot send message to current node";
-  uint64_t request_id = SendToNode(to_node_id, MessageFlag::kNormal, std::move(data));
+  uint64_t request_id = SendToNode(to_node_id, std::move(data));
   auto [iter, inserted] = outstanding_requests_.try_emplace(request_id);
   EXA_THROW_CHECK(inserted);
   auto& outstanding_request = iter->second;
@@ -267,15 +258,22 @@ void MessageBroker::BroadcastGossip() {
 
   // broadcast all known node states(include ourselves) to random peers
   std::vector<uint32_t> node_ids = GetRandomPeers(network_config_.gossip_fanout);
-  GossipMessage gossip_message;
+  BrokerGossipMessage gossip_message;
+  gossip_message.from_node_id = this_node_.node_id;
   gossip_message.node_states.reserve(node_id_to_state_.size());
   for (const auto& [node_id, node_state] : node_id_to_state_) {
     gossip_message.node_states.emplace_back(node_state);
   }
-  auto serialized_gossip_message = Serialize(gossip_message);
+  BrokerMessage broker_msg {.variant = std::move(gossip_message)};
+  auto serialized = Serialize(broker_msg);
 
   for (uint32_t node_id : node_ids) {
-    SendToNode(node_id, MessageFlag::kGossip, serialized_gossip_message);
+    auto socket_it = node_id_to_send_socket_.find(node_id);
+    if (socket_it == node_id_to_send_socket_.end()) {
+      continue;
+    }
+    auto& [target_node_id, socket] = *socket_it;
+    EXA_THROW_CHECK(socket.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::none));
   }
 }
 
@@ -305,14 +303,14 @@ void MessageBroker::CheckNodeAlivenessWaiterTimeout() {
   }
 }
 
-void MessageBroker::StartRecvSocketPuller(const std::string& address) {
+void MessageBroker::StartRecvSocketPuller() {
   zmq::socket_t recv_socket {zmq_context_, zmq::socket_type::dealer};
-  recv_socket.bind(address);
+  recv_socket.bind(this_node_.address);
   recv_socket.set(zmq::sockopt::linger, 0);
-  log::Info("Node {}'s recv socket bound to {}", this_node_.node_id, address);
+  log::Info("Node {}'s recv socket bound to {}", this_node_.node_id, this_node_.address);
 
-  recv_socket_puller_ = std::make_unique<RecvSocketPuller>(std::move(recv_socket), [this](zmq::multipart_t multi) {
-    async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::DispatchReceivedMessage>(std::move(multi)));
+  recv_socket_puller_ = std::make_unique<RecvSocketPuller>(std::move(recv_socket), [this](ByteBuffer raw) {
+    async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::DispatchReceivedMessage>(std::move(raw)));
   });
 }
 
@@ -349,9 +347,7 @@ std::vector<uint32_t> MessageBroker::GetRandomPeers(size_t fanout) {
   return node_ids;
 }
 
-void MessageBroker::HandleGossipMessage(const ByteBuffer& gossip_data) {
-  const auto gossip_message = Deserialize<GossipMessage>(gossip_data);
-
+void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_message) {
   for (const auto& incoming_node_state : gossip_message.node_states) {
     auto [iter, inserted] = node_id_to_state_.try_emplace(incoming_node_state.node_id, incoming_node_state);
     if (inserted) {
@@ -378,21 +374,21 @@ void MessageBroker::HandleGossipMessage(const ByteBuffer& gossip_data) {
   }
 }
 
-void MessageBroker::HandleRepliedResponse(uint64_t request_id_in_node, ByteBuffer data) {
-  auto it = outstanding_requests_.find(request_id_in_node);
+void MessageBroker::HandleRepliedResponse(BrokerTwoWayMessage response_msg) {
+  auto it = outstanding_requests_.find(response_msg.request_id);
   if (it == outstanding_requests_.end()) {
-    log::Critical("Received response for unknown request id {}", request_id_in_node);
+    log::Critical("Received response for unknown request id {}", response_msg.request_id);
     return;
   }
   auto& [request_id, pending] = *it;
-  pending.response_bytes = std::move(data);
+  pending.response_bytes = std::move(response_msg.payload);
   pending.sem.Acquire(1);
 }
 
-exec::task<void> MessageBroker::HandleIncomingRequest(Identifier identifier, ByteBuffer data) {
+exec::task<void> MessageBroker::HandleIncomingRequest(BrokerTwoWayMessage request_msg) {
   EXA_THROW_CHECK(request_handler_ != nullptr) << "Request handler not set";
-  ByteBuffer reply_data = co_await request_handler_(std::move(data));
-  SendReply(identifier, std::move(reply_data));
+  ByteBuffer reply_data = co_await request_handler_(std::move(request_msg.payload));
+  SendReply(request_msg.request_node_id, request_msg.request_id, std::move(reply_data));
 }
 
 void MessageBroker::OnNodeAlive(uint32_t node_id) {
@@ -426,7 +422,7 @@ void MessageBroker::OnNodeAlive(uint32_t node_id) {
     return;
   }
   for (auto&& reply : node_handle.mapped()) {
-    SendReply(reply.identifier, std::move(reply.data));
+    SendReply(reply.request_node_id, reply.request_id, std::move(reply.data));
   }
 }
 
@@ -446,30 +442,25 @@ void MessageBroker::OnNodeDead(uint32_t node_id) {
   deferred_replies_.erase(node_id);
 }
 
-uint64_t MessageBroker::SendToNode(uint32_t node_id, MessageFlag flag, ByteBuffer data) {
+uint64_t MessageBroker::SendToNode(uint32_t node_id, ByteBuffer data) {
   auto request_id = send_request_id_counter_++;
-  Identifier identifier {
-      .request_node_id = this_node_.node_id,
-      .response_node_id = node_id,
-      .request_id = request_id,
-      .flag = flag,
-  };
+  BrokerMessage broker_msg {.variant = BrokerTwoWayMessage {
+                                .request_node_id = this_node_.node_id,
+                                .response_node_id = node_id,
+                                .request_id = request_id,
+                                .payload = std::move(data),
+                            }};
   auto socket_it = node_id_to_send_socket_.find(node_id);
   if (socket_it == node_id_to_send_socket_.end()) {
     EXA_THROW << fmt_lib::format("Node {} is trying to send request to an unconnected node {}", this_node_.node_id,
                                  node_id);
   }
   auto& [target_node_id, socket] = *socket_it;
-  auto serialized_identifier = Serialize(identifier);
-  zmq::multipart_t multi;
-  multi.addmem(serialized_identifier.data(), serialized_identifier.size());
-  multi.add(BytesToZmqMsg(std::move(data)));
-  EXA_THROW_CHECK(multi.send(socket));
+  EXA_THROW_CHECK(socket.send(ByteBufferToZmqBuffer(Serialize(broker_msg)), zmq::send_flags::none));
   return request_id;
 }
 
-void MessageBroker::SendReply(const Identifier& identifier, ByteBuffer data) {
-  auto request_node_id = identifier.request_node_id;
+void MessageBroker::SendReply(uint32_t request_node_id, uint64_t request_id, ByteBuffer data) {
   auto socket_it = node_id_to_send_socket_.find(request_node_id);
   if (socket_it == node_id_to_send_socket_.end()) {
     // The requesting node connected to our recv socket and sent a request, but we haven't
@@ -481,17 +472,20 @@ void MessageBroker::SendReply(const Identifier& identifier, ByteBuffer data) {
     // Buffer the reply until EstablishConnection() creates the reverse connection and
     // the broker flushes it.
     deferred_replies_[request_node_id].push_back(ReplyOperation {
-        .identifier = identifier,
+        .request_node_id = request_node_id,
+        .request_id = request_id,
         .data = std::move(data),
     });
     return;
   }
-  auto& [node_id, socket] = *socket_it;
-  auto serialized_identifier = Serialize(identifier);
-  zmq::multipart_t multi;
-  multi.addmem(serialized_identifier.data(), serialized_identifier.size());
-  multi.add(BytesToZmqMsg(std::move(data)));
-  EXA_THROW_CHECK(multi.send(socket));
+  auto& [target_node_id, socket] = *socket_it;
+  BrokerMessage broker_msg {.variant = BrokerTwoWayMessage {
+                                .request_node_id = request_node_id,
+                                .response_node_id = this_node_.node_id,
+                                .request_id = request_id,
+                                .payload = std::move(data),
+                            }};
+  EXA_THROW_CHECK(socket.send(ByteBufferToZmqBuffer(Serialize(broker_msg)), zmq::send_flags::none));
 }
 
 }  // namespace ex_actor::internal

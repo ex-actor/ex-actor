@@ -42,23 +42,13 @@ ex_actor::ClusterConfig MakeConfig(uint32_t node_id, const std::string& address,
 
 void DispatchGossip(ex_actor::internal::MessageBroker& broker,
                     const std::vector<ex_actor::internal::NodeState>& node_states) {
-  ex_actor::internal::GossipMessage gossip_msg;
-  gossip_msg.node_states = node_states;
-  auto gossip_bytes = ex_actor::internal::Serialize(gossip_msg);
-
   uint32_t sender_node_id = node_states.empty() ? 0 : node_states.front().node_id;
-  ex_actor::internal::Identifier gossip_id {
-      .request_node_id = sender_node_id,
-      .response_node_id = 0,
-      .request_id = 0,
-      .flag = ex_actor::internal::MessageFlag::kGossip,
-  };
-  auto id_bytes = ex_actor::internal::Serialize(gossip_id);
-
-  zmq::multipart_t multi;
-  multi.addmem(id_bytes.data(), id_bytes.size());
-  multi.addmem(gossip_bytes.data(), gossip_bytes.size());
-  stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(multi)));
+  ex_actor::internal::BrokerMessage broker_msg {.variant = ex_actor::internal::BrokerGossipMessage {
+                                                    .from_node_id = sender_node_id,
+                                                    .node_states = node_states,
+                                                }};
+  auto raw = ex_actor::internal::Serialize(broker_msg);
+  stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(raw)));
 }
 
 }  // namespace
@@ -312,20 +302,14 @@ TEST(MessageBrokerTest, HandleRepliedResponseResolvesOutstandingRequest) {
                 got_response.store(true, std::memory_order_relaxed);
               }));
 
-  ex_actor::internal::Identifier reply_id {
-      .request_node_id = 0,
-      .response_node_id = 1,
-      .request_id = 0,
-      .flag = ex_actor::internal::MessageFlag::kNormal,
-  };
-  auto id_bytes = ex_actor::internal::Serialize(reply_id);
-  auto reply_data = MakeBytes("pong");
-
-  zmq::multipart_t multi;
-  multi.addmem(id_bytes.data(), id_bytes.size());
-  multi.addmem(reply_data.data(), reply_data.size());
-
-  stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(multi)));
+  ex_actor::internal::BrokerMessage reply_msg {.variant = ex_actor::internal::BrokerTwoWayMessage {
+                                                   .request_node_id = 0,
+                                                   .response_node_id = 1,
+                                                   .request_id = 0,
+                                                   .payload = MakeBytes("pong"),
+                                               }};
+  auto raw = ex_actor::internal::Serialize(reply_msg);
+  stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(raw)));
 
   stdexec::sync_wait(scope.on_empty());
   EXPECT_TRUE(got_response.load(std::memory_order_relaxed));
@@ -338,41 +322,32 @@ TEST(MessageBrokerTest, HandleRepliedResponseResolvesOutstandingRequest) {
 // DispatchReceivedMessage: rejects invalid identifier
 // ============================================================
 
-TEST(MessageBrokerTest, DispatchReceivedMessageRejectsInvalidIdentifier) {
+TEST(MessageBrokerTest, DispatchReceivedMessageRejectsMisdirectedTwoWay) {
   auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7310",
                            /*contact_node_id=*/1, /*contact_address=*/"tcp://127.0.0.1:7311");
   ex_actor::internal::MessageBroker broker(config);
 
-  ex_actor::internal::Identifier bad_id {
-      .request_node_id = 5,
-      .response_node_id = 6,
-      .request_id = 0,
-      .flag = ex_actor::internal::MessageFlag::kNormal,
-  };
-  auto id_bytes = ex_actor::internal::Serialize(bad_id);
-  auto data = MakeBytes("bad");
+  ex_actor::internal::BrokerMessage bad_msg {.variant = ex_actor::internal::BrokerTwoWayMessage {
+                                                 .request_node_id = 5,
+                                                 .response_node_id = 6,
+                                                 .request_id = 0,
+                                                 .payload = MakeBytes("bad"),
+                                             }};
+  auto raw = ex_actor::internal::Serialize(bad_msg);
 
-  zmq::multipart_t multi;
-  multi.addmem(id_bytes.data(), id_bytes.size());
-  multi.addmem(data.data(), data.size());
-
-  EXPECT_THAT([&]() { stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(multi))); },
-              testing::Throws<std::exception>(testing::Property(
-                  &std::exception::what, testing::HasSubstr("Invalid identifier in received message"))));
+  EXPECT_THAT([&]() { stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(raw))); },
+              testing::Throws<std::exception>(
+                  testing::Property(&std::exception::what, testing::HasSubstr("not addressed to this node"))));
 
   stdexec::sync_wait(broker.Stop());
 }
 
-TEST(MessageBrokerTest, DispatchReceivedMessageRejectsWrongPartCount) {
+TEST(MessageBrokerTest, DispatchReceivedMessageRejectsCorruptData) {
   auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7312");
   ex_actor::internal::MessageBroker broker(config);
 
-  zmq::multipart_t multi;
-  multi.addmem("abc", 3);
-
-  EXPECT_THAT([&]() { stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(multi))); },
-              testing::Throws<std::exception>(
-                  testing::Property(&std::exception::what, testing::HasSubstr("Expected 2-part message"))));
+  auto corrupt = MakeBytes("abc");
+  EXPECT_THROW(stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(corrupt))), std::exception);
 
   stdexec::sync_wait(broker.Stop());
 }

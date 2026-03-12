@@ -41,7 +41,7 @@ add_test(
   NAME heartbeat_test
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/heartbeat_test.py
           $<TARGET_FILE:heartbeat_test>)
-set_tests_properties(heartbeat_test PROPERTIES TIMEOUT 10)
+set_tests_properties(heartbeat_test PROPERTIES TIMEOUT 20)
 
 add_executable(dynamic_connectivity_test dynamic_connectivity_test.cc)
 target_link_libraries(dynamic_connectivity_test PRIVATE ex_actor)

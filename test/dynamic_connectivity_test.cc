@@ -55,10 +55,10 @@ class DynamicConnectivityTest {
 
  private:
   ex_actor::ClusterConfig BuildConfig() const {
-    ex_actor::ClusterConfig config;
     constexpr uint32_t kBasePort = 5000;
-    config.this_node = {.node_id = this_node_id_,
-                        .address = ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", kBasePort + this_node_id_)};
+    ex_actor::ClusterConfig config;
+    config.this_node_id = this_node_id_;
+    config.listen_address = ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", kBasePort + this_node_id_);
     config.network_config = {
         .heartbeat_timeout_ms = 1000,
         .gossip_interval_ms = 100,
@@ -66,12 +66,11 @@ class DynamicConnectivityTest {
     };
 
     if (this_node_id_ != 0) {
-      uint32_t contact_node_id = 0;
+      uint32_t contact_port = kBasePort;
       if (type_ == TestType::kChain) {
-        contact_node_id = this_node_id_ - 1;
+        contact_port = kBasePort + this_node_id_ - 1;
       }
-      config.contact_node = {.node_id = contact_node_id,
-                             .address = ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", kBasePort + contact_node_id)};
+      config.contact_node_address = ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", contact_port);
     }
     return config;
   }

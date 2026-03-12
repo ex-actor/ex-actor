@@ -31,8 +31,6 @@ ActorRegistry& GetGlobalDefaultRegistry();
 void AssignGlobalDefaultRegistry(std::unique_ptr<ActorRegistry> registry);
 bool IsGlobalDefaultRegistryInitialized();
 void SetupGlobalHandlers();
-ClusterConfig BuildClusterConfigFromNodeList(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
-void WaitForClusterNodes(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
@@ -164,6 +162,14 @@ void ConfigureLogging(const LogConfig& config = {});
 
 // -------------deprecated APIs-------------
 
+struct NodeInfo {
+  /// Unique ID for this node, should be unique within the cluster.
+  uint32_t node_id = 0;
+  /// Format: "<protocol>://<IP>:<port>". For the current node, we'll open a listener on this address. For other nodes,
+  /// we'll connect to this address.
+  std::string address;
+};
+
 /// Init the global default registry in distributed mode, use specified scheduler. Not thread-safe.
 template <ex::scheduler Scheduler>
 [[deprecated(
@@ -181,6 +187,12 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
 // -----------template function implementations(non-template funcs are written in .cc file)-------------
 
 namespace ex_actor {
+
+namespace internal {
+ClusterConfig BuildClusterConfigFromNodeList(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
+void WaitForClusterNodes(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
+}  // namespace internal
+
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler) {
   internal::log::Info("Initializing ex_actor in single-node mode with custom scheduler.");
@@ -204,7 +216,7 @@ void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler, const ClusterConfig& cluster_config) {
   internal::log::Info("Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}",
-                      cluster_config.this_node.node_id);
+                      cluster_config.this_node_id);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), cluster_config));
   internal::SetupGlobalHandlers();

@@ -60,6 +60,12 @@ jobs:
           # Install the compiler
           sudo apt-get install -y ${{ matrix.toolchain.compiler.cc }} ${{ matrix.toolchain.compiler.cpp }}
 
+      - name: Set up compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.toolchain.os }}-${{ matrix.toolchain.compiler.cc }}-${{ matrix.toolchain.cxxflags || 'default' }}
+          variant: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
+
       - name: Set reusable strings
         # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
         id: strings
@@ -77,6 +83,9 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.toolchain.compiler.cpp }}
           -DCMAKE_C_COMPILER=${{ matrix.toolchain.compiler.cc }}
           -DCMAKE_CXX_FLAGS="${{ matrix.toolchain.cxxflags }}"
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
+          ${{ runner.os == 'Windows' && '-DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded' || '' }}
           -G "Ninja Multi-Config"
 
       - name: Build

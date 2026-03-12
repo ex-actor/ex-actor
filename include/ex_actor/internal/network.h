@@ -38,13 +38,6 @@
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
-struct NodeInfo {
-  /// Unique ID for this node, should be unique within the cluster.
-  uint32_t node_id = 0;
-  /// Format: "<protocol>://<IP>:<port>". For the current node, we'll open a listener on this address. For other nodes,
-  /// we'll connect to this address.
-  std::string address;
-};
 
 struct NetworkConfig {
   /// How long (ms) should we consider a node dead if we haven't received any messages from it
@@ -56,9 +49,9 @@ struct NetworkConfig {
 };
 
 struct ClusterConfig {
-  NodeInfo this_node;
-  /// If you are the first node in the cluster, leave it empty. Otherwise, set it to any other node in the cluster.
-  NodeInfo contact_node;
+  uint32_t this_node_id;
+  std::string listen_address;
+  std::string contact_node_address;
   NetworkConfig network_config;
 };
 }  // namespace ex_actor
@@ -132,7 +125,7 @@ class MessageBroker {
  public:
   using RequestHandler = std::function<exec::task<ByteBuffer>(ByteBuffer)>;
 
-  explicit MessageBroker(const ClusterConfig& cluster_config);
+  explicit MessageBroker(ClusterConfig cluster_config);
   ~MessageBroker();
 
   /**
@@ -184,7 +177,7 @@ class MessageBroker {
   void OnNodeAlive(uint32_t node_id);
   void OnNodeDead(uint32_t node_id);
 
-  uint64_t SendToNode(uint32_t node_id, ByteBuffer data);
+  uint64_t SendTwoWayMessage(uint32_t node_id, ByteBuffer data);
   void SendReply(uint32_t request_node_id, uint64_t request_id, ByteBuffer data);
 
   struct OutstandingRequest {
@@ -201,8 +194,7 @@ class MessageBroker {
     ByteBuffer data;
   };
 
-  NodeInfo this_node_ {};
-  NetworkConfig network_config_;
+  ClusterConfig cluster_config_;
   uint64_t send_request_id_counter_ = 0;
 
   std::unordered_map</*node_id*/ uint32_t, std::vector<ReplyOperation>> deferred_replies_;
@@ -215,6 +207,8 @@ class MessageBroker {
   std::mt19937 rng_ {std::random_device {}()};
 
   zmq::context_t zmq_context_ {/*io_threads_=*/1};
+  // connected at start, then moved to node_id_to_send_socket_ once got gossip from it
+  std::optional<zmq::socket_t> contact_node_send_socket_;
   std::unordered_map<uint32_t, zmq::socket_t> node_id_to_send_socket_;
 
   LocalActorRef<MessageBroker> self_actor_ref_;

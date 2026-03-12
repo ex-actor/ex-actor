@@ -28,13 +28,9 @@ ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorSchedu
                                            const ClusterConfig& cluster_config,
                                            LocalActorRef<MessageBroker> broker_actor_ref)
     : scheduler_(std::move(scheduler)),
-      this_node_id_(cluster_config.this_node.node_id),
+      this_node_id_(cluster_config.this_node_id),
       broker_actor_ref_(broker_actor_ref) {
   InitRandomNumGenerator();
-  if (!cluster_config.contact_node.address.empty()) {
-    EXA_THROW_CHECK(cluster_config.this_node.node_id != cluster_config.contact_node.node_id)
-        << "Duplicate node id: " << cluster_config.this_node.node_id;
-  }
 }
 
 exec::task<void> ActorRegistryBackend::AsyncDestroyAllActors() {
@@ -179,12 +175,12 @@ ActorRegistry::~ActorRegistry() {
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              const ClusterConfig& cluster_config)
-    : this_node_id_(cluster_config.this_node.node_id),
+    : this_node_id_(cluster_config.this_node_id),
       default_work_sharing_thread_pool_(thread_pool_size),
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
-      broker_actor_(cluster_config.this_node.address.empty()
+      broker_actor_(cluster_config.listen_address.empty()
                         ? nullptr
                         : std::make_unique<Actor<MessageBroker>>(scheduler_->Clone(), ActorConfig {}, cluster_config)),
       broker_actor_ref_(broker_actor_ ? LocalActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get())

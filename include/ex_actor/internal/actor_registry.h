@@ -34,7 +34,6 @@
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal {
-
 /**
  * @brief An actor wrapper of the most functions of ActorRegistry. Bootstraps itself as an actor, so it can reuse the
  * core functionality of Actors like mailboxes, schedulers, etc.

@@ -17,13 +17,23 @@ pushd ex-actor
     git checkout "$GITHUB_SHA"
   fi
 
+  LAUNCHER_FLAGS=()
+  if command -v ccache &>/dev/null; then
+    LAUNCHER_FLAGS=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+  fi
+
   # Build & install ex-actor
-  ./scripts/regen_build_dir.sh
+  ./scripts/regen_build_dir.sh "${LAUNCHER_FLAGS[@]}"
   cmake --build build --config Release
   cmake --install build --prefix "${HOME}/.cmake/packages/"
 popd
 
 # return to your project and build it
+LAUNCHER_FLAGS=()
+if command -v ccache &>/dev/null; then
+  LAUNCHER_FLAGS=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+fi
+
 rm -rf build
-cmake -S . -B build -G "Ninja Multi-Config" -DCMAKE_PREFIX_PATH="${HOME}/.cmake/packages/"
+cmake -S . -B build -G "Ninja Multi-Config" -DCMAKE_PREFIX_PATH="${HOME}/.cmake/packages/" "${LAUNCHER_FLAGS[@]}"
 cmake --build build --config Release

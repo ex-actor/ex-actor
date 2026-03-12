@@ -39,6 +39,12 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
+      - name: Set up compiler cache
+        if: ${{ !matrix.setup_bazel }}
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: import-test-${{ matrix.dir }}
+
       - name: Setup Bazel environment
         if: matrix.setup_bazel
         uses: bazel-contrib/setup-bazel@0.8.1

@@ -161,6 +161,11 @@ def build_and_test(temp_dir: Path, verbose: bool = False):
         "cmake", "-S", str(temp_dir), "-B", str(build_dir),
         "-G", "Ninja Multi-Config"
     ]
+    if shutil.which("ccache"):
+        cmake_cmd += [
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+        ]
     # Set CPM_SOURCE_CACHE environment variable
     env = os.environ.copy()
     env['CPM_SOURCE_CACHE'] = os.path.expanduser('~/.cache/CPM')

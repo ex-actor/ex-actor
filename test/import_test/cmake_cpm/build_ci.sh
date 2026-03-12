@@ -14,5 +14,10 @@ rm -rf build
 
 export CPM_SOURCE_CACHE=$HOME/.cache/CPM
 
-cmake -S . -B build -G "Ninja Multi-Config" -DCPM_ex_actor_SOURCE="$GITHUB_WORKSPACE"
+LAUNCHER_FLAGS=()
+if command -v ccache &>/dev/null; then
+  LAUNCHER_FLAGS=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+fi
+
+cmake -S . -B build -G "Ninja Multi-Config" -DCPM_ex_actor_SOURCE="$GITHUB_WORKSPACE" "${LAUNCHER_FLAGS[@]}"
 cmake --build build --config Release

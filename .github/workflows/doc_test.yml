@@ -37,6 +37,11 @@ jobs:
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends cmake ninja-build wget
 
+      - name: Set up compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: doc-test
+
       - name: Run documentation tests
         run: python3 test/doc_test.py --verbose
 

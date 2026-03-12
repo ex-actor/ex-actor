@@ -101,23 +101,23 @@ static void RegisterAtExitCleanup() {
 void SetupGlobalHandlers() { RegisterAtExitCleanup(); }
 
 ClusterConfig BuildClusterConfigFromNodeList(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
-  ClusterConfig cluster_config {
-      .this_node = NodeInfo {.node_id = this_node_id},
-  };
-  NodeInfo min_id_node {.node_id = this_node_id};
+  ClusterConfig cluster_config {.this_node_id = this_node_id};
+
+  uint32_t min_id = this_node_id;
+  std::string min_id_address;
 
   for (const auto& node : cluster_node_info) {
-    if (node.node_id < min_id_node.node_id) {
-      min_id_node.node_id = node.node_id;
-      min_id_node.address = node.address;
+    if (node.node_id < min_id) {
+      min_id = node.node_id;
+      min_id_address = node.address;
     }
 
     if (node.node_id == this_node_id) {
-      cluster_config.this_node.address = node.address;
+      cluster_config.listen_address = node.address;
     }
   }
-  if (min_id_node.node_id != this_node_id) {
-    cluster_config.contact_node = min_id_node;
+  if (min_id != this_node_id) {
+    cluster_config.contact_node_address = min_id_address;
   }
   return cluster_config;
 }
@@ -157,7 +157,7 @@ void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<No
 void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
   internal::log::Info(
       "Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}, this_node_id={}, ",
-      thread_pool_size, cluster_config.this_node.node_id);
+      thread_pool_size, cluster_config.this_node_id);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, cluster_config);
   internal::SetupGlobalHandlers();

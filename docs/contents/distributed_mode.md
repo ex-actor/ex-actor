@@ -2,9 +2,7 @@
 
 !!! Note
 
-```
-This feature is currently experimental. While it's fully functional and ready for use, it's not massively tested in production yet. Bugs, performance issues and API changes should be expected. Welcome to have a try and build together with us!
-```
+    This feature is currently experimental. While it's fully functional and ready for use, it's not massively tested in production yet. Bugs, performance issues and API changes should be expected. Welcome to have a try and build together with us!
 
 Distributed mode enables you to create actors at remote nodes. When calling a remote actor, all arguments will be
 serialized and sent to the remote node through network, after execution the return value will be deserialized and sent

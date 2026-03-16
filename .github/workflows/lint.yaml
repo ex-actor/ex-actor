@@ -36,19 +36,24 @@ jobs:
         run: |
           ./scripts/regen_build_dir.sh
 
-      - uses: cpp-linter/cpp-linter-action@v2.16.5
-        id: linter
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          verbosity: "debug"
-          style: "file" # Use .clang-format config file
-          tidy-checks: "" # Use .clang-tidy config file
-          version: "20"
-          ignore: "test/import_test|include/ex_actor/3rd_lib"
-          ignore-tidy: "**/*.h"
-          step-summary: ${{ github.event_name == 'pull_request' && 'update' }}
+      - name: Install clangd
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main"
+          sudo apt-get update
+          sudo apt-get install -y clangd-20
+          sudo update-alternatives --install /usr/bin/clangd clangd /usr/bin/clangd-20 100
 
-      - name: Fail fast?!
-        if: steps.linter.outputs.checks-failed > 0
-        run: exit 1
+      - name: Install clangd-tidy
+        run: pip install clangd-tidy
+
+      - name: Run clangd-tidy
+        run: |
+          find src/ include/ -name '*.cc' -o -name '*.h' \
+            | grep -v 'test/import_test' \
+            | grep -v 'include/ex_actor/3rd_lib' \
+            | xargs clangd-tidy \
+              -p . \
+              -f \
+              --github \
+              --fail-on-severity warn

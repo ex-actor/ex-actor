@@ -2,12 +2,46 @@
 
 !!! Note
 
-    This feature is currently experimental. While it's fully functional and ready for use, it's not massively tested in production yet. Bugs, performance issues and API changes should be expected. Welcome to have a try and build together with us!
-
+```
+This feature is currently experimental. While it's fully functional and ready for use, it's not massively tested in production yet. Bugs, performance issues and API changes should be expected. Welcome to have a try and build together with us!
+```
 
 Distributed mode enables you to create actors at remote nodes. When calling a remote actor, all arguments will be
 serialized and sent to the remote node through network, after execution the return value will be deserialized and sent
 back to the caller.
+
+## Start or join a cluster
+
+To start a cluster, you need to pass a `ex_actor::ClusterConfig` to `ex_actor::Init()`.
+
+```cpp
+ex_actor::ClusterConfig cluster_config {
+  // the public address other nodes use to connect to you.
+  // we'll open a listening port at this address.
+  .listen_address = "tcp://10.10.2.145:5301",
+  // set to any node in the cluster to join an existing cluster.
+  // for the first node, leave it empty.
+  .contact_node_address = "tcp://10.10.2.113:5665",
+};
+ex_actor::Init(/*thread_pool_size=*/4, cluster_config);
+```
+
+The cluster is dynamically connected, for the first node, leave the contact node address empty.
+For the remaining nodes, set the contact node address to **any node** in the cluster to join.
+
+## Discover remote nodes
+
+Use `ex_actor::WaitNodeCondition()` to wait until the cluster reaches a desired state. It takes a predicate on the list of alive nodes and a timeout:
+
+```cpp
+auto [nodes, condition_met] = co_await ex_actor::WaitNodeCondition(
+    [](const std::vector<ex_actor::NodeInfo>& nodes) {
+      return nodes.size() >= 2;
+    },
+    /*timeout_ms=*/5000);
+```
+
+The returned `nodes` is a vector of `ex_actor::NodeInfo` (each with `.node_id` and `.address`). Use the address to identify which node is which, then extract `node_id` for use with `Spawn().ToNode()`.
 
 ## Make your actor class be able to be created remotely
 
@@ -23,6 +57,7 @@ class YourClass {
 
 EXA_REMOTE(&YourClass::Create, &YourClass::Method1, &YourClass::Method2);
 
+// `node_id` is extracted from the `NodeInfo` returned by `WaitNodeCondition()`.
 co_await ex_actor::Spawn<&YourClass::Create>().ToNode(node_id);
 ```
 
@@ -31,37 +66,14 @@ Then in `Spawn<>`, provide the factory function pointer (the first argument of `
 
 Such boilerplate is caused by the lack of reflection before C++26. It can be simplified in C++26 using reflection, we'll add a new set of APIs for C++26 in the future, stay tuned!
 
-## Start or join a cluster
-
-To start a cluster, you need to pass a `ex_actor::ClusterConfig` to `ex_actor::Init()`.
-
-```cpp
-ex_actor::ClusterConfig cluster_config {
-  .this_node_id = 19,
-  // the public address other nodes use to connect to you.
-  // we'll open a listening port at this address.
-  .listen_address = "tcp://10.10.2.145:5301",
-  // set to any node in the cluster to join an existing cluster.
-  // for the first node, leave it empty.
-  .contact_node_address = "tcp://10.10.2.113:5665",
-};
-ex_actor::Init(..., cluster_config);
-
-co_await ex_actor::WaitNodeAlive(remote_node_id, /*timeout_ms=*/5000);
-```
-
-The cluster is dynamically connected, for the first node, leave the contact node address empty.
-For the remaining nodes, set the contact node address to **any node** in the cluster to join.
-
-Before operating with the remote node, call `ex_actor::WaitNodeAlive()` to confirm it is reachable; otherwise an exception will be thrown when you call `ex_actor::Spawn()` or `actor_ref.Send()`
-
-## Example
+## Full example
 
 <!-- doc test start, wrapper_script: test/multi_process_test.py -->
 ```cpp
+#include <algorithm>
 #include <cassert>
-#include <cstdlib>
 #include <iostream>
+#include <string>
 #include "ex_actor/api.h"
 
 class PingWorker {
@@ -80,15 +92,12 @@ class PingWorker {
 // 0. Register the class & methods using EXA_REMOTE
 EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping);
 
-// Usage: ./distributed_node <node_id> <listen_address> <remote_node_id> [contact_address]
+// Usage: ./distributed_node <listen_address> [contact_address]
 // The first node in the cluster should omit contact_address.
 exec::task<void> MainCoroutine(int argc, char** argv) {
-  uint32_t this_node_id = std::atoi(argv[1]);
-  std::string listen_address = argv[2];
-  uint32_t remote_node_id = std::atoi(argv[3]);
-  std::string contact_address = (argc > 4) ? argv[4] : "";
+  std::string listen_address = argv[1];
+  std::string contact_address = (argc > 2) ? argv[2] : "";
   ex_actor::ClusterConfig cluster_config {
-      .this_node_id = this_node_id,
       .listen_address = listen_address,
       .contact_node_address = contact_address,
   };
@@ -96,18 +105,27 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
   // 1. Start or join the cluster
   ex_actor::Init(/*thread_pool_size=*/4, cluster_config);
 
-  // 2. Wait for the remote node to be alive
-  bool connected = co_await ex_actor::WaitNodeAlive(remote_node_id, /*timeout_ms=*/5000);
-  if (!connected) {
-    throw std::runtime_error("Cannot connect to node " + std::to_string(remote_node_id));
+  // 2. Wait for the remote node to be discovered
+  auto [nodes, condition_met] = co_await ex_actor::WaitNodeCondition(
+      [](const auto& nodes) { return nodes.size() >= 2; },
+      /*timeout_ms=*/5000);
+  if (!condition_met) {
+    throw std::runtime_error("Cannot connect to any remote node");
   }
 
-  // 3. Create a remote actor and send messages to it
+  // 3. Pick the first remote node (any node whose address differs from ours)
+  auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address != listen_address; });
+  if (it == nodes.end()) {
+    throw std::runtime_error("Cannot find any remote node");
+  }
+  auto remote_node_id = it->node_id;
+
+  // 4. Create a remote actor and send messages to it
   auto ping_worker =
       co_await ex_actor::Spawn<&PingWorker::Create>(/*name=*/"Alice").ToNode(remote_node_id);
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
-  std::cout << "All work done, node id: " << this_node_id << std::endl;
+  std::cout << "All work done" << std::endl;
 
   // Wait for OS exit signal(like CTRL+C or kill) before shutting down, otherwise the process
   // will exit immediately, which might be earlier than the other node finishes its work,
@@ -118,18 +136,55 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
 
 int main(int argc, char** argv) { stdexec::sync_wait(MainCoroutine(argc, argv)); }
 ```
-<!-- doc test end -->
+
+
 
 Compile this program into a binary, let's say `distributed_node`.
 
-usage: `./distributed_node <node_id> <listen_address> <remote_node_id> [contact_address]`
+usage: `./distributed_node <listen_address> [contact_address]`
 
-In one shell, run: `./distributed_node 0 tcp://127.0.0.1:5301 1`, in another shell, run: `./distributed_node 1 tcp://127.0.0.1:5302 0 tcp://127.0.0.1:5301`. Both processes should print "All work done" log.
+In one shell, run: `./distributed_node tcp://127.0.0.1:5301`, in another shell, run: `./distributed_node tcp://127.0.0.1:5302 tcp://127.0.0.1:5301`. Both processes should print "All work done" log.
 
-Node 0 is the first node so it doesn't need a contact address. Node 1 specifies node 0's address as the contact address to join the cluster.
+The first node doesn't need a contact address. The second node specifies the first node's address as the contact address to join the cluster.
 
 The process will block on `ex_actor::WaitOsExitSignal()` until OS exit signal is received. You should kill them manually by CTRL+C or kill command.
 
+## Fault tolerance
+
+When a remote node becomes unreachable (dead, heartbeat timeout, connection refused, etc.), in-flight RPCs throw `ex_actor::ConnectionLost`, by catching this exception you can handle the failure gracefully.
+
+```cpp
+try {
+  co_await ref.Send<&YourClass::Method>();
+} catch (const ex_actor::ConnectionLost& e) {
+  // e.node_id tells you which node was lost
+  // e.what() has a human-readable message
+}
+```
+
+For example, now a node dies, you want to recreate your actor to another node:
+
+```cpp
+bool connection_lost = false;
+try {
+  co_await ref.Send<&YourClass::Method>();
+} catch (const ex_actor::ConnectionLost& e) {
+  connection_lost = true;
+}
+
+if (connection_lost) {
+  std::cout << "I need a new node to join the cluster!" << std::endl;
+  // 1. launch a new node, either by starting a process manually,
+  // or using outer system's API if you are using k8s or slurm etc.
+
+  // 2. wait for the new node to be ready.
+  co_await ex_actor::WaitNodeCondition(...);
+
+  // 3. recreate your actor to the new node. The original actor's state
+  // is lost forever, it's your responsibility to handle the state recovery.
+  auto new_ref = co_await ex_actor::Spawn<&YourClass::Create>().ToNode(new_node_id);
+}
+```
 
 ## Architecture details
 
@@ -140,7 +195,6 @@ It is a reflection-based C++20 serialization library, which can serialize basic 
 
 As for the protocol, since we have a fixed schema by nature(all nodes use the same binary, so the types are the same across all nodes),
 we can take advantage of a schemafull protocol. For this reason, we choose [Cap'n Proto](https://capnproto.org/) from reflect-cpp's supported protocols.
-
 
 ### Network
 

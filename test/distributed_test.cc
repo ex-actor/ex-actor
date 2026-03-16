@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <barrier>
 #include <exception>
 #include <memory>
@@ -111,18 +112,33 @@ EXA_REMOTE(&RetVoid::Create, &RetVoid::ReturnVoid, &RetVoid::CoroutineReturnVoid
 
 TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
   std::barrier bar {2};
-  auto node_main = [&bar](uint32_t this_node_id) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> exec::task<void> {
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
-        .this_node_id = this_node_id,
-        .listen_address = addresses.at(this_node_id),
-        .contact_node_address = (this_node_id == 0) ? "" : addresses.at(0),
+        .listen_address = addresses.at(index),
+        .contact_node_address = (index == 0) ? "" : addresses.at(0),
     };
     ex_actor::ActorRegistry registry(/*thread_pool_size=*/4, cluster_config);
 
-    uint32_t remote_node_id = (this_node_id + 1) % addresses.size();
-    bool connected = co_await registry.WaitNodeAlive(remote_node_id, 5000);
-    EXPECT_TRUE(connected);
+    auto [nodes, condition_met] =
+        co_await registry.WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
+                                            /*timeout_ms=*/5000);
+    EXPECT_TRUE(condition_met);
+    EXPECT_GE(nodes.size(), 2U);
+    if (nodes.size() < 2U) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+
+    std::string remote_address = addresses.at(1 - index);
+    auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(it, nodes.end());
+    if (it == nodes.end()) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+    auto remote_node_id = it->node_id;
+
     auto ping_worker = co_await registry.Spawn<&PingWorker::Create>(/*name=*/"Alice").ToNode(remote_node_id);
     auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
     auto ping_res = co_await std::move(ping);
@@ -135,27 +151,52 @@ TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
 
 TEST(DistributedTest, ConstructionInDistributedMode) {
   std::barrier bar {2};
-  auto node_main = [&bar](uint32_t this_node_id) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> exec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
-        .this_node_id = this_node_id,
-        .listen_address = addresses.at(this_node_id),
-        .contact_node_address = (this_node_id == 0) ? "" : addresses.at(0),
+        .listen_address = addresses.at(index),
+        .contact_node_address = (index == 0) ? "" : addresses.at(0),
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
 
     // test local creation
     auto local_a = co_await registry.Spawn<A>();
     auto local_b = co_await registry.Spawn<B>();
-    auto local_a2 = co_await registry.Spawn<A>().ToNode(this_node_id);
+    auto local_a2 = co_await registry.Spawn<A>();
 
     // test remote creation
-    uint32_t remote_node_id = (this_node_id + 1) % addresses.size();
-    bool connected = co_await registry.WaitNodeAlive(remote_node_id, 5000);
-    EXPECT_TRUE(connected);
+    auto [nodes, condition_met] =
+        co_await registry.WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
+                                            /*timeout_ms=*/5000);
+    EXPECT_TRUE(condition_met);
+    EXPECT_GE(nodes.size(), 2U);
+    if (nodes.size() < 2U) {
+      bar.arrive_and_wait();
+      co_return;
+    }
 
-    logging::Info("node {} creating remote actor A", this_node_id);
+    std::string this_address = addresses.at(index);
+    std::string remote_address = addresses.at(1 - index);
+    auto self_it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == this_address; });
+    auto remote_it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(self_it, nodes.end());
+    EXPECT_NE(remote_it, nodes.end());
+    if (self_it == nodes.end() || remote_it == nodes.end()) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+    auto this_node_id = self_it->node_id;
+    auto remote_node_id = remote_it->node_id;
+
+    // test ToNode with this_node_id (spawn "remotely" on self)
+    logging::Info("node {} creating actor on self via ToNode", index);
+    auto self_a = co_await registry.Spawn<&A::Create>().ToNode(this_node_id);
+    auto self_ping = co_await registry.Spawn<&PingWorker::Create>(/*name=*/"Self").ToNode(this_node_id);
+    auto self_reply = co_await self_ping.Send<&PingWorker::Ping>("hi");
+    EXPECT_EQ(self_reply, "ack from Self, msg got: hi");
+
+    logging::Info("node {} creating remote actor A", index);
     /*
     before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
     here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
@@ -172,7 +213,7 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     ex_actor::ActorConfig a_config {.actor_name = "A"};
     auto remote_a = co_await registry.Spawn<&A::Create>().ToNode(remote_node_id).WithConfig(a_config);
 
-    logging::Info("node {} creating remote actor B", this_node_id);
+    logging::Info("node {} creating remote actor B", index);
     auto remote_b = co_await registry.Spawn<&B::Create>(1, "asd", std::make_unique<int>()).ToNode(remote_node_id);
 
     logging::Info("creating remote actor C without registering with EXA_REMOTE");
@@ -228,19 +269,33 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
 
 TEST(DistributedTest, ActorLookUpInDistributeMode) {
   std::barrier bar {2};
-  auto node_main = [&bar](uint32_t this_node_id) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> exec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
-        .this_node_id = this_node_id,
-        .listen_address = addresses.at(this_node_id),
-        .contact_node_address = (this_node_id == 0) ? "" : addresses.at(0),
+        .listen_address = addresses.at(index),
+        .contact_node_address = (index == 0) ? "" : addresses.at(0),
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
 
-    uint32_t remote_node_id = (this_node_id + 1) % addresses.size();
-    bool connected = co_await registry.WaitNodeAlive(remote_node_id, 5000);
-    EXPECT_TRUE(connected);
+    auto [nodes, condition_met] =
+        co_await registry.WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
+                                            /*timeout_ms=*/5000);
+    EXPECT_TRUE(condition_met);
+    EXPECT_GE(nodes.size(), 2U);
+    if (nodes.size() < 2U) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+
+    std::string remote_address = addresses.at(1 - index);
+    auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(it, nodes.end());
+    if (it == nodes.end()) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+    auto remote_node_id = it->node_id;
     ex_actor::ActorConfig echoer_config {.actor_name = "Alice"};
     auto remote_actor = co_await registry.Spawn<&Echoer::Create>().ToNode(remote_node_id).WithConfig(echoer_config);
     auto lookup_result = co_await registry.GetActorRefByName<Echoer>(remote_node_id, "Alice");
@@ -267,19 +322,33 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
 
 TEST(DistributedTest, ActorRefSerializationTest) {
   std::barrier bar {2};
-  auto node_main = [&bar](uint32_t this_node_id) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> exec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
-        .this_node_id = this_node_id,
-        .listen_address = addresses.at(this_node_id),
-        .contact_node_address = (this_node_id == 0) ? "" : addresses.at(0),
+        .listen_address = addresses.at(index),
+        .contact_node_address = (index == 0) ? "" : addresses.at(0),
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
 
-    uint32_t remote_node_id = (this_node_id + 1) % addresses.size();
-    bool connected = co_await registry.WaitNodeAlive(remote_node_id, 5000);
-    EXPECT_TRUE(connected);
+    auto [nodes, condition_met] =
+        co_await registry.WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
+                                            /*timeout_ms=*/5000);
+    EXPECT_TRUE(condition_met);
+    EXPECT_GE(nodes.size(), 2U);
+    if (nodes.size() < 2U) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+
+    std::string remote_address = addresses.at(1 - index);
+    auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(it, nodes.end());
+    if (it == nodes.end()) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+    auto remote_node_id = it->node_id;
 
     auto local_actor_a = co_await registry.Spawn<Echoer>();
     auto local_actor_b = co_await registry.Spawn<Echoer>();

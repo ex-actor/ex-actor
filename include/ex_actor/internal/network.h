@@ -49,20 +49,40 @@ struct NetworkConfig {
 };
 
 struct ClusterConfig {
-  uint32_t this_node_id;
   std::string listen_address;
   std::string contact_node_address;
   NetworkConfig network_config;
 };
+
+struct NodeInfo {
+  uint64_t node_id = 0;
+  std::string address;
+};
+
+/// Thrown when a remote operation fails due to the target node being
+/// unreachable (dead, timed-out heartbeat, connection refused, etc.).
+struct ConnectionLost : public std::runtime_error {
+  uint64_t node_id;
+
+  explicit ConnectionLost(uint64_t node_id, const std::string& message)
+      : std::runtime_error(message), node_id(node_id) {}
+};
+
+struct WaitNodeConditionResult {
+  std::vector<NodeInfo> nodes;
+  bool condition_met;
+};
+
 }  // namespace ex_actor
 
 namespace ex_actor::internal {
 
-struct NodeAlivenessWaiter {
-  explicit NodeAlivenessWaiter(uint64_t deadline_ms) : sem(1), deadline_ms(deadline_ms) {}
+struct NodeConditionWaiter {
+  explicit NodeConditionWaiter(uint64_t deadline_ms) : sem(1), deadline_ms(deadline_ms) {}
   ex_actor::Semaphore sem;
   uint64_t deadline_ms;
-  bool arrived = false;
+  bool condition_met = false;
+  std::function<bool(const std::vector<NodeInfo>&)> predicate;
 };
 
 /**
@@ -125,7 +145,7 @@ class MessageBroker {
  public:
   using RequestHandler = std::function<exec::task<ByteBuffer>(ByteBuffer)>;
 
-  explicit MessageBroker(ClusterConfig cluster_config);
+  explicit MessageBroker(uint64_t this_node_id, ClusterConfig cluster_config);
   ~MessageBroker();
 
   /**
@@ -145,16 +165,17 @@ class MessageBroker {
   exec::task<void> Stop();
 
   /**
-   * @brief Wait for a node to be alive.
-   * @returns True if the node is alive before the timeout, false otherwise.
+   * @brief Wait until predicate(alive_nodes) returns true, or timeout.
+   * @return A pair of (alive nodes snapshot, whether the condition was met).
    */
-  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
+  exec::task<WaitNodeConditionResult> WaitNodeCondition(std::function<bool(const std::vector<NodeInfo>&)> predicate,
+                                                        uint64_t timeout_ms);
 
   /**
    * @brief Send buffer to the remote node and get a response.
    * @return A task containing raw response buffer.
    */
-  exec::task<ByteBuffer> SendRequest(uint32_t to_node_id, ByteBuffer data);
+  exec::task<ByteBuffer> SendRequest(uint64_t to_node_id, ByteBuffer data);
 
   // Called by RecvSocketPuller
   exec::task<void> DispatchReceivedMessage(ByteBuffer raw);
@@ -162,54 +183,58 @@ class MessageBroker {
   // ------------- periodical tasks scheduled in PeriodicalTaskScheduler -------------
   void BroadcastGossip();
   void CheckHeartbeatTimeout();
-  void CheckNodeAlivenessWaiterTimeout();
+  void CheckNodeConditionWaiterTimeout();
 
  private:
   void StartRecvSocketPuller();
   void StartPeriodicalTaskScheduler();
 
-  std::vector<uint32_t> GetRandomPeers(size_t fanout);
+  std::vector<uint64_t> GetRandomPeers(size_t fanout);
 
   void HandleRepliedResponse(BrokerTwoWayMessage response_msg);
   exec::task<void> HandleIncomingRequest(BrokerTwoWayMessage request_msg);
   void HandleGossipMessage(const BrokerGossipMessage& gossip_message);
 
-  void OnNodeAlive(uint32_t node_id);
-  void OnNodeDead(uint32_t node_id);
+  void OnNodeAlive(uint64_t node_id);
+  void OnNodeDead(uint64_t node_id);
 
-  uint64_t SendTwoWayMessage(uint32_t node_id, ByteBuffer data);
-  void SendReply(uint32_t request_node_id, uint64_t request_id, ByteBuffer data);
+  std::vector<NodeInfo> BuildAliveNodeInfoList() const;
+  void EvaluateNodeConditionWaiters();
+
+  uint64_t SendTwoWayMessage(uint64_t node_id, ByteBuffer data);
+  void SendReply(uint64_t request_node_id, uint64_t request_id, ByteBuffer data);
 
   struct OutstandingRequest {
     Semaphore sem;
     ByteBuffer response_bytes;
     std::exception_ptr exception_ptr;
-    uint32_t response_node_id {};
+    uint64_t response_node_id {};
     OutstandingRequest() : sem(1) {}
   };
 
   struct ReplyOperation {
-    uint32_t request_node_id;
+    uint64_t request_node_id;
     uint64_t request_id;
     ByteBuffer data;
   };
 
+  uint64_t this_node_id_;
   ClusterConfig cluster_config_;
   uint64_t send_request_id_counter_ = 0;
 
-  std::unordered_map</*node_id*/ uint32_t, std::vector<ReplyOperation>> deferred_replies_;
+  std::unordered_map</*node_id*/ uint64_t, std::vector<ReplyOperation>> deferred_replies_;
   std::unordered_map</*request_id*/ uint64_t, OutstandingRequest> outstanding_requests_;
 
   bool stopped_ = false;
 
-  std::unordered_map<uint32_t, NodeState> node_id_to_state_;
-  std::unordered_map<uint32_t, std::list<NodeAlivenessWaiter>> node_id_to_waiters_;
-  std::mt19937 rng_ {std::random_device {}()};
+  std::unordered_map<uint64_t, NodeState> node_id_to_state_;
+  std::list<NodeConditionWaiter> node_condition_waiters_;
+  std::mt19937_64 rng_ {std::random_device {}()};
 
   zmq::context_t zmq_context_ {/*io_threads_=*/1};
   // connected at start, then moved to node_id_to_send_socket_ once got gossip from it
   std::optional<zmq::socket_t> contact_node_send_socket_;
-  std::unordered_map<uint32_t, zmq::socket_t> node_id_to_send_socket_;
+  std::unordered_map<uint64_t, zmq::socket_t> node_id_to_send_socket_;
 
   LocalActorRef<MessageBroker> self_actor_ref_;
   RequestHandler request_handler_;

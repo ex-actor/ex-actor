@@ -104,18 +104,18 @@ struct NetworkReply {
 struct NodeState {
   bool alive = true;
   uint64_t last_seen_timestamp_ms = 0;
-  uint32_t node_id = 0;
+  uint64_t node_id = 0;
   std::string address;
 };
 
 struct BrokerGossipMessage {
-  uint32_t from_node_id;
+  uint64_t from_node_id;
   std::vector<NodeState> node_states;
 };
 
 struct BrokerTwoWayMessage {
-  uint32_t request_node_id;
-  uint32_t response_node_id;
+  uint64_t request_node_id;
+  uint64_t response_node_id;
   uint64_t request_id;  // the request id in the request node
   ByteBuffer payload;
 };

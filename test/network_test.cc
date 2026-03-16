@@ -1,9 +1,11 @@
 #include "ex_actor/internal/network.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <ranges>
 #include <string>
 #include <thread>
 
@@ -27,11 +29,9 @@ std::string BytesToString(const ByteBuffer& buf) {
   return std::string(reinterpret_cast<const char*>(buf.data()), buf.size());
 }
 
-ex_actor::ClusterConfig MakeConfig(uint32_t node_id, const std::string& address,
-                                   const std::string& contact_address = "", uint64_t heartbeat_timeout_ms = 5000,
-                                   uint64_t gossip_interval_ms = 500) {
+ex_actor::ClusterConfig MakeConfig(const std::string& address, const std::string& contact_address = "",
+                                   uint64_t heartbeat_timeout_ms = 5000, uint64_t gossip_interval_ms = 500) {
   ex_actor::ClusterConfig config;
-  config.this_node_id = node_id;
   config.listen_address = address;
   config.contact_node_address = contact_address;
   config.network_config.heartbeat_timeout_ms = heartbeat_timeout_ms;
@@ -41,7 +41,7 @@ ex_actor::ClusterConfig MakeConfig(uint32_t node_id, const std::string& address,
 
 void DispatchGossip(ex_actor::internal::MessageBroker& broker,
                     const std::vector<ex_actor::internal::NodeState>& node_states) {
-  uint32_t sender_node_id = node_states.empty() ? 0 : node_states.front().node_id;
+  uint64_t sender_node_id = node_states.empty() ? 0 : node_states.front().node_id;
   ex_actor::internal::BrokerMessage broker_msg {.variant = ex_actor::internal::BrokerGossipMessage {
                                                     .from_node_id = sender_node_id,
                                                     .node_states = node_states,
@@ -57,15 +57,15 @@ void DispatchGossip(ex_actor::internal::MessageBroker& broker,
 // ============================================================
 
 TEST(MessageBrokerTest, ConstructorSucceedsWithNoContactNode) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7203");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7203");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
   stdexec::sync_wait(broker.Stop());
 }
 
 TEST(MessageBrokerTest, ConstructorSucceedsWithValidContactNode) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7204",
+  auto config = MakeConfig("tcp://127.0.0.1:7204",
                            /*contact_address=*/"tcp://127.0.0.1:7205");
-  ex_actor::internal::MessageBroker broker(config);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
   stdexec::sync_wait(broker.Stop());
 }
 
@@ -74,19 +74,19 @@ TEST(MessageBrokerTest, ConstructorSucceedsWithValidContactNode) {
 // ============================================================
 
 TEST(MessageBrokerTest, SendRequestToUnconnectedNodeThrows) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7210");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7210");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   EXPECT_THAT([&]() { stdexec::sync_wait(broker.SendRequest(/*to_node_id=*/99, {})); },
-              testing::Throws<std::exception>(testing::Property(
+              testing::Throws<ex_actor::ConnectionLost>(testing::Property(
                   &std::exception::what, testing::HasSubstr("trying to send request to an unconnected node"))));
 
   stdexec::sync_wait(broker.Stop());
 }
 
 TEST(MessageBrokerTest, SendRequestToSelfThrows) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7211");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7211");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   EXPECT_THAT([&]() { stdexec::sync_wait(broker.SendRequest(/*to_node_id=*/0, {})); },
               testing::Throws<std::exception>(
@@ -96,74 +96,96 @@ TEST(MessageBrokerTest, SendRequestToSelfThrows) {
 }
 
 // ============================================================
-// WaitNodeAlive: immediate return for already-connected contact node
+// WaitNodeCondition: immediate return for already-connected contact node
 // ============================================================
 
-TEST(MessageBrokerTest, WaitNodeAliveReturnsTrueForGossipDiscoveredNode) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7220");
-  ex_actor::internal::MessageBroker broker(config);
+TEST(MessageBrokerTest, WaitNodeConditionReturnsTrueForGossipDiscoveredNode) {
+  auto config = MakeConfig("tcp://127.0.0.1:7220");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   DispatchGossip(broker,
                  {{.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7221"}});
 
-  auto [alive] = stdexec::sync_wait(broker.WaitNodeAlive(/*node_id=*/1, /*timeout_ms=*/10)).value();
-  EXPECT_TRUE(alive);
+  auto [result] = stdexec::sync_wait(broker.WaitNodeCondition(
+                                         [](const std::vector<ex_actor::NodeInfo>& nodes) {
+                                           return std::ranges::any_of(
+                                               nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                                         },
+                                         /*timeout_ms=*/10))
+                      .value();
+  EXPECT_TRUE(result.condition_met);
 
   stdexec::sync_wait(broker.Stop());
 }
 
-TEST(MessageBrokerTest, WaitNodeAliveReturnsTrueForSelfNode) {
-  auto config = MakeConfig(/*node_id=*/5, "tcp://127.0.0.1:7222");
-  ex_actor::internal::MessageBroker broker(config);
+TEST(MessageBrokerTest, WaitNodeConditionWithAlwaysTruePredicateReturnsImmediately) {
+  auto config = MakeConfig("tcp://127.0.0.1:7222");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/5, config);
 
-  auto [alive] = stdexec::sync_wait(broker.WaitNodeAlive(/*node_id=*/5, /*timeout_ms=*/10)).value();
-  EXPECT_TRUE(alive);
+  // An always-true predicate returns immediately (self node is always in the list).
+  auto [result] =
+      stdexec::sync_wait(broker.WaitNodeCondition([](const std::vector<ex_actor::NodeInfo>& /*nodes*/) { return true; },
+                                                  /*timeout_ms=*/10))
+          .value();
+  EXPECT_TRUE(result.condition_met);
 
   stdexec::sync_wait(broker.Stop());
 }
 
 // ============================================================
-// WaitNodeAlive + CheckNodeAlivenessWaiterTimeout: waiter times out
+// WaitNodeCondition + CheckNodeConditionWaiterTimeout: waiter times out
 // ============================================================
 
-TEST(MessageBrokerTest, WaitNodeAliveTimesOutForUnknownNode) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7230");
-  ex_actor::internal::MessageBroker broker(config);
+TEST(MessageBrokerTest, WaitNodeConditionTimesOutForUnknownNode) {
+  auto config = MakeConfig("tcp://127.0.0.1:7230");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   exec::async_scope scope;
-  std::atomic<bool> result = true;
+  std::atomic<bool> condition_met = true;
 
-  scope.spawn(broker.WaitNodeAlive(/*node_id=*/99, /*timeout_ms=*/0) |
-              stdexec::then([&result](bool alive) { result.store(alive, std::memory_order_relaxed); }));
+  scope.spawn(broker.WaitNodeCondition(
+                  [](const std::vector<ex_actor::NodeInfo>& nodes) {
+                    return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 99; });
+                  },
+                  /*timeout_ms=*/0) |
+              stdexec::then([&condition_met](const ex_actor::WaitNodeConditionResult& res) {
+                condition_met.store(res.condition_met, std::memory_order_relaxed);
+              }));
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  broker.CheckNodeAlivenessWaiterTimeout();
+  broker.CheckNodeConditionWaiterTimeout();
 
   stdexec::sync_wait(scope.on_empty());
-  EXPECT_FALSE(result.load(std::memory_order_relaxed));
+  EXPECT_FALSE(condition_met.load(std::memory_order_relaxed));
 
   stdexec::sync_wait(broker.Stop());
 }
 
 // ============================================================
-// WaitNodeAlive resolves when gossip brings a new node
+// WaitNodeCondition resolves when gossip brings a new node
 // ============================================================
 
-TEST(MessageBrokerTest, WaitNodeAliveResolvesOnGossipDiscovery) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7240");
-  ex_actor::internal::MessageBroker broker(config);
+TEST(MessageBrokerTest, WaitNodeConditionResolvesOnGossipDiscovery) {
+  auto config = MakeConfig("tcp://127.0.0.1:7240");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   exec::async_scope scope;
-  std::atomic<bool> result = false;
+  std::atomic<bool> condition_met = false;
 
-  scope.spawn(broker.WaitNodeAlive(/*node_id=*/1, /*timeout_ms=*/5000) |
-              stdexec::then([&result](bool alive) { result.store(alive, std::memory_order_relaxed); }));
+  scope.spawn(broker.WaitNodeCondition(
+                  [](const std::vector<ex_actor::NodeInfo>& nodes) {
+                    return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                  },
+                  /*timeout_ms=*/5000) |
+              stdexec::then([&condition_met](const ex_actor::WaitNodeConditionResult& res) {
+                condition_met.store(res.condition_met, std::memory_order_relaxed);
+              }));
 
   DispatchGossip(broker,
                  {{.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7241"}});
 
   stdexec::sync_wait(scope.on_empty());
-  EXPECT_TRUE(result.load(std::memory_order_relaxed));
+  EXPECT_TRUE(condition_met.load(std::memory_order_relaxed));
 
   stdexec::sync_wait(broker.Stop());
 }
@@ -173,8 +195,8 @@ TEST(MessageBrokerTest, WaitNodeAliveResolvesOnGossipDiscovery) {
 // ============================================================
 
 TEST(MessageBrokerTest, DuplicateGossipForSameNodeDoesNotThrow) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7250");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7250");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   DispatchGossip(broker,
                  {{.alive = true, .last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
@@ -189,8 +211,8 @@ TEST(MessageBrokerTest, DuplicateGossipForSameNodeDoesNotThrow) {
 // ============================================================
 
 TEST(MessageBrokerTest, GossipWithConflictingAddressThrows) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7260");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7260");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   DispatchGossip(broker,
                  {{.alive = true, .last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7261"}});
@@ -211,10 +233,10 @@ TEST(MessageBrokerTest, GossipWithConflictingAddressThrows) {
 // ============================================================
 
 TEST(MessageBrokerTest, CheckHeartbeatTimeoutDeactivatesTimedOutNodes) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7270",
+  auto config = MakeConfig("tcp://127.0.0.1:7270",
                            /*contact_address=*/"tcp://127.0.0.1:7271",
                            /*heartbeat_timeout_ms=*/1);
-  ex_actor::internal::MessageBroker broker(config);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover node 1 via gossip so it gets added to node_id_to_state_
   DispatchGossip(broker,
@@ -225,16 +247,21 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutDeactivatesTimedOutNodes) {
   broker.CheckHeartbeatTimeout();
 
   exec::async_scope scope;
-  std::atomic<bool> wait_result = true;
+  std::atomic<bool> condition_met = true;
   scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
-      broker.WaitNodeAlive(/*node_id=*/1, /*timeout_ms=*/0) |
-      stdexec::then([&wait_result](bool alive) { wait_result = alive; })));
+      broker.WaitNodeCondition(
+          [](const std::vector<ex_actor::NodeInfo>& nodes) {
+            return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+          },
+          /*timeout_ms=*/0) |
+      stdexec::then(
+          [&condition_met](const ex_actor::WaitNodeConditionResult& res) { condition_met = res.condition_met; })));
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  broker.CheckNodeAlivenessWaiterTimeout();
+  broker.CheckNodeConditionWaiterTimeout();
 
   stdexec::sync_wait(scope.on_empty());
-  EXPECT_FALSE(wait_result);
+  EXPECT_FALSE(condition_met);
 
   stdexec::sync_wait(broker.Stop());
 }
@@ -244,10 +271,10 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutDeactivatesTimedOutNodes) {
 // ============================================================
 
 TEST(MessageBrokerTest, CheckHeartbeatTimeoutErrorsOutstandingRequests) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7280",
+  auto config = MakeConfig("tcp://127.0.0.1:7280",
                            /*contact_address=*/"tcp://127.0.0.1:7281",
                            /*heartbeat_timeout_ms=*/1);
-  ex_actor::internal::MessageBroker broker(config);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover node 1 via gossip so it gets added to node_id_to_state_ and a send socket is created
   DispatchGossip(broker,
@@ -273,9 +300,9 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutErrorsOutstandingRequests) {
 // ============================================================
 
 TEST(MessageBrokerTest, HandleRepliedResponseResolvesOutstandingRequest) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7290",
+  auto config = MakeConfig("tcp://127.0.0.1:7290",
                            /*contact_address=*/"tcp://127.0.0.1:7291");
-  ex_actor::internal::MessageBroker broker(config);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover node 1 via gossip so we can send requests to it
   DispatchGossip(broker,
@@ -312,9 +339,9 @@ TEST(MessageBrokerTest, HandleRepliedResponseResolvesOutstandingRequest) {
 // ============================================================
 
 TEST(MessageBrokerTest, DispatchReceivedMessageRejectsMisdirectedTwoWay) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7310",
+  auto config = MakeConfig("tcp://127.0.0.1:7310",
                            /*contact_address=*/"tcp://127.0.0.1:7311");
-  ex_actor::internal::MessageBroker broker(config);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   ex_actor::internal::BrokerMessage bad_msg {.variant = ex_actor::internal::BrokerTwoWayMessage {
                                                  .request_node_id = 5,
@@ -332,8 +359,8 @@ TEST(MessageBrokerTest, DispatchReceivedMessageRejectsMisdirectedTwoWay) {
 }
 
 TEST(MessageBrokerTest, DispatchReceivedMessageRejectsCorruptData) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7312");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7312");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   auto corrupt = MakeBytes("abc");
   EXPECT_THROW(stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(corrupt))), std::exception);
@@ -346,15 +373,20 @@ TEST(MessageBrokerTest, DispatchReceivedMessageRejectsCorruptData) {
 // ============================================================
 
 TEST(MessageBrokerTest, MultipleWaitersNotifiedOnGossipDiscovery) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7320");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7320");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   exec::async_scope scope;
   std::atomic<int> success_count = 0;
 
   for (int i = 0; i < 3; ++i) {
-    scope.spawn(broker.WaitNodeAlive(/*node_id=*/2, /*timeout_ms=*/5000) | stdexec::then([&success_count](bool alive) {
-                  if (alive) {
+    scope.spawn(broker.WaitNodeCondition(
+                    [](const std::vector<ex_actor::NodeInfo>& nodes) {
+                      return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
+                    },
+                    /*timeout_ms=*/5000) |
+                stdexec::then([&success_count](const ex_actor::WaitNodeConditionResult& res) {
+                  if (res.condition_met) {
                     success_count.fetch_add(1, std::memory_order_relaxed);
                   }
                 }));
@@ -374,18 +406,32 @@ TEST(MessageBrokerTest, MultipleWaitersNotifiedOnGossipDiscovery) {
 // ============================================================
 
 TEST(MessageBrokerTest, GossipIntroducesMultipleNodesAtOnce) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7330");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7330");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   exec::async_scope scope;
   std::atomic<int> success_count = 0;
 
-  scope.spawn(broker.WaitNodeAlive(/*node_id=*/1, /*timeout_ms=*/5000) | stdexec::then([&success_count](bool alive) {
-                if (alive) success_count.fetch_add(1, std::memory_order_relaxed);
+  scope.spawn(broker.WaitNodeCondition(
+                  [](const std::vector<ex_actor::NodeInfo>& nodes) {
+                    return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                  },
+                  /*timeout_ms=*/5000) |
+              stdexec::then([&success_count](const ex_actor::WaitNodeConditionResult& res) {
+                if (res.condition_met) {
+                  success_count.fetch_add(1, std::memory_order_relaxed);
+                }
               }));
 
-  scope.spawn(broker.WaitNodeAlive(/*node_id=*/2, /*timeout_ms=*/5000) | stdexec::then([&success_count](bool alive) {
-                if (alive) success_count.fetch_add(1, std::memory_order_relaxed);
+  scope.spawn(broker.WaitNodeCondition(
+                  [](const std::vector<ex_actor::NodeInfo>& nodes) {
+                    return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
+                  },
+                  /*timeout_ms=*/5000) |
+              stdexec::then([&success_count](const ex_actor::WaitNodeConditionResult& res) {
+                if (res.condition_met) {
+                  success_count.fetch_add(1, std::memory_order_relaxed);
+                }
               }));
 
   DispatchGossip(broker,
@@ -406,8 +452,8 @@ TEST(MessageBrokerTest, GossipIntroducesMultipleNodesAtOnce) {
 // ============================================================
 
 TEST(MessageBrokerTest, BroadcastGossipNoPeersNoCrash) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7340");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7340");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   EXPECT_NO_THROW(broker.BroadcastGossip());
 
@@ -415,9 +461,9 @@ TEST(MessageBrokerTest, BroadcastGossipNoPeersNoCrash) {
 }
 
 TEST(MessageBrokerTest, BroadcastGossipWithPeersNoCrash) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7350",
+  auto config = MakeConfig("tcp://127.0.0.1:7350",
                            /*contact_address=*/"tcp://127.0.0.1:7351");
-  ex_actor::internal::MessageBroker broker(config);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   EXPECT_NO_THROW(broker.BroadcastGossip());
 
@@ -429,10 +475,10 @@ TEST(MessageBrokerTest, BroadcastGossipWithPeersNoCrash) {
 // ============================================================
 
 TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7360",
+  auto config = MakeConfig("tcp://127.0.0.1:7360",
                            /*contact_address=*/"tcp://127.0.0.1:7361",
                            /*heartbeat_timeout_ms=*/200);
-  ex_actor::internal::MessageBroker broker(config);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover node 1 via gossip first
   DispatchGossip(broker,
@@ -451,8 +497,14 @@ TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
   // The node should NOT be timed out since we just refreshed it
   broker.CheckHeartbeatTimeout();
 
-  auto [alive] = stdexec::sync_wait(broker.WaitNodeAlive(/*node_id=*/1, /*timeout_ms=*/10)).value();
-  EXPECT_TRUE(alive);
+  auto [result] = stdexec::sync_wait(broker.WaitNodeCondition(
+                                         [](const std::vector<ex_actor::NodeInfo>& nodes) {
+                                           return std::ranges::any_of(
+                                               nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                                         },
+                                         /*timeout_ms=*/10))
+                      .value();
+  EXPECT_TRUE(result.condition_met);
 
   stdexec::sync_wait(broker.Stop());
 }
@@ -462,16 +514,20 @@ TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
 // ============================================================
 
 TEST(MessageBrokerTest, CheckHeartbeatTimeoutDoesNotDeactivateSelf) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7370",
+  auto config = MakeConfig("tcp://127.0.0.1:7370",
                            /*contact_address=*/"",
                            /*heartbeat_timeout_ms=*/1);
-  ex_actor::internal::MessageBroker broker(config);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   broker.CheckHeartbeatTimeout();
 
-  auto [alive] = stdexec::sync_wait(broker.WaitNodeAlive(/*node_id=*/0, /*timeout_ms=*/10)).value();
-  EXPECT_TRUE(alive);
+  // Self node is never deactivated. An always-true predicate returns immediately.
+  auto [result] =
+      stdexec::sync_wait(broker.WaitNodeCondition([](const std::vector<ex_actor::NodeInfo>& /*nodes*/) { return true; },
+                                                  /*timeout_ms=*/10))
+          .value();
+  EXPECT_TRUE(result.condition_met);
 
   stdexec::sync_wait(broker.Stop());
 }
@@ -481,8 +537,8 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutDoesNotDeactivateSelf) {
 // ============================================================
 
 TEST(MessageBrokerTest, BroadcastGossipAfterDiscovery) {
-  auto config = MakeConfig(/*node_id=*/0, "tcp://127.0.0.1:7380");
-  ex_actor::internal::MessageBroker broker(config);
+  auto config = MakeConfig("tcp://127.0.0.1:7380");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   DispatchGossip(broker,
                  {{.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7381"},

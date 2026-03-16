@@ -24,36 +24,37 @@ ADDR1 = "tcp://127.0.0.1:5302"
 
 # Step 1: Launch both nodes, capturing their logs to temp files.
 log_file0 = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")
-node0 = subprocess.Popen([argv[1], "0", ADDR0, "1"], stdout=log_file0, stderr=subprocess.STDOUT)
+node0 = subprocess.Popen([argv[1], ADDR0, ADDR1], stdout=log_file0, stderr=subprocess.STDOUT)
 log_file0.close()
 
 log_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")
-node1 = subprocess.Popen([argv[1], "1", ADDR1, "0", ADDR0], stdout=log_file, stderr=subprocess.STDOUT)
+node1 = subprocess.Popen([argv[1], ADDR1, ADDR0, ADDR0], stdout=log_file, stderr=subprocess.STDOUT)
 log_file.close()
 
 # Step 2: Wait for bidirectional gossip discovery (up to 5 s).
+# Node IDs are auto-generated, so we look for the generic gossip pattern.
 deadline = time.monotonic() + 5
-node0_found_node1 = False
-node1_found_node0 = False
+node0_found_peer = False
+node1_found_peer = False
 while time.monotonic() < deadline:
-    if not node0_found_node1:
+    if not node0_found_peer:
         with open(log_file0.name, "r") as f:
-            if "[Gossip] Node 0 found node 1" in f.read():
-                node0_found_node1 = True
-    if not node1_found_node0:
+            if "[Gossip]" in f.read() and "found node" in open(log_file0.name).read():
+                node0_found_peer = True
+    if not node1_found_peer:
         with open(log_file.name, "r") as f:
-            if "[Gossip] Node 1 found node 0" in f.read():
-                node1_found_node0 = True
-    if node0_found_node1 and node1_found_node0:
+            if "[Gossip]" in f.read() and "found node" in open(log_file.name).read():
+                node1_found_peer = True
+    if node0_found_peer and node1_found_peer:
         break
     time.sleep(0.1)
 
-if not node0_found_node1 or not node1_found_node0:
+if not node0_found_peer or not node1_found_peer:
     missing = []
-    if not node0_found_node1:
-        missing.append("node0 -> node1")
-    if not node1_found_node0:
-        missing.append("node1 -> node0")
+    if not node0_found_peer:
+        missing.append("node0 -> peer")
+    if not node1_found_peer:
+        missing.append("node1 -> peer")
     print(f"FAIL: connection not established: {', '.join(missing)}")
     with open(log_file0.name, "r") as f:
         print("=== node0 log ===", flush=True)
@@ -108,7 +109,7 @@ while time.monotonic() < deadline:
         content = f.read()
     if "detects that node" in content and "is dead" in content:
         death_detected = True
-    if "caught exception during ping" in content:
+    if "connection lost to node" in content:
         exception_caught = True
     if death_detected and exception_caught:
         print(content, end="", flush=True)
@@ -120,7 +121,7 @@ if not death_detected or not exception_caught:
     if not death_detected:
         missing.append("death detection")
     if not exception_caught:
-        missing.append("caught exception during ping")
+        missing.append("connection lost to node")
     print(f"FAIL: node1 did not log: {', '.join(missing)}")
     with open(log_file.name, "r") as f:
         print(f.read(), end="", flush=True)
@@ -129,7 +130,7 @@ if not death_detected or not exception_caught:
     os.unlink(log_file.name)
     sys.exit(1)
 
-print("SUCCESS: node1 detected node0's death and caught ping exception", flush=True)
+print("SUCCESS: node1 detected node0's death and caught ConnectionLost", flush=True)
 node1.kill()
 node1.wait()
 os.unlink(log_file.name)

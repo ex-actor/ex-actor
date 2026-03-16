@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -42,73 +43,91 @@ enum class TestType : uint8_t {
 
 class DynamicConnectivityTest {
  public:
-  DynamicConnectivityTest(uint32_t this_node_id, uint32_t cluster_size, TestType type)
-      : this_node_id_(this_node_id), cluster_size_(cluster_size), type_(type) {}
+  DynamicConnectivityTest(uint32_t this_index, uint32_t cluster_size, TestType type)
+      : this_index_(this_index), cluster_size_(cluster_size), type_(type) {}
 
   void Test() {
     auto config = BuildConfig();
-    ex_actor::Init(1, config);
-    CheckConnectivityAndCallMethod();
+    ex_actor::Init(/*thread_pool_size=*/1, config);
+
+    auto coroutine = [this]() -> exec::task<void> {
+      // Wait for all other nodes to be discovered
+      auto [nodes, condition_met] =
+          co_await ex_actor::WaitNodeCondition([this](const auto& nodes) { return nodes.size() >= cluster_size_; },
+                                               /*timeout_ms=*/6000);
+      EXA_THROW_CHECK(condition_met) << ex_actor::fmt_lib::format(
+          "Error: node index {} can't discover all {} nodes, only found {}", this_index_, cluster_size_, nodes.size());
+
+      // Pick a target node by address
+      uint32_t target_index = PickTargetIndex();
+      std::string target_address = GetAddress(target_index);
+      auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == target_address; });
+      EXA_THROW_CHECK(it != nodes.end()) << "Cannot find target node at " << target_address;
+      auto target_node_id = it->node_id;
+
+      std::string str {"Hello"};
+      auto actor_creation_sender = ex_actor::Spawn<Echoer>();
+      auto [actor_ref] = stdexec::sync_wait(actor_creation_sender).value();
+      auto actor_method_calling_sender = actor_ref.Send<&Echoer::Echo>(str);
+      auto [method_calling_return_val] = stdexec::sync_wait(std::move(actor_method_calling_sender)).value();
+      EXA_THROW_CHECK(method_calling_return_val == str)
+          << ex_actor::fmt_lib::format("Error: local method calling error");
+
+      auto remote_actor_creation_sender = ex_actor::Spawn<&Echoer::Create>().ToNode(target_node_id);
+      auto [remote_actor_ref] = stdexec::sync_wait(std::move(remote_actor_creation_sender)).value();
+      auto remote_actor_calling_sender = remote_actor_ref.Send<&Echoer::Echo>(str);
+      auto [remote_method_calling_return_val] = stdexec::sync_wait(std::move(remote_actor_calling_sender)).value();
+      EXA_THROW_CHECK(remote_method_calling_return_val == str)
+          << ex_actor::fmt_lib::format("Error: remote method calling error");
+    };
+
+    stdexec::sync_wait(coroutine());
     std::this_thread::sleep_for(std::chrono::milliseconds {1500});
     ex_actor::Shutdown();
   }
 
  private:
-  ex_actor::ClusterConfig BuildConfig() const {
+  static std::string GetAddress(uint32_t index) {
     constexpr uint32_t kBasePort = 5000;
+    return ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", kBasePort + index);
+  }
+
+  ex_actor::ClusterConfig BuildConfig() const {
     ex_actor::ClusterConfig config;
-    config.this_node_id = this_node_id_;
-    config.listen_address = ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", kBasePort + this_node_id_);
+    config.listen_address = GetAddress(this_index_);
     config.network_config = {
         .heartbeat_timeout_ms = 1000,
         .gossip_interval_ms = 100,
         .gossip_fanout = cluster_size_ > 1 ? cluster_size_ / 2 : 1,
     };
 
-    if (this_node_id_ != 0) {
-      uint32_t contact_port = kBasePort;
+    if (this_index_ != 0) {
+      uint32_t contact_index = 0;
       if (type_ == TestType::kChain) {
-        contact_port = kBasePort + this_node_id_ - 1;
+        contact_index = this_index_ - 1;
       }
-      config.contact_node_address = ex_actor::fmt_lib::format("tcp://127.0.0.1:{}", contact_port);
+      config.contact_node_address = GetAddress(contact_index);
     }
     return config;
   }
 
-  void CheckConnectivityAndCallMethod() const {
-    uint32_t target_node_id;
+  uint32_t PickTargetIndex() const {
+    uint32_t target_index;
     if (type_ == TestType::kStar) {
       std::random_device device;
       std::mt19937 random_generator(device());
       std::uniform_int_distribution<uint32_t> dist(0, cluster_size_ - 1);
-      target_node_id = dist(random_generator);
+      target_index = dist(random_generator);
     } else {
-      target_node_id = cluster_size_ - 1 - this_node_id_;
-      if (target_node_id == this_node_id_) {
-        target_node_id = (this_node_id_ + 1) % cluster_size_;
+      target_index = cluster_size_ - 1 - this_index_;
+      if (target_index == this_index_) {
+        target_index = (this_index_ + 1) % cluster_size_;
       }
     }
-
-    auto [connected] = stdexec::sync_wait(ex_actor::WaitNodeAlive(target_node_id, 6000)).value();
-    EXA_THROW_CHECK(connected) << ex_actor::fmt_lib::format("Error: node {} can't connected to node {}", this_node_id_,
-                                                            target_node_id);
-
-    std::string str {"Hello"};
-    auto actor_creation_sender = ex_actor::Spawn<Echoer>();
-    auto [actor_ref] = stdexec::sync_wait(actor_creation_sender).value();
-    auto actor_method_calling_sender = actor_ref.Send<&Echoer::Echo>(str);
-    auto [method_calling_return_val] = stdexec::sync_wait(std::move(actor_method_calling_sender)).value();
-    EXA_THROW_CHECK(method_calling_return_val == str) << ex_actor::fmt_lib::format("Error: local method calling error");
-
-    auto remote_actor_creation_sender = ex_actor::Spawn<&Echoer::Create>().ToNode(target_node_id);
-    auto [remote_actor_ref] = stdexec::sync_wait(std::move(remote_actor_creation_sender)).value();
-    auto remote_actor_calling_sender = remote_actor_ref.Send<&Echoer::Echo>(str);
-    auto [remote_method_calling_return_val] = stdexec::sync_wait(std::move(remote_actor_calling_sender)).value();
-    EXA_THROW_CHECK(remote_method_calling_return_val == str)
-        << ex_actor::fmt_lib::format("Error: remote method calling error");
+    return target_index;
   }
 
-  uint32_t this_node_id_;
+  uint32_t this_index_;
   uint32_t cluster_size_;
   TestType type_;
 };
@@ -119,8 +138,8 @@ int main(int argc, char* argv[]) {
   }
 
   uint32_t cluster_size = std::atoi(argv[1]);
-  uint32_t this_node_id = std::atoi(argv[2]);
-  if (cluster_size == 0 || this_node_id >= cluster_size) {
+  uint32_t this_index = std::atoi(argv[2]);
+  if (cluster_size == 0 || this_index >= cluster_size) {
     return 1;
   }
 
@@ -134,7 +153,7 @@ int main(int argc, char* argv[]) {
     return -1;
   }
 
-  DynamicConnectivityTest dynamic_connectivity_test(this_node_id, cluster_size, type);
+  DynamicConnectivityTest dynamic_connectivity_test(this_index, cluster_size, type);
   dynamic_connectivity_test.Test();
 
   return 0;

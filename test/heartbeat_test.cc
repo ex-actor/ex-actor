@@ -1,5 +1,6 @@
+#include <algorithm>
 #include <chrono>
-#include <exception>
+#include <string>
 #include <thread>
 
 #include "ex_actor/api.h"
@@ -21,17 +22,15 @@ class PingWorker {
 
 EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping);
 
-// Usage: <binary> <node_id> <listen_address> <remote_node_id> [contact_address]
+// Usage: <binary> <listen_address> <remote_address> [contact_address]
 int main(int argc, char** argv) {
   ex_actor::internal::InstallFallbackExceptionHandler();
-  uint32_t this_node_id = std::atoi(argv[1]);
-  std::string listen_address = argv[2];
-  uint32_t remote_node_id = std::atoi(argv[3]);
-  std::string contact_address = (argc > 4) ? argv[4] : "";
-  auto coroutine = [](uint32_t this_node_id, std::string listen_address, uint32_t remote_node_id,
+  std::string listen_address = argv[1];
+  std::string remote_address = argv[2];
+  std::string contact_address = (argc > 3) ? argv[3] : "";
+  auto coroutine = [](std::string listen_address, std::string remote_address,
                       std::string contact_address) -> exec::task<void> {
     ex_actor::ClusterConfig cluster_config {
-        .this_node_id = this_node_id,
         .listen_address = listen_address,
         .contact_node_address = contact_address,
         .network_config =
@@ -41,23 +40,30 @@ int main(int argc, char** argv) {
             },
     };
     ex_actor::Init(/*thread_pool_size=*/2, cluster_config);
-    bool connected = co_await ex_actor::WaitNodeAlive(remote_node_id, 5000);
-    EXA_THROW_CHECK(connected) << "Cannot connect to node " << remote_node_id;
+
+    auto [nodes, condition_met] =
+        co_await ex_actor::WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
+                                             /*timeout_ms=*/5000);
+    EXA_THROW_CHECK(condition_met) << "Cannot connect to any remote node";
+
+    auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXA_THROW_CHECK(it != nodes.end()) << "Cannot find remote node at " << remote_address;
+    auto remote_node_id = it->node_id;
+
     auto ping_worker = co_await ex_actor::Spawn<&PingWorker::Create>(/*name=*/"Alice").ToNode(remote_node_id);
-    logging::Info("Node {} connected to node {}, remote actor created, now start to ping it", this_node_id,
-                  remote_node_id);
+    logging::Info("Connected to remote node, remote actor created, now start to ping it");
     while (true) {
       try {
         auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
         std::ignore = co_await std::move(ping);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      } catch (const std::exception& e) {
-        logging::Error("Node {} caught exception during ping: {}", this_node_id, e.what());
+      } catch (const ex_actor::ConnectionLost& e) {
+        logging::Error("connection lost to node {}: {}", e.node_id, e.what());
         break;
       }
     }
     co_await ex_actor::WaitOsExitSignal();
     ex_actor::Shutdown();
   };
-  stdexec::sync_wait(coroutine(this_node_id, std::move(listen_address), remote_node_id, std::move(contact_address)));
+  stdexec::sync_wait(coroutine(std::move(listen_address), std::move(remote_address), std::move(contact_address)));
 }

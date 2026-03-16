@@ -41,8 +41,8 @@ namespace ex_actor::internal {
  */
 class ActorRegistryBackend {
  public:
-  explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                                const ClusterConfig& cluster_config, LocalActorRef<MessageBroker> broker_actor_ref);
+  explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint64_t this_node_id,
+                                LocalActorRef<MessageBroker> broker_actor_ref);
 
   exec::task<void> AsyncDestroyAllActors();
 
@@ -50,7 +50,7 @@ class ActorRegistryBackend {
    * @brief Spawn a local actor with config.
    */
   template <class UserClass, class... Args>
-  exec::task<ActorRef<UserClass>> SpawnWithClass(uint32_t node_id, ActorConfig config, Args... args) {
+  exec::task<ActorRef<UserClass>> SpawnWithClass(uint64_t node_id, ActorConfig config, Args... args) {
     if (node_id != this_node_id_) {
       EXA_THROW << "Spawn<UserClass> can only be used to create local actor, to create remote actor, use "
                    "Spawn<&CreateFn> to provide a fixed signature for remote actor creation. node_id="
@@ -63,7 +63,7 @@ class ActorRegistryBackend {
    * @brief Spawn an actor (local or remote) using a factory function, with config.
    */
   template <auto kCreateFn, class... Args>
-  exec::task<ActorRef<FnReturnType<kCreateFn>>> SpawnWithCreateFn(uint32_t node_id, ActorConfig config, Args... args) {
+  exec::task<ActorRef<FnReturnType<kCreateFn>>> SpawnWithCreateFn(uint64_t node_id, ActorConfig config, Args... args) {
     using UserClass = FnReturnType<kCreateFn>;
     static_assert(std::is_invocable_v<decltype(kCreateFn), Args...>,
                   "Class can't be created by given args and create function");
@@ -120,7 +120,7 @@ class ActorRegistryBackend {
   }
 
   template <class UserClass>
-  exec::task<std::optional<ActorRef<UserClass>>> GetActorRefByName(const uint32_t& node_id,
+  exec::task<std::optional<ActorRef<UserClass>>> GetActorRefByName(const uint64_t& node_id,
                                                                    const std::string& name) const {
     if (node_id == this_node_id_) {
       co_return GetActorRefByName<UserClass>(name);
@@ -144,11 +144,10 @@ class ActorRegistryBackend {
    * @brief Handle a network request. Returns the serialized reply data.
    */
   exec::task<ByteBuffer> HandleNetworkRequest(ByteBuffer request_buffer);
-  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
 
  private:
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  exec::task<ActorRef<UserClass>> SpawnLocal(uint32_t node_id, ActorConfig config, Args... args) {
+  exec::task<ActorRef<UserClass>> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
     auto actor_id = GenerateRandomActorId();
     auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::move(args)...);
     auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor.get(), broker_actor_ref_);
@@ -164,7 +163,7 @@ class ActorRegistryBackend {
 
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
-  uint32_t this_node_id_ = 0;
+  uint64_t this_node_id_ = 0;
   LocalActorRef<MessageBroker> broker_actor_ref_;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
@@ -207,12 +206,12 @@ class SpawnBuilder : public ex::sender_t {
   explicit SpawnBuilder(LocalActorRef<ActorRegistryBackend> backend_ref, Args... args)
       : backend_ref_(std::move(backend_ref)), args_(std::move(args)...) {}
 
-  SpawnBuilder& ToNode(uint32_t node_id) & {
+  SpawnBuilder& ToNode(uint64_t node_id) & {
     node_id_ = node_id;
     return *this;
   }
 
-  SpawnBuilder&& ToNode(uint32_t node_id) && {
+  SpawnBuilder&& ToNode(uint64_t node_id) && {
     node_id_ = node_id;
     return std::move(*this);
   }
@@ -240,7 +239,7 @@ class SpawnBuilder : public ex::sender_t {
 
  private:
   template <class Config, class Tuple>
-  auto MakeSender(uint32_t node_id, Config&& config, Tuple&& args) {
+  auto MakeSender(uint64_t node_id, Config&& config, Tuple&& args) {
     return std::apply(
         [this, node_id, config = std::forward<Config>(config)](auto&&... a) mutable {
           if constexpr (kCreateFn == nullptr) {
@@ -257,7 +256,7 @@ class SpawnBuilder : public ex::sender_t {
   }
 
   LocalActorRef<ActorRegistryBackend> backend_ref_;
-  uint32_t node_id_ = 0;
+  uint64_t node_id_ = 0;
   ActorConfig config_ {};
   std::tuple<Args...> args_;
 };
@@ -340,42 +339,20 @@ class ActorRegistry {
    * @brief Find the actor by name at remote node.
    */
   template <class UserClass>
-  SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32_t& node_id,
+  SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint64_t& node_id,
                                                                       const std::string& name) const {
     // resolve overload ambiguity
     constexpr exec::task<std::optional<ActorRef<UserClass>>> (ActorRegistryBackend::*kProcessFn)(
-        const uint32_t& node_id, const std::string& name) const = &ActorRegistryBackend::GetActorRefByName<UserClass>;
+        const uint64_t& node_id, const std::string& name) const = &ActorRegistryBackend::GetActorRefByName<UserClass>;
 
     return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(node_id, name));
   }
 
-  exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
-
-  // ------------deprecated APIs------------
-
-  /// Backward-compatible alias for Spawn.
-  template <class UserClass, class... Args>
-  [[deprecated("Use Spawn() instead of CreateActor().")]]
-  SenderOf<ActorRef<UserClass>> auto CreateActor(Args... args) {
-    return Spawn<UserClass, Args...>(std::move(args)...);
-  }
-
-  /// @deprecated Use Spawn<UserClass>(args...).ToNode(node_id).WithConfig(config) instead.
-  template <class UserClass, class... Args>
-  [[deprecated("Use Spawn<UserClass>(args...).ToNode(node_id).WithConfig(config) instead.")]]
-  SenderOf<ActorRef<UserClass>> auto SpawnWithConfig(uint32_t node_id, ActorConfig config, Args... args) {
-    return Spawn<UserClass, Args...>(std::move(args)...).ToNode(node_id).WithConfig(std::move(config));
-  }
-
-  /// @deprecated Use Spawn<kCreateFn>(args...).ToNode(node_id).WithConfig(config) instead.
-  template <auto kCreateFn, class... Args>
-  [[deprecated("Use Spawn<kCreateFn>(args...).ToNode(node_id).WithConfig(config) instead.")]]
-  SenderOf<ActorRef<FnReturnType<kCreateFn>>> auto SpawnWithConfig(uint32_t node_id, ActorConfig config, Args... args) {
-    return Spawn<kCreateFn, Args...>(std::move(args)...).ToNode(node_id).WithConfig(std::move(config));
-  }
+  exec::task<WaitNodeConditionResult> WaitNodeCondition(std::function<bool(const std::vector<NodeInfo>&)> predicate,
+                                                        uint64_t timeout_ms);
 
  private:
-  uint32_t this_node_id_;
+  uint64_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   std::unique_ptr<Actor<MessageBroker>> broker_actor_;

@@ -16,10 +16,10 @@
 
 #include <csignal>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
-#include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/util.h"
@@ -100,37 +100,6 @@ static void RegisterAtExitCleanup() {
 
 void SetupGlobalHandlers() { RegisterAtExitCleanup(); }
 
-ClusterConfig BuildClusterConfigFromNodeList(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
-  ClusterConfig cluster_config {.this_node_id = this_node_id};
-
-  uint32_t min_id = this_node_id;
-  std::string min_id_address;
-
-  for (const auto& node : cluster_node_info) {
-    if (node.node_id < min_id) {
-      min_id = node.node_id;
-      min_id_address = node.address;
-    }
-
-    if (node.node_id == this_node_id) {
-      cluster_config.listen_address = node.address;
-    }
-  }
-  if (min_id != this_node_id) {
-    cluster_config.contact_node_address = min_id_address;
-  }
-  return cluster_config;
-}
-
-void WaitForClusterNodes(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
-  for (const auto& node : cluster_node_info) {
-    if (node.node_id != this_node_id) {
-      auto [connected] =
-          stdexec::sync_wait(ex_actor::WaitNodeAlive(node.node_id, kDefaultWaitNodeAliveTimeoutMs)).value();
-      EXA_THROW_CHECK(connected) << "Cannot connect to the node " << node.node_id;
-    }
-  }
-}
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
@@ -142,22 +111,9 @@ void Init(uint32_t thread_pool_size) {
   internal::SetupGlobalHandlers();
 }
 
-void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
-  internal::log::Info(
-      "Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}, this_node_id={}, "
-      "total_nodes={}",
-      thread_pool_size, this_node_id, cluster_node_info.size());
-  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  auto cluster_config = internal::BuildClusterConfigFromNodeList(this_node_id, cluster_node_info);
-  global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, cluster_config);
-  internal::SetupGlobalHandlers();
-  internal::WaitForClusterNodes(this_node_id, cluster_node_info);
-}
-
 void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
-  internal::log::Info(
-      "Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}, this_node_id={}, ",
-      thread_pool_size, cluster_config.this_node_id);
+  internal::log::Info("Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}",
+                      thread_pool_size);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, cluster_config);
   internal::SetupGlobalHandlers();
@@ -165,8 +121,9 @@ void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
 
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
 
-exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
-  co_return co_await global_default_registry->WaitNodeAlive(node_id, timeout_ms);
+exec::task<WaitNodeConditionResult> WaitNodeCondition(std::function<bool(const std::vector<NodeInfo>&)> predicate,
+                                                      uint64_t timeout_ms) {
+  co_return co_await global_default_registry->WaitNodeCondition(std::move(predicate), timeout_ms);
 }
 
 exec::task<void> WaitOsExitSignal() {

@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -83,10 +84,11 @@ void Shutdown();
 exec::task<void> WaitOsExitSignal();
 
 /**
- * @brief Wait for the node to be alive.
- * @return True if the node is alive before the timeout, false otherwise.
+ * @brief Wait until a predicate on the set of alive nodes is satisfied, or timeout.
+ * @return The list of alive nodes and whether the condition was met before the timeout.
  */
-exec::task<bool> WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms);
+exec::task<WaitNodeConditionResult> WaitNodeCondition(std::function<bool(const std::vector<NodeInfo>&)> predicate,
+                                                      uint64_t timeout_ms);
 
 /**
  * @brief Ask ex_actor to hold a resource, the resource won't be released until runtime is shut down.
@@ -150,7 +152,7 @@ SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const std::s
  * @brief Find the actor by name at specified node.
  */
 template <class UserClass>
-SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32_t& node_id, const std::string& name) {
+SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint64_t& node_id, const std::string& name) {
   return internal::GetGlobalDefaultRegistry().GetActorRefByName<UserClass>(node_id, name);
 }
 
@@ -160,38 +162,11 @@ SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint32
  */
 void ConfigureLogging(const LogConfig& config = {});
 
-// -------------deprecated APIs-------------
-
-struct NodeInfo {
-  /// Unique ID for this node, should be unique within the cluster.
-  uint32_t node_id = 0;
-  /// Format: "<protocol>://<IP>:<port>". For the current node, we'll open a listener on this address. For other nodes,
-  /// we'll connect to this address.
-  std::string address;
-};
-
-/// Init the global default registry in distributed mode, use specified scheduler. Not thread-safe.
-template <ex::scheduler Scheduler>
-[[deprecated(
-    "Deprecated: use cluster_config-based initialization: `Init(uint32_t, const ClusterConfig&)` "
-    "or `ActorRegistry(Scheduler, const ClusterConfig&)`. This API will be removed in the future.")]]
-void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
-/// Init the global default registry in distributed mode, use the default work-sharing thread pool as the scheduler. Not
-/// thread-safe.
-[[deprecated(
-    "Deprecated: use `Init(uint32_t, const ClusterConfig&)` instead. This API will be removed in the future.")]]
-void Init(uint32_t thread_pool_size, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
-
 }  // namespace ex_actor
 
 // -----------template function implementations(non-template funcs are written in .cc file)-------------
 
 namespace ex_actor {
-
-namespace internal {
-ClusterConfig BuildClusterConfigFromNodeList(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
-void WaitForClusterNodes(uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info);
-}  // namespace internal
 
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler) {
@@ -202,21 +177,8 @@ void Init(Scheduler scheduler) {
 }
 
 template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler, uint32_t this_node_id, const std::vector<NodeInfo>& cluster_node_info) {
-  internal::log::Info(
-      "Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}, total_nodes={}", this_node_id,
-      cluster_node_info.size());
-  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  auto cluster_config = internal::BuildClusterConfigFromNodeList(this_node_id, cluster_node_info);
-  AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), cluster_config));
-  internal::SetupGlobalHandlers();
-  internal::WaitForClusterNodes(this_node_id, cluster_node_info);
-}
-
-template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler, const ClusterConfig& cluster_config) {
-  internal::log::Info("Initializing ex_actor in distributed mode with custom scheduler. this_node_id={}",
-                      cluster_config.this_node_id);
+  internal::log::Info("Initializing ex_actor in distributed mode with custom scheduler.");
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), cluster_config));
   internal::SetupGlobalHandlers();

@@ -32,7 +32,7 @@ class ActorRef : public LocalActorRef<UserClass> {
  public:
   ActorRef() : LocalActorRef<UserClass>() {}
 
-  ActorRef(uint32_t this_node_id, uint32_t node_id, uint64_t actor_id, TypeErasedActor* actor,
+  ActorRef(uint64_t this_node_id, uint64_t node_id, uint64_t actor_id, TypeErasedActor* actor,
            const LocalActorRef<MessageBroker>& broker_actor_ref)
       : LocalActorRef<UserClass>(actor_id, actor),
         this_node_id_(this_node_id),
@@ -46,7 +46,7 @@ class ActorRef : public LocalActorRef<UserClass> {
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
   }
 
-  void SetLocalRuntimeInfo(uint32_t this_node_id, TypeErasedActor* actor,
+  void SetLocalRuntimeInfo(uint64_t this_node_id, TypeErasedActor* actor,
                            const LocalActorRef<MessageBroker>& broker_actor_ref) {
     this_node_id_ = this_node_id;
     this->type_erased_actor_ = actor;
@@ -100,11 +100,11 @@ class ActorRef : public LocalActorRef<UserClass> {
     return LocalActorRef<UserClass>::template SendLocal<kMethod>(std::move(args)...);
   }
 
-  uint32_t GetNodeId() const { return node_id_; }
+  uint64_t GetNodeId() const { return node_id_; }
 
  private:
-  uint32_t this_node_id_ = 0;
-  uint32_t node_id_ = 0;
+  uint64_t this_node_id_ = 0;
+  uint64_t node_id_ = 0;
   LocalActorRef<MessageBroker> broker_actor_ref_;
 
   template <auto kMethod, class... Args>
@@ -177,7 +177,7 @@ struct hash<ex_actor::ActorRef<UserClass>> {
     if (ref.IsEmpty()) {
       return ex_actor::internal::kEmptyActorRefHashVal;
     }
-    return std::hash<uint64_t>()(ref.GetActorId()) ^ std::hash<uint32_t>()(ref.GetNodeId());
+    return std::hash<uint64_t>()(ref.GetActorId()) ^ std::hash<uint64_t>()(ref.GetNodeId());
   }
 };
 }  // namespace std
@@ -188,7 +188,7 @@ struct hash<ex_actor::ActorRef<UserClass>> {
 
 namespace ex_actor::internal {
 struct ActorRefSerdeContext {
-  uint32_t this_node_id = 0;
+  uint64_t this_node_id = 0;
   std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
   LocalActorRef<MessageBroker> broker_actor_ref;
 };
@@ -199,7 +199,7 @@ template <typename U>
 struct Reflector<ex_actor::internal::ActorRef<U>> {
   struct ReflType {
     bool is_empty {};
-    uint32_t node_id {};
+    uint64_t node_id {};
     uint64_t actor_id {};
   };
 

@@ -1,5 +1,6 @@
+#include <algorithm>
 #include <cassert>
-#include <cstdlib>
+#include <string>
 
 #include "ex_actor/api.h"
 #include "ex_actor/internal/logging.h"
@@ -19,31 +20,33 @@ class PingWorker {
 };
 EXA_REMOTE(&PingWorker::CreateFn, &PingWorker::Ping);
 
-// Usage: <binary> <node_id> <listen_address> <remote_node_id> [contact_address]
+// Usage: <binary> <listen_address> [contact_address]
 exec::task<void> MainCoroutine(int argc, char** argv) {
   auto shared_pool = std::make_shared<ex_actor::WorkSharingThreadPool>(4);
-  uint32_t this_node_id = std::atoi(argv[1]);
-  std::string listen_address = argv[2];
-  uint32_t remote_node_id = std::atoi(argv[3]);
-  std::string contact_address = (argc > 4) ? argv[4] : "";
+  std::string listen_address = argv[1];
+  std::string contact_address = (argc > 2) ? argv[2] : "";
   ex_actor::ClusterConfig cluster_config {
-      .this_node_id = this_node_id,
       .listen_address = listen_address,
       .contact_node_address = contact_address,
   };
   ex_actor::Init(shared_pool->GetScheduler(), cluster_config);
   ex_actor::HoldResource(shared_pool);
 
-  bool connected = co_await ex_actor::WaitNodeAlive(remote_node_id, 5000);
-  EXA_THROW_CHECK(connected) << "Cannot connected to node " << remote_node_id;
+  auto [nodes, condition_met] =
+      co_await ex_actor::WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
+  EXA_THROW_CHECK(condition_met) << "Cannot connect to any remote node";
 
-  // 2. Specify the create function in Spawn
+  auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address != listen_address; });
+  EXA_THROW_CHECK(it != nodes.end()) << "Cannot find any remote node";
+  auto remote_node_id = it->node_id;
+
   auto ping_worker = co_await ex_actor::Spawn<&PingWorker::CreateFn>(/*name=*/"Alice").ToNode(remote_node_id);
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
   (void)ping_res;
 
-  logging::Info("All work done, node id: {}", this_node_id);
+  logging::Info("All work done");
   co_await ex_actor::WaitOsExitSignal();
   ex_actor::Shutdown();
 }

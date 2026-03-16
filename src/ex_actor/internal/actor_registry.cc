@@ -16,6 +16,8 @@
 
 #include <cstdint>
 #include <exception>
+#include <functional>
+#include <random>
 
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
@@ -24,12 +26,9 @@
 namespace ex_actor::internal {
 
 // ----------------------ActorRegistryBackend--------------------------
-ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                                           const ClusterConfig& cluster_config,
+ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint64_t this_node_id,
                                            LocalActorRef<MessageBroker> broker_actor_ref)
-    : scheduler_(std::move(scheduler)),
-      this_node_id_(cluster_config.this_node_id),
-      broker_actor_ref_(broker_actor_ref) {
+    : scheduler_(std::move(scheduler)), this_node_id_(this_node_id), broker_actor_ref_(broker_actor_ref) {
   InitRandomNumGenerator();
 }
 
@@ -153,11 +152,6 @@ exec::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorM
   }
 }
 
-exec::task<bool> ActorRegistryBackend::WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
-  EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
-  co_return co_await broker_actor_ref_.SendLocal<&MessageBroker::WaitNodeAlive>(node_id, timeout_ms);
-}
-
 // ----------------------ActorRegistry--------------------------
 ActorRegistry::~ActorRegistry() {
   log::Info("Start to shutdown actor registry");
@@ -175,17 +169,23 @@ ActorRegistry::~ActorRegistry() {
 
 ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
                              const ClusterConfig& cluster_config)
-    : this_node_id_(cluster_config.this_node_id),
+    : this_node_id_([] {
+        std::random_device rd;
+        std::mt19937_64 gen(rd());
+        // Mask off the sign bit so the value is serializable by Cap'n Proto (which uses int64)
+        return gen() & 0x7FFF'FFFF'FFFF'FFFF;
+      }()),
       default_work_sharing_thread_pool_(thread_pool_size),
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
       broker_actor_(cluster_config.listen_address.empty()
                         ? nullptr
-                        : std::make_unique<Actor<MessageBroker>>(scheduler_->Clone(), ActorConfig {}, cluster_config)),
+                        : std::make_unique<Actor<MessageBroker>>(scheduler_->Clone(), ActorConfig {}, this_node_id_,
+                                                                 cluster_config)),
       broker_actor_ref_(broker_actor_ ? LocalActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get())
                                       : LocalActorRef<MessageBroker> {}),
-      backend_actor_(scheduler_->Clone(), ActorConfig {}, scheduler_->Clone(), cluster_config, broker_actor_ref_),
+      backend_actor_(scheduler_->Clone(), ActorConfig {}, scheduler_->Clone(), this_node_id_, broker_actor_ref_),
       backend_actor_ref_(/*actor_id=*/UINT64_MAX, &backend_actor_) {
   if (!broker_actor_ref_.IsEmpty()) {
     NotifyOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
@@ -196,13 +196,14 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
     ex::sync_wait(broker_actor_ref_.SendLocal<&MessageBroker::Start>(std::move(request_handler)));
   }
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+  log::Info("ActorRegistry created, node_id={}", this_node_id_);
 }
 
-exec::task<bool> ActorRegistry::WaitNodeAlive(uint32_t node_id, uint64_t timeout_ms) {
-  if (node_id == this_node_id_) {
-    co_return true;
-  }
-  co_return co_await backend_actor_ref_.SendLocal<&ActorRegistryBackend::WaitNodeAlive>(node_id, timeout_ms);
+exec::task<WaitNodeConditionResult> ActorRegistry::WaitNodeCondition(
+    std::function<bool(const std::vector<NodeInfo>&)> predicate, uint64_t timeout_ms) {
+  EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty())
+      << "WaitNodeCondition requires distributed mode, add ClusterConfig to Init() to enable distributed mode";
+  co_return co_await broker_actor_ref_.SendLocal<&MessageBroker::WaitNodeCondition>(std::move(predicate), timeout_ms);
 }
 
 }  // namespace ex_actor::internal

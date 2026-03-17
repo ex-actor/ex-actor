@@ -348,8 +348,8 @@ class ActorRegistry {
     return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(node_id, name));
   }
 
-  exec::task<WaitNodeConditionResult> WaitNodeCondition(std::function<bool(const std::vector<NodeInfo>&)> predicate,
-                                                        uint64_t timeout_ms);
+  exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
+                                                      uint64_t timeout_ms);
 
  private:
   uint64_t this_node_id_;

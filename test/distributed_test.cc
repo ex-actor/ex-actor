@@ -120,20 +120,20 @@ TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
     };
     ex_actor::ActorRegistry registry(/*thread_pool_size=*/4, cluster_config);
 
-    auto [nodes, condition_met] =
-        co_await registry.WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
-                                            /*timeout_ms=*/5000);
+    auto [cluster_state, condition_met] =
+        co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
     EXPECT_TRUE(condition_met);
-    EXPECT_GE(nodes.size(), 2U);
-    if (nodes.size() < 2U) {
+    EXPECT_GE(cluster_state.nodes.size(), 2U);
+    if (cluster_state.nodes.size() < 2U) {
       bar.arrive_and_wait();
       co_return;
     }
 
     std::string remote_address = addresses.at(1 - index);
-    auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
-    EXPECT_NE(it, nodes.end());
-    if (it == nodes.end()) {
+    auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(it, cluster_state.nodes.end());
+    if (it == cluster_state.nodes.end()) {
       bar.arrive_and_wait();
       co_return;
     }
@@ -166,23 +166,24 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     auto local_a2 = co_await registry.Spawn<A>();
 
     // test remote creation
-    auto [nodes, condition_met] =
-        co_await registry.WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
-                                            /*timeout_ms=*/5000);
+    auto [cluster_state, condition_met] =
+        co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
     EXPECT_TRUE(condition_met);
-    EXPECT_GE(nodes.size(), 2U);
-    if (nodes.size() < 2U) {
+    EXPECT_GE(cluster_state.nodes.size(), 2U);
+    if (cluster_state.nodes.size() < 2U) {
       bar.arrive_and_wait();
       co_return;
     }
 
     std::string this_address = addresses.at(index);
     std::string remote_address = addresses.at(1 - index);
-    auto self_it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == this_address; });
-    auto remote_it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
-    EXPECT_NE(self_it, nodes.end());
-    EXPECT_NE(remote_it, nodes.end());
-    if (self_it == nodes.end() || remote_it == nodes.end()) {
+    auto self_it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == this_address; });
+    auto remote_it =
+        std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(self_it, cluster_state.nodes.end());
+    EXPECT_NE(remote_it, cluster_state.nodes.end());
+    if (self_it == cluster_state.nodes.end() || remote_it == cluster_state.nodes.end()) {
       bar.arrive_and_wait();
       co_return;
     }
@@ -278,20 +279,20 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
 
-    auto [nodes, condition_met] =
-        co_await registry.WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
-                                            /*timeout_ms=*/5000);
+    auto [cluster_state, condition_met] =
+        co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
     EXPECT_TRUE(condition_met);
-    EXPECT_GE(nodes.size(), 2U);
-    if (nodes.size() < 2U) {
+    EXPECT_GE(cluster_state.nodes.size(), 2U);
+    if (cluster_state.nodes.size() < 2U) {
       bar.arrive_and_wait();
       co_return;
     }
 
     std::string remote_address = addresses.at(1 - index);
-    auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
-    EXPECT_NE(it, nodes.end());
-    if (it == nodes.end()) {
+    auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(it, cluster_state.nodes.end());
+    if (it == cluster_state.nodes.end()) {
       bar.arrive_and_wait();
       co_return;
     }
@@ -331,20 +332,20 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
 
-    auto [nodes, condition_met] =
-        co_await registry.WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
-                                            /*timeout_ms=*/5000);
+    auto [cluster_state, condition_met] =
+        co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
     EXPECT_TRUE(condition_met);
-    EXPECT_GE(nodes.size(), 2U);
-    if (nodes.size() < 2U) {
+    EXPECT_GE(cluster_state.nodes.size(), 2U);
+    if (cluster_state.nodes.size() < 2U) {
       bar.arrive_and_wait();
       co_return;
     }
 
     std::string remote_address = addresses.at(1 - index);
-    auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
-    EXPECT_NE(it, nodes.end());
-    if (it == nodes.end()) {
+    auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(it, cluster_state.nodes.end());
+    if (it == cluster_state.nodes.end()) {
       bar.arrive_and_wait();
       co_return;
     }

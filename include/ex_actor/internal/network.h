@@ -59,6 +59,11 @@ struct NodeInfo {
   std::string address;
 };
 
+// now it only has one field, but we keep it as a separate struct for future extensibility
+struct ClusterState {
+  std::vector<NodeInfo> nodes;
+};
+
 /// Thrown when a remote operation fails due to the target node being
 /// unreachable (dead, timed-out heartbeat, connection refused, etc.).
 struct ConnectionLost : public std::runtime_error {
@@ -68,21 +73,21 @@ struct ConnectionLost : public std::runtime_error {
       : std::runtime_error(message), node_id(node_id) {}
 };
 
-struct WaitNodeConditionResult {
-  std::vector<NodeInfo> nodes;
-  bool condition_met;
+struct WaitClusterStateResult {
+  ClusterState cluster_state;
+  bool condition_met = false;
 };
 
 }  // namespace ex_actor
 
 namespace ex_actor::internal {
 
-struct NodeConditionWaiter {
-  explicit NodeConditionWaiter(uint64_t deadline_ms) : sem(1), deadline_ms(deadline_ms) {}
+struct ClusterStateWaiter {
+  explicit ClusterStateWaiter(uint64_t deadline_ms) : sem(1), deadline_ms(deadline_ms) {}
   ex_actor::Semaphore sem;
   uint64_t deadline_ms;
   bool condition_met = false;
-  std::function<bool(const std::vector<NodeInfo>&)> predicate;
+  std::function<bool(const ClusterState&)> predicate;
 };
 
 /**
@@ -168,8 +173,8 @@ class MessageBroker {
    * @brief Wait until predicate(alive_nodes) returns true, or timeout.
    * @return A pair of (alive nodes snapshot, whether the condition was met).
    */
-  exec::task<WaitNodeConditionResult> WaitNodeCondition(std::function<bool(const std::vector<NodeInfo>&)> predicate,
-                                                        uint64_t timeout_ms);
+  exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
+                                                      uint64_t timeout_ms);
 
   /**
    * @brief Send buffer to the remote node and get a response.
@@ -183,7 +188,7 @@ class MessageBroker {
   // ------------- periodical tasks scheduled in PeriodicalTaskScheduler -------------
   void BroadcastGossip();
   void CheckHeartbeatTimeout();
-  void CheckNodeConditionWaiterTimeout();
+  void CheckClusterStateWaiterTimeout();
 
  private:
   void StartRecvSocketPuller();
@@ -199,7 +204,7 @@ class MessageBroker {
   void OnNodeDead(uint64_t node_id);
 
   std::vector<NodeInfo> BuildAliveNodeInfoList() const;
-  void EvaluateNodeConditionWaiters();
+  void EvaluateClusterStateWaiters();
 
   uint64_t SendTwoWayMessage(uint64_t node_id, ByteBuffer data);
   void SendReply(uint64_t request_node_id, uint64_t request_id, ByteBuffer data);
@@ -228,7 +233,7 @@ class MessageBroker {
   bool stopped_ = false;
 
   std::unordered_map<uint64_t, NodeState> node_id_to_state_;
-  std::list<NodeConditionWaiter> node_condition_waiters_;
+  std::list<ClusterStateWaiter> cluster_state_waiters_;
   std::mt19937_64 rng_ {std::random_device {}()};
 
   zmq::context_t zmq_context_ {/*io_threads_=*/1};

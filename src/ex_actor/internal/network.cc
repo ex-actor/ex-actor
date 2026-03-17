@@ -228,21 +228,21 @@ exec::task<ByteBuffer> MessageBroker::SendRequest(uint64_t to_node_id, ByteBuffe
   co_return std::move(response_bytes);
 }
 
-exec::task<WaitNodeConditionResult> MessageBroker::WaitNodeCondition(
-    std::function<bool(const std::vector<NodeInfo>&)> predicate, uint64_t timeout_ms) {
-  auto alive_nodes = BuildAliveNodeInfoList();
-  if (predicate(alive_nodes)) {
-    co_return WaitNodeConditionResult {.nodes = std::move(alive_nodes), .condition_met = true};
+exec::task<WaitClusterStateResult> MessageBroker::WaitClusterState(std::function<bool(const ClusterState&)> predicate,
+                                                                   uint64_t timeout_ms) {
+  ClusterState state {.nodes = BuildAliveNodeInfoList()};
+  if (predicate(state)) {
+    co_return WaitClusterStateResult {.cluster_state = std::move(state), .condition_met = true};
   }
 
-  auto waiter_it = node_condition_waiters_.emplace(node_condition_waiters_.end(), GetTimeMs() + timeout_ms);
+  auto waiter_it = cluster_state_waiters_.emplace(cluster_state_waiters_.end(), GetTimeMs() + timeout_ms);
   waiter_it->predicate = std::move(predicate);
 
   co_await waiter_it->sem.OnDrained();
   bool met = waiter_it->condition_met;
-  node_condition_waiters_.erase(waiter_it);
+  cluster_state_waiters_.erase(waiter_it);
 
-  co_return WaitNodeConditionResult {.nodes = BuildAliveNodeInfoList(), .condition_met = met};
+  co_return WaitClusterStateResult {.cluster_state = {.nodes = BuildAliveNodeInfoList()}, .condition_met = met};
 }
 
 std::vector<uint64_t> MessageBroker::GetRandomPeers(size_t fanout) {
@@ -304,9 +304,9 @@ void MessageBroker::CheckHeartbeatTimeout() {
   }
 }
 
-void MessageBroker::CheckNodeConditionWaiterTimeout() {
+void MessageBroker::CheckClusterStateWaiterTimeout() {
   auto now_ms = GetTimeMs();
-  for (auto it = node_condition_waiters_.begin(); it != node_condition_waiters_.end();) {
+  for (auto it = cluster_state_waiters_.begin(); it != cluster_state_waiters_.end();) {
     auto& waiter = *it;
     ++it;  // advance before signaling -- the coroutine may erase this entry on resume
     if (!waiter.condition_met && waiter.deadline_ms <= now_ms) {
@@ -335,7 +335,7 @@ void MessageBroker::StartPeriodicalTaskScheduler() {
       [this]() { async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::CheckHeartbeatTimeout>()); },
       kDefaultHeartbeatCheckIntervalMs);
   periodical_task_scheduler_->Register(
-      [this]() { async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::CheckNodeConditionWaiterTimeout>()); },
+      [this]() { async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::CheckClusterStateWaiterTimeout>()); },
       kDefaultWaiterExpirationCheckIntervalMs);
 }
 
@@ -399,7 +399,7 @@ void MessageBroker::OnNodeAlive(uint64_t node_id) {
     contact_node_send_socket_ = std::nullopt;
   }
 
-  EvaluateNodeConditionWaiters();
+  EvaluateClusterStateWaiters();
 
   // flush deferred replies
   auto node_handle = deferred_replies_.extract(new_node.node_id);
@@ -426,7 +426,7 @@ void MessageBroker::OnNodeDead(uint64_t node_id) {
   }
   deferred_replies_.erase(node_id);
 
-  EvaluateNodeConditionWaiters();
+  EvaluateClusterStateWaiters();
 }
 
 uint64_t MessageBroker::SendTwoWayMessage(uint64_t node_id, ByteBuffer data) {
@@ -486,12 +486,12 @@ std::vector<NodeInfo> MessageBroker::BuildAliveNodeInfoList() const {
   return result;
 }
 
-void MessageBroker::EvaluateNodeConditionWaiters() {
-  auto alive_nodes = BuildAliveNodeInfoList();
-  for (auto it = node_condition_waiters_.begin(); it != node_condition_waiters_.end();) {
+void MessageBroker::EvaluateClusterStateWaiters() {
+  ClusterState state {.nodes = BuildAliveNodeInfoList()};
+  for (auto it = cluster_state_waiters_.begin(); it != cluster_state_waiters_.end();) {
     auto& waiter = *it;
     ++it;  // advance before signaling -- the coroutine may erase this entry on resume
-    if (!waiter.condition_met && waiter.predicate(alive_nodes)) {
+    if (!waiter.condition_met && waiter.predicate(state)) {
       waiter.condition_met = true;
       waiter.sem.Acquire(1);
     }

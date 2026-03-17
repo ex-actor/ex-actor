@@ -46,15 +46,15 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
   });
 
   // 3. Wait for the cluster to reach your desired state.
-  auto [nodes, condition_met] = co_await ex_actor::WaitNodeCondition(
-      /*predicate=*/[](const std::vector<ex_actor::NodeInfo>& nodes) {
-        return nodes.size() >= 2;
+  auto [cluster_state, condition_met] = co_await ex_actor::WaitClusterState(
+      /*predicate=*/[](const ex_actor::ClusterState& state) {
+        return state.nodes.size() >= 2;
       },
       /*timeout_ms=*/5000);
   assert(condition_met);
 
   // 4. Pick a remote node, here we pick the first node whose address differs from ours.
-  auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address != listen_address; });
+  auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address != listen_address; });
   auto remote_node_id = it->node_id;
 
   // 5. Create actor at remote node and play!
@@ -125,7 +125,7 @@ if (connection_lost) {
   // or using outer system's API if you are using k8s or slurm etc.
 
   // 2. wait for the new node to be ready.
-  co_await ex_actor::WaitNodeCondition(...);
+  co_await ex_actor::WaitClusterState(...);
 
   // 3. recreate your actor to the new node. The original actor's state
   // is lost forever, it's your responsibility to handle the state recovery.

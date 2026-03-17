@@ -199,11 +199,11 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
   log::Info("ActorRegistry created, node_id={}", this_node_id_);
 }
 
-exec::task<WaitNodeConditionResult> ActorRegistry::WaitNodeCondition(
-    std::function<bool(const std::vector<NodeInfo>&)> predicate, uint64_t timeout_ms) {
+exec::task<WaitClusterStateResult> ActorRegistry::WaitClusterState(std::function<bool(const ClusterState&)> predicate,
+                                                                   uint64_t timeout_ms) {
   EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty())
-      << "WaitNodeCondition requires distributed mode, add ClusterConfig to Init() to enable distributed mode";
-  co_return co_await broker_actor_ref_.SendLocal<&MessageBroker::WaitNodeCondition>(std::move(predicate), timeout_ms);
+      << "WaitClusterState requires distributed mode, add ClusterConfig to Init() to enable distributed mode";
+  co_return co_await broker_actor_ref_.SendLocal<&MessageBroker::WaitClusterState>(std::move(predicate), timeout_ms);
 }
 
 }  // namespace ex_actor::internal

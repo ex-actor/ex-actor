@@ -52,17 +52,18 @@ class DynamicConnectivityTest {
 
     auto coroutine = [this]() -> exec::task<void> {
       // Wait for all other nodes to be discovered
-      auto [nodes, condition_met] =
-          co_await ex_actor::WaitNodeCondition([this](const auto& nodes) { return nodes.size() >= cluster_size_; },
-                                               /*timeout_ms=*/6000);
+      auto [cluster_state, condition_met] =
+          co_await ex_actor::WaitClusterState([this](const auto& state) { return state.nodes.size() >= cluster_size_; },
+                                              /*timeout_ms=*/6000);
       EXA_THROW_CHECK(condition_met) << ex_actor::fmt_lib::format(
-          "Error: node index {} can't discover all {} nodes, only found {}", this_index_, cluster_size_, nodes.size());
+          "Error: node index {} can't discover all {} nodes, only found {}", this_index_, cluster_size_,
+          cluster_state.nodes.size());
 
       // Pick a target node by address
       uint32_t target_index = PickTargetIndex();
       std::string target_address = GetAddress(target_index);
-      auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == target_address; });
-      EXA_THROW_CHECK(it != nodes.end()) << "Cannot find target node at " << target_address;
+      auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == target_address; });
+      EXA_THROW_CHECK(it != cluster_state.nodes.end()) << "Cannot find target node at " << target_address;
       auto target_node_id = it->node_id;
 
       std::string str {"Hello"};

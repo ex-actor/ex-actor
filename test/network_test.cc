@@ -96,20 +96,20 @@ TEST(MessageBrokerTest, SendRequestToSelfThrows) {
 }
 
 // ============================================================
-// WaitNodeCondition: immediate return for already-connected contact node
+// WaitClusterState: immediate return for already-connected contact node
 // ============================================================
 
-TEST(MessageBrokerTest, WaitNodeConditionReturnsTrueForGossipDiscoveredNode) {
+TEST(MessageBrokerTest, WaitClusterStateReturnsTrueForGossipDiscoveredNode) {
   auto config = MakeConfig("tcp://127.0.0.1:7220");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   DispatchGossip(broker,
                  {{.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7221"}});
 
-  auto [result] = stdexec::sync_wait(broker.WaitNodeCondition(
-                                         [](const std::vector<ex_actor::NodeInfo>& nodes) {
+  auto [result] = stdexec::sync_wait(broker.WaitClusterState(
+                                         [](const ex_actor::ClusterState& state) {
                                            return std::ranges::any_of(
-                                               nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                                               state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
                                          },
                                          /*timeout_ms=*/10))
                       .value();
@@ -118,14 +118,14 @@ TEST(MessageBrokerTest, WaitNodeConditionReturnsTrueForGossipDiscoveredNode) {
   stdexec::sync_wait(broker.Stop());
 }
 
-TEST(MessageBrokerTest, WaitNodeConditionWithAlwaysTruePredicateReturnsImmediately) {
+TEST(MessageBrokerTest, WaitClusterStateWithAlwaysTruePredicateReturnsImmediately) {
   auto config = MakeConfig("tcp://127.0.0.1:7222");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/5, config);
 
   // An always-true predicate returns immediately (self node is always in the list).
   auto [result] =
-      stdexec::sync_wait(broker.WaitNodeCondition([](const std::vector<ex_actor::NodeInfo>& /*nodes*/) { return true; },
-                                                  /*timeout_ms=*/10))
+      stdexec::sync_wait(broker.WaitClusterState([](const ex_actor::ClusterState& /*state*/) { return true; },
+                                                 /*timeout_ms=*/10))
           .value();
   EXPECT_TRUE(result.condition_met);
 
@@ -133,27 +133,28 @@ TEST(MessageBrokerTest, WaitNodeConditionWithAlwaysTruePredicateReturnsImmediate
 }
 
 // ============================================================
-// WaitNodeCondition + CheckNodeConditionWaiterTimeout: waiter times out
+// WaitClusterState + CheckClusterStateWaiterTimeout: waiter times out
 // ============================================================
 
-TEST(MessageBrokerTest, WaitNodeConditionTimesOutForUnknownNode) {
+TEST(MessageBrokerTest, WaitClusterStateTimesOutForUnknownNode) {
   auto config = MakeConfig("tcp://127.0.0.1:7230");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   exec::async_scope scope;
   std::atomic<bool> condition_met = true;
 
-  scope.spawn(broker.WaitNodeCondition(
-                  [](const std::vector<ex_actor::NodeInfo>& nodes) {
-                    return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 99; });
+  scope.spawn(broker.WaitClusterState(
+                  [](const ex_actor::ClusterState& state) {
+                    return std::ranges::any_of(state.nodes,
+                                               [](const ex_actor::NodeInfo& n) { return n.node_id == 99; });
                   },
                   /*timeout_ms=*/0) |
-              stdexec::then([&condition_met](const ex_actor::WaitNodeConditionResult& res) {
+              stdexec::then([&condition_met](const ex_actor::WaitClusterStateResult& res) {
                 condition_met.store(res.condition_met, std::memory_order_relaxed);
               }));
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  broker.CheckNodeConditionWaiterTimeout();
+  broker.CheckClusterStateWaiterTimeout();
 
   stdexec::sync_wait(scope.on_empty());
   EXPECT_FALSE(condition_met.load(std::memory_order_relaxed));
@@ -162,22 +163,22 @@ TEST(MessageBrokerTest, WaitNodeConditionTimesOutForUnknownNode) {
 }
 
 // ============================================================
-// WaitNodeCondition resolves when gossip brings a new node
+// WaitClusterState resolves when gossip brings a new node
 // ============================================================
 
-TEST(MessageBrokerTest, WaitNodeConditionResolvesOnGossipDiscovery) {
+TEST(MessageBrokerTest, WaitClusterStateResolvesOnGossipDiscovery) {
   auto config = MakeConfig("tcp://127.0.0.1:7240");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   exec::async_scope scope;
   std::atomic<bool> condition_met = false;
 
-  scope.spawn(broker.WaitNodeCondition(
-                  [](const std::vector<ex_actor::NodeInfo>& nodes) {
-                    return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+  scope.spawn(broker.WaitClusterState(
+                  [](const ex_actor::ClusterState& state) {
+                    return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
                   },
                   /*timeout_ms=*/5000) |
-              stdexec::then([&condition_met](const ex_actor::WaitNodeConditionResult& res) {
+              stdexec::then([&condition_met](const ex_actor::WaitClusterStateResult& res) {
                 condition_met.store(res.condition_met, std::memory_order_relaxed);
               }));
 
@@ -249,16 +250,16 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutDeactivatesTimedOutNodes) {
   exec::async_scope scope;
   std::atomic<bool> condition_met = true;
   scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
-      broker.WaitNodeCondition(
-          [](const std::vector<ex_actor::NodeInfo>& nodes) {
-            return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+      broker.WaitClusterState(
+          [](const ex_actor::ClusterState& state) {
+            return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
           },
           /*timeout_ms=*/0) |
       stdexec::then(
-          [&condition_met](const ex_actor::WaitNodeConditionResult& res) { condition_met = res.condition_met; })));
+          [&condition_met](const ex_actor::WaitClusterStateResult& res) { condition_met = res.condition_met; })));
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  broker.CheckNodeConditionWaiterTimeout();
+  broker.CheckClusterStateWaiterTimeout();
 
   stdexec::sync_wait(scope.on_empty());
   EXPECT_FALSE(condition_met);
@@ -380,12 +381,13 @@ TEST(MessageBrokerTest, MultipleWaitersNotifiedOnGossipDiscovery) {
   std::atomic<int> success_count = 0;
 
   for (int i = 0; i < 3; ++i) {
-    scope.spawn(broker.WaitNodeCondition(
-                    [](const std::vector<ex_actor::NodeInfo>& nodes) {
-                      return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
+    scope.spawn(broker.WaitClusterState(
+                    [](const ex_actor::ClusterState& state) {
+                      return std::ranges::any_of(state.nodes,
+                                                 [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
                     },
                     /*timeout_ms=*/5000) |
-                stdexec::then([&success_count](const ex_actor::WaitNodeConditionResult& res) {
+                stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
                   if (res.condition_met) {
                     success_count.fetch_add(1, std::memory_order_relaxed);
                   }
@@ -412,23 +414,23 @@ TEST(MessageBrokerTest, GossipIntroducesMultipleNodesAtOnce) {
   exec::async_scope scope;
   std::atomic<int> success_count = 0;
 
-  scope.spawn(broker.WaitNodeCondition(
-                  [](const std::vector<ex_actor::NodeInfo>& nodes) {
-                    return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+  scope.spawn(broker.WaitClusterState(
+                  [](const ex_actor::ClusterState& state) {
+                    return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
                   },
                   /*timeout_ms=*/5000) |
-              stdexec::then([&success_count](const ex_actor::WaitNodeConditionResult& res) {
+              stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
                 if (res.condition_met) {
                   success_count.fetch_add(1, std::memory_order_relaxed);
                 }
               }));
 
-  scope.spawn(broker.WaitNodeCondition(
-                  [](const std::vector<ex_actor::NodeInfo>& nodes) {
-                    return std::ranges::any_of(nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
+  scope.spawn(broker.WaitClusterState(
+                  [](const ex_actor::ClusterState& state) {
+                    return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
                   },
                   /*timeout_ms=*/5000) |
-              stdexec::then([&success_count](const ex_actor::WaitNodeConditionResult& res) {
+              stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
                 if (res.condition_met) {
                   success_count.fetch_add(1, std::memory_order_relaxed);
                 }
@@ -497,10 +499,10 @@ TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
   // The node should NOT be timed out since we just refreshed it
   broker.CheckHeartbeatTimeout();
 
-  auto [result] = stdexec::sync_wait(broker.WaitNodeCondition(
-                                         [](const std::vector<ex_actor::NodeInfo>& nodes) {
+  auto [result] = stdexec::sync_wait(broker.WaitClusterState(
+                                         [](const ex_actor::ClusterState& state) {
                                            return std::ranges::any_of(
-                                               nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                                               state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
                                          },
                                          /*timeout_ms=*/10))
                       .value();
@@ -524,8 +526,8 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutDoesNotDeactivateSelf) {
 
   // Self node is never deactivated. An always-true predicate returns immediately.
   auto [result] =
-      stdexec::sync_wait(broker.WaitNodeCondition([](const std::vector<ex_actor::NodeInfo>& /*nodes*/) { return true; },
-                                                  /*timeout_ms=*/10))
+      stdexec::sync_wait(broker.WaitClusterState([](const ex_actor::ClusterState& /*state*/) { return true; },
+                                                 /*timeout_ms=*/10))
           .value();
   EXPECT_TRUE(result.condition_met);
 

@@ -121,9 +121,9 @@ void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
 
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
 
-exec::task<WaitNodeConditionResult> WaitNodeCondition(std::function<bool(const std::vector<NodeInfo>&)> predicate,
-                                                      uint64_t timeout_ms) {
-  co_return co_await global_default_registry->WaitNodeCondition(std::move(predicate), timeout_ms);
+exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
+                                                    uint64_t timeout_ms) {
+  co_return co_await global_default_registry->WaitClusterState(std::move(predicate), timeout_ms);
 }
 
 exec::task<void> WaitOsExitSignal() {

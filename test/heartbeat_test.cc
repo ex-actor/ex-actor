@@ -41,13 +41,13 @@ int main(int argc, char** argv) {
     };
     ex_actor::Init(/*thread_pool_size=*/2, cluster_config);
 
-    auto [nodes, condition_met] =
-        co_await ex_actor::WaitNodeCondition([](const auto& nodes) { return nodes.size() >= 2; },
-                                             /*timeout_ms=*/5000);
+    auto [cluster_state, condition_met] =
+        co_await ex_actor::WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                            /*timeout_ms=*/5000);
     EXA_THROW_CHECK(condition_met) << "Cannot connect to any remote node";
 
-    auto it = std::ranges::find_if(nodes, [&](const auto& n) { return n.address == remote_address; });
-    EXA_THROW_CHECK(it != nodes.end()) << "Cannot find remote node at " << remote_address;
+    auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXA_THROW_CHECK(it != cluster_state.nodes.end()) << "Cannot find remote node at " << remote_address;
     auto remote_node_id = it->node_id;
 
     auto ping_worker = co_await ex_actor::Spawn<&PingWorker::Create>(/*name=*/"Alice").ToNode(remote_node_id);

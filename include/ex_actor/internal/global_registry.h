@@ -19,7 +19,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <vector>
 
 #include "ex_actor/internal/actor_ref.h"
 #include "ex_actor/internal/actor_registry.h"
@@ -87,8 +86,8 @@ exec::task<void> WaitOsExitSignal();
  * @brief Wait until a predicate on the set of alive nodes is satisfied, or timeout.
  * @return The list of alive nodes and whether the condition was met before the timeout.
  */
-exec::task<WaitNodeConditionResult> WaitNodeCondition(std::function<bool(const std::vector<NodeInfo>&)> predicate,
-                                                      uint64_t timeout_ms);
+exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
+                                                    uint64_t timeout_ms);
 
 /**
  * @brief Ask ex_actor to hold a resource, the resource won't be released until runtime is shut down.

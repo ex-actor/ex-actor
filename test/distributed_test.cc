@@ -110,6 +110,23 @@ struct RetVoid {
 };
 EXA_REMOTE(&RetVoid::Create, &RetVoid::ReturnVoid, &RetVoid::CoroutineReturnVoid);
 
+class NonMovableActor {
+ public:
+  NonMovableActor(const NonMovableActor&) = delete;
+  NonMovableActor& operator=(const NonMovableActor&) = delete;
+  NonMovableActor(NonMovableActor&&) = delete;
+  NonMovableActor& operator=(NonMovableActor&&) = delete;
+
+  static NonMovableActor Create(std::string name) { return NonMovableActor(std::move(name)); }
+
+  std::string GetName() const { return name_; }
+
+ private:
+  explicit NonMovableActor(std::string name) : name_(std::move(name)) {}
+  std::string name_;
+};
+EXA_REMOTE(&NonMovableActor::Create, &NonMovableActor::GetName);
+
 TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
   std::barrier bar {2};
   auto node_main = [&bar](size_t index) -> exec::task<void> {
@@ -389,4 +406,13 @@ TEST(DistributedTest, ActorRefSerializationTest) {
 
   node_0.join();
   node_1.join();
+}
+
+// Verifies that a non-movable actor can be spawned via a factory function.
+// The lambda is never invoked; it only needs to compile, which forces the
+// full Spawn -> Actor template chain to be instantiated for NonMovableActor.
+TEST(DistributedTest, NonMovableActorCompiles) {
+  [[maybe_unused]] auto unused = [](ex_actor::ActorRegistry& registry) {
+    return registry.Spawn<&NonMovableActor::Create>(/*name=*/"Bob").ToNode(0);
+  };
 }

@@ -160,7 +160,10 @@ class Actor : public TypeErasedActor {
   explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args... args)
       : TypeErasedActor(std::move(actor_config)), scheduler_(std::move(scheduler)) {
     if constexpr (kCreateFn != nullptr) {
-      user_class_instance_ = std::make_unique<UserClass>(kCreateFn(std::move(args)...));
+      // Use `new` directly so the prvalue returned by kCreateFn is used to
+      // initialize the heap object, benefiting from guaranteed copy elision
+      // (C++17 [dcl.init]/17.6.1) and not requiring UserClass to be movable.
+      user_class_instance_.reset(new UserClass(kCreateFn(std::move(args)...)));
     } else {
       user_class_instance_ = std::make_unique<UserClass>(std::move(args)...);
     }

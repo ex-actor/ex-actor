@@ -141,6 +141,11 @@ class ActorRegistryBackend {
   }
 
   /**
+   * @brief Update the broker actor ref. Called when switching to distributed mode after init.
+   */
+  void SetBrokerActorRef(LocalActorRef<MessageBroker> broker_actor_ref);
+
+  /**
    * @brief Handle a network request. Returns the serialized reply data.
    */
   exec::task<ByteBuffer> HandleNetworkRequest(ByteBuffer request_buffer);
@@ -268,32 +273,16 @@ class SpawnBuilder : public ex::sender_t {
 class ActorRegistry {
  public:
   /**
-   * @brief Construct in single-node mode, use the default work-sharing thread pool as the scheduler.
+   * @brief Construct with the default work-sharing thread pool as the scheduler.
    */
-  explicit ActorRegistry(uint32_t thread_pool_size)
-      : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, /*cluster_config=*/ {}) {}
+  explicit ActorRegistry(uint32_t thread_pool_size) : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr) {}
 
   /**
-   * @brief Construct in single-node mode, use specified scheduler.
+   * @brief Construct with a user-specified scheduler.
    */
   template <ex::scheduler Scheduler>
   explicit ActorRegistry(Scheduler scheduler)
-      : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler),
-                      /*cluster_config*/ {}) {}
-
-  /**
-   * @brief Construct in distributed mode, use the default work-sharing thread pool as the scheduler.
-   */
-  explicit ActorRegistry(uint32_t thread_pool_size, const ClusterConfig& cluster_config)
-      : ActorRegistry(thread_pool_size, /*scheduler=*/nullptr, cluster_config) {}
-
-  /**
-   * @brief Construct in distributed mode, use specified scheduler.
-   */
-  template <ex::scheduler Scheduler>
-  explicit ActorRegistry(Scheduler scheduler, const ClusterConfig& cluster_config)
-      : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler),
-                      cluster_config) {}
+      : ActorRegistry(/*thread_pool_size=*/0, std::make_unique<AnyStdExecScheduler<Scheduler>>(scheduler)) {}
 
   ~ActorRegistry();
 
@@ -351,6 +340,13 @@ class ActorRegistry {
   exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
                                                       uint64_t timeout_ms);
 
+  /**
+   * @brief [Experimental] Switch to distributed mode by creating and starting the MessageBroker.
+   * Can be called after Init() with non-distributed mode to join or start a cluster.
+   * @note Not thread-safe. Must not be called if already in distributed mode.
+   */
+  exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config);
+
  private:
   uint64_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;
@@ -360,8 +356,7 @@ class ActorRegistry {
   Actor<ActorRegistryBackend> backend_actor_;
   LocalActorRef<ActorRegistryBackend> backend_actor_ref_;
 
-  explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                         const ClusterConfig& cluster_config);
+  explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler);
 };
 
 }  // namespace ex_actor::internal

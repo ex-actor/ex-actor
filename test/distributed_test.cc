@@ -135,7 +135,8 @@ TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
     };
-    ex_actor::ActorRegistry registry(/*thread_pool_size=*/4, cluster_config);
+    ex_actor::ActorRegistry registry(/*thread_pool_size=*/4);
+    co_await registry.StartOrJoinCluster(cluster_config);
 
     auto [cluster_state, condition_met] =
         co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
@@ -175,7 +176,8 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
     };
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+    co_await registry.StartOrJoinCluster(cluster_config);
 
     // test local creation
     auto local_a = co_await registry.Spawn<A>();
@@ -294,7 +296,8 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
     };
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+    co_await registry.StartOrJoinCluster(cluster_config);
 
     auto [cluster_state, condition_met] =
         co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
@@ -347,7 +350,8 @@ TEST(DistributedTest, ActorRefSerializationTest) {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
     };
-    ex_actor::ActorRegistry registry(thread_pool.GetScheduler(), cluster_config);
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+    co_await registry.StartOrJoinCluster(cluster_config);
 
     auto [cluster_state, condition_met] =
         co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },

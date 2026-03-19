@@ -29,7 +29,8 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
       .listen_address = listen_address,
       .contact_node_address = contact_address,
   };
-  ex_actor::Init(shared_pool->GetScheduler(), cluster_config);
+  ex_actor::Init(shared_pool->GetScheduler());
+  co_await ex_actor::StartOrJoinCluster(cluster_config);
   ex_actor::HoldResource(shared_pool);
 
   auto [cluster_state, condition_met] =

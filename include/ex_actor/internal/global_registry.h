@@ -55,17 +55,10 @@ template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler);
 
 /**
- * @brief Init the global default registry in distributed mode, use the default thread pool as the scheduler.
- * @note Not thread-safe.
+ * @brief [Experimental] Switch to distributed mode by starting or joining a cluster.
+ * @note Not thread-safe. Should be called after Init() and before Shutdown(). Can't be called twice.
  */
-void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config);
-
-/**
- * @brief Init the global default registry in distributed mode, use user-specified scheduler.
- * @note Not thread-safe.
- */
-template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler, const ClusterConfig& cluster_config);
+exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config);
 
 /**
  * @brief Shutdown the global default registry. Must be called explicitly before `main` exits.
@@ -169,17 +162,9 @@ namespace ex_actor {
 
 template <ex::scheduler Scheduler>
 void Init(Scheduler scheduler) {
-  internal::log::Info("Initializing ex_actor in single-node mode with custom scheduler.");
+  internal::log::Info("Initializing ex_actor with custom scheduler.");
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
-  internal::SetupGlobalHandlers();
-}
-
-template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler, const ClusterConfig& cluster_config) {
-  internal::log::Info("Initializing ex_actor in distributed mode with custom scheduler.");
-  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler), cluster_config));
   internal::SetupGlobalHandlers();
 }
 

@@ -16,6 +16,7 @@
 
 #include <iostream>
 #include <memory>
+#include <source_location>
 #include <sstream>
 
 #include <rfl/to_view.hpp>
@@ -38,7 +39,7 @@ struct LogConfig {
 }  // namespace ex_actor
 
 namespace ex_actor::internal {
-inline constexpr char kDefaultLoggerPattern[] = "[%Y-%m-%d %T.%e%z] [%^%L%$] [%t] %v";
+inline constexpr char kDefaultLoggerPattern[] = "[%Y-%m-%d %T.%e%z] [%^%L%$] [%P/%t] [%s:%#] %v";
 
 spdlog::level::level_enum ToSpdlogLevel(LogLevel level);
 
@@ -157,22 +158,48 @@ std::string JoinVarsNameValue(std::string_view names, T&& first, Args&&... remai
 }  // namespace ex_actor::internal
 
 namespace ex_actor::internal::log {
-template <typename... Args>
-inline void Info(spdlog::format_string_t<Args...> fmt, Args&&... args) {
-  internal::GlobalLogger()->info(fmt, std::forward<Args>(args)...);
+
+inline spdlog::source_loc ToSpdlogSourceLoc(const std::source_location& loc) {
+  return spdlog::source_loc {loc.file_name(), static_cast<int>(loc.line()), loc.function_name()};
 }
+
+// A format string wrapper that also captures source_location at the call site.
+// This avoids the GCC limitation where source_location can't follow a parameter pack.
 template <typename... Args>
-inline void Warn(spdlog::format_string_t<Args...> fmt, Args&&... args) {
-  internal::GlobalLogger()->warn(fmt, std::forward<Args>(args)...);
-}
+struct FormatWithLoc {
+  spdlog::format_string_t<Args...> fmt;
+  std::source_location loc;
+
+  template <typename T>
+  consteval FormatWithLoc(  // NOLINT(google-explicit-constructor)
+      const T& s, const std::source_location& loc = std::source_location::current())
+      : fmt(s), loc(loc) {}
+};
+
 template <typename... Args>
-inline void Error(spdlog::format_string_t<Args...> fmt, Args&&... args) {
-  internal::GlobalLogger()->error(fmt, std::forward<Args>(args)...);
+void Info(FormatWithLoc<std::type_identity_t<Args>...> fmt_with_loc, Args&&... args) {
+  internal::GlobalLogger()->log(ToSpdlogSourceLoc(fmt_with_loc.loc), spdlog::level::info, fmt_with_loc.fmt,
+                                std::forward<Args>(args)...);
 }
+
 template <typename... Args>
-inline void Critical(spdlog::format_string_t<Args...> fmt, Args&&... args) {
-  internal::GlobalLogger()->critical(fmt, std::forward<Args>(args)...);
+void Warn(FormatWithLoc<std::type_identity_t<Args>...> fmt_with_loc, Args&&... args) {
+  internal::GlobalLogger()->log(ToSpdlogSourceLoc(fmt_with_loc.loc), spdlog::level::warn, fmt_with_loc.fmt,
+                                std::forward<Args>(args)...);
 }
+
+template <typename... Args>
+void Error(FormatWithLoc<std::type_identity_t<Args>...> fmt_with_loc, Args&&... args) {
+  internal::GlobalLogger()->log(ToSpdlogSourceLoc(fmt_with_loc.loc), spdlog::level::err, fmt_with_loc.fmt,
+                                std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+void Critical(FormatWithLoc<std::type_identity_t<Args>...> fmt_with_loc, Args&&... args) {
+  internal::GlobalLogger()->log(ToSpdlogSourceLoc(fmt_with_loc.loc), spdlog::level::critical, fmt_with_loc.fmt,
+                                std::forward<Args>(args)...);
+}
+
 }  // namespace ex_actor::internal::log
 
 // Backward-compatibility aliases — these namespaces were removed in favor of ex_actor.

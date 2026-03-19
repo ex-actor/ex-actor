@@ -48,7 +48,8 @@ class DynamicConnectivityTest {
 
   void Test() {
     auto config = BuildConfig();
-    ex_actor::Init(/*thread_pool_size=*/1, config);
+    ex_actor::Init(/*thread_pool_size=*/1);
+    stdexec::sync_wait(ex_actor::StartOrJoinCluster(config));
 
     auto coroutine = [this]() -> exec::task<void> {
       // Wait for all other nodes to be discovered

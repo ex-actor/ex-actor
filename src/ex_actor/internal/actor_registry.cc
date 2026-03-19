@@ -32,6 +32,10 @@ ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorSchedu
   InitRandomNumGenerator();
 }
 
+void ActorRegistryBackend::SetBrokerActorRef(LocalActorRef<MessageBroker> broker_actor_ref) {
+  broker_actor_ref_ = broker_actor_ref;
+}
+
 exec::task<void> ActorRegistryBackend::AsyncDestroyAllActors() {
   exec::async_scope async_scope;
   log::Info("Sending destroy messages to actors");
@@ -167,8 +171,7 @@ ActorRegistry::~ActorRegistry() {
   log::Info("Actor registry shutdown completed");
 }
 
-ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                             const ClusterConfig& cluster_config)
+ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler)
     : this_node_id_([] {
         std::random_device rd;
         std::mt19937_64 gen(rd());
@@ -179,30 +182,41 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
-      broker_actor_(cluster_config.listen_address.empty()
-                        ? nullptr
-                        : std::make_unique<Actor<MessageBroker>>(scheduler_->Clone(), ActorConfig {}, this_node_id_,
-                                                                 cluster_config)),
-      broker_actor_ref_(broker_actor_ ? LocalActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get())
-                                      : LocalActorRef<MessageBroker> {}),
       backend_actor_(scheduler_->Clone(), ActorConfig {}, scheduler_->Clone(), this_node_id_, broker_actor_ref_),
       backend_actor_ref_(/*actor_id=*/UINT64_MAX, &backend_actor_) {
-  if (!broker_actor_ref_.IsEmpty()) {
-    NotifyOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
-    MessageBroker::RequestHandler request_handler =
-        [ref = backend_actor_ref_](ByteBuffer data) -> exec::task<ByteBuffer> {
-      co_return co_await ref.SendLocal<&ActorRegistryBackend::HandleNetworkRequest>(std::move(data));
-    };
-    ex::sync_wait(broker_actor_ref_.SendLocal<&MessageBroker::Start>(std::move(request_handler)));
-  }
-  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   log::Info("ActorRegistry created, node_id={}", this_node_id_);
+}
+
+exec::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_config) {
+  log::Info("Starting distributed mode...");
+  EXA_THROW_CHECK(broker_actor_ref_.IsEmpty()) << "Already in distributed mode.";
+  EXA_THROW_CHECK(!cluster_config.listen_address.empty()) << "listen_address must not be empty";
+
+  broker_actor_ =
+      std::make_unique<Actor<MessageBroker>>(scheduler_->Clone(), ActorConfig {}, this_node_id_, cluster_config);
+  broker_actor_ref_ = LocalActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
+  NotifyOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
+
+  // Update the backend actor's broker ref so it can forward network requests
+  co_await backend_actor_ref_.SendLocal<&ActorRegistryBackend::SetBrokerActorRef>(broker_actor_ref_);
+
+  auto request_handler = [ref = backend_actor_ref_](ByteBuffer data) -> exec::task<ByteBuffer> {
+    co_return co_await ref.SendLocal<&ActorRegistryBackend::HandleNetworkRequest>(std::move(data));
+  };
+  co_await broker_actor_ref_.SendLocal<&MessageBroker::Start>(std::move(request_handler));
+
+  if (cluster_config.contact_node_address.empty()) {
+    log::Info("Successfully started distributed mode, listen_address={}", cluster_config.listen_address);
+  } else {
+    log::Info("Successfully started distributed mode, listen_address={}, contact_node_address={}",
+              cluster_config.listen_address, cluster_config.contact_node_address);
+  }
 }
 
 exec::task<WaitClusterStateResult> ActorRegistry::WaitClusterState(std::function<bool(const ClusterState&)> predicate,
                                                                    uint64_t timeout_ms) {
   EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty())
-      << "WaitClusterState requires distributed mode, add ClusterConfig to Init() to enable distributed mode";
+      << "WaitClusterState requires distributed mode, call StartOrJoinCluster() after Init() to enable it.";
   co_return co_await broker_actor_ref_.SendLocal<&MessageBroker::WaitClusterState>(std::move(predicate), timeout_ms);
 }
 

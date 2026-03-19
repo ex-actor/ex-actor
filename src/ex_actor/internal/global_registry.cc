@@ -104,19 +104,15 @@ void SetupGlobalHandlers() { RegisterAtExitCleanup(); }
 
 namespace ex_actor {
 void Init(uint32_t thread_pool_size) {
-  internal::log::Info("Initializing ex_actor in single-node mode with default scheduler, thread_pool_size={}",
-                      thread_pool_size);
+  internal::log::Info("Initializing ex_actor with default scheduler, thread_pool_size={}", thread_pool_size);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size);
   internal::SetupGlobalHandlers();
 }
 
-void Init(uint32_t thread_pool_size, const ClusterConfig& cluster_config) {
-  internal::log::Info("Initializing ex_actor in distributed mode with default scheduler, thread_pool_size={}",
-                      thread_pool_size);
-  EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
-  global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size, cluster_config);
-  internal::SetupGlobalHandlers();
+exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config) {
+  EXA_THROW_CHECK(internal::IsGlobalDefaultRegistryInitialized()) << "Not initialized. Call Init() first.";
+  co_await internal::GetGlobalDefaultRegistry().StartOrJoinCluster(cluster_config);
 }
 
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }

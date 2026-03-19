@@ -39,7 +39,8 @@ int main(int argc, char** argv) {
                 .gossip_interval_ms = 50,
             },
     };
-    ex_actor::Init(/*thread_pool_size=*/2, cluster_config);
+    ex_actor::Init(/*thread_pool_size=*/2);
+    co_await ex_actor::StartOrJoinCluster(cluster_config);
 
     auto [cluster_state, condition_met] =
         co_await ex_actor::WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },

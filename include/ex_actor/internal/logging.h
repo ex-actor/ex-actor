@@ -39,7 +39,7 @@ struct LogConfig {
 }  // namespace ex_actor
 
 namespace ex_actor::internal {
-inline constexpr char kDefaultLoggerPattern[] = "[%Y-%m-%d %T.%e%z] [%^%L%$] [%P/%t] [%s:%#] %v";
+inline constexpr char kDefaultLoggerPattern[] = "[%^%L%$%Y-%m-%d %T.%e%z %P/%t %s:%#] %v";
 
 spdlog::level::level_enum ToSpdlogLevel(LogLevel level);
 

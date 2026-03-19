@@ -163,7 +163,7 @@ MessageBroker::MessageBroker(uint64_t this_node_id, ClusterConfig cluster_config
 
 MessageBroker::~MessageBroker() {
   if (!stopped_) {
-    log::Critical("MessageBroker destroyed without calling Stop() first, node_id={}", this_node_id_);
+    log::Critical("MessageBroker destroyed without calling Stop() first, node_id={:#x}", this_node_id_);
   }
 }
 
@@ -178,16 +178,16 @@ void MessageBroker::Start(RequestHandler request_handler) {
 }
 
 exec::task<void> MessageBroker::Stop() {
-  log::Info("Node {} stopping message broker", this_node_id_);
+  log::Info("Node {:#x} stopping message broker", this_node_id_);
   if (periodical_task_scheduler_ != nullptr) {
     periodical_task_scheduler_->Stop();
   }
   if (recv_socket_puller_ != nullptr) {
     recv_socket_puller_->Stop();
   }
-  log::Info("Node {}'s message broker stopped, waiting for in-flight tasks", this_node_id_);
+  log::Info("Node {:#x}'s message broker stopped, waiting for in-flight tasks", this_node_id_);
   co_await async_scope_.on_empty();
-  log::Info("Node {}'s message broker fully stopped", this_node_id_);
+  log::Info("Node {:#x}'s message broker fully stopped", this_node_id_);
   stopped_ = true;
 }
 
@@ -300,7 +300,7 @@ void MessageBroker::CheckHeartbeatTimeout() {
       continue;
     }
     MapAt(node_id_to_state_, node_id).alive = false;
-    OnNodeDead(node_id);
+    OnNodeConnectionLost(node_id);
   }
 }
 
@@ -319,7 +319,7 @@ void MessageBroker::StartRecvSocketPuller() {
   zmq::socket_t recv_socket {zmq_context_, zmq::socket_type::dealer};
   recv_socket.bind(cluster_config_.listen_address);
   recv_socket.set(zmq::sockopt::linger, 0);
-  log::Info("Node {}'s recv socket bound to {}", this_node_id_, cluster_config_.listen_address);
+  log::Info("Node {:#x}'s recv socket bound to {}", this_node_id_, cluster_config_.listen_address);
 
   recv_socket_puller_ = std::make_unique<RecvSocketPuller>(std::move(recv_socket), [this](ByteBuffer raw) {
     async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::DispatchReceivedMessage>(std::move(raw)));
@@ -350,8 +350,8 @@ void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_messag
     // update existing node state
     auto& cur_node_state = iter->second;
     EXA_THROW_CHECK_EQ(cur_node_state.address, incoming_node_state.address)
-        << fmt_lib::format("Node {} has conflicting address, {} vs {}.", cur_node_state.node_id, cur_node_state.address,
-                           incoming_node_state.address);
+        << fmt_lib::format("Node {:#x} has conflicting address, {} vs {}.", cur_node_state.node_id,
+                           cur_node_state.address, incoming_node_state.address);
     if (incoming_node_state.alive) {
       EXA_THROW_CHECK(cur_node_state.alive)
           << "Can't transform from dead to alive now, will support in the future once failover is implemented";
@@ -361,7 +361,7 @@ void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_messag
     cur_node_state.last_seen_timestamp_ms =
         std::max(cur_node_state.last_seen_timestamp_ms, incoming_node_state.last_seen_timestamp_ms);
     if (new_node_dead) {
-      OnNodeDead(incoming_node_state.node_id);
+      OnNodeConnectionLost(incoming_node_state.node_id);
     }
   }
 }
@@ -385,7 +385,7 @@ exec::task<void> MessageBroker::HandleIncomingRequest(BrokerTwoWayMessage reques
 
 void MessageBroker::OnNodeAlive(uint64_t node_id) {
   const auto& new_node = MapAt(node_id_to_state_, node_id);
-  log::Info("[Gossip] Node {} found node {}, connecting to it at {}", this_node_id_, new_node.node_id,
+  log::Info("[Gossip] Node {:#x} found node {:#x}, connecting to it at {}", this_node_id_, new_node.node_id,
             new_node.address);
 
   // Create send socket
@@ -411,18 +411,26 @@ void MessageBroker::OnNodeAlive(uint64_t node_id) {
   }
 }
 
-void MessageBroker::OnNodeDead(uint64_t node_id) {
-  log::Warn("Node {} detects that node {} is dead, all requests to this node will be failed, heartbeat timeout is {}ms",
-            this_node_id_, node_id, cluster_config_.network_config.heartbeat_timeout_ms);
-  // Error out waiting outstanding requests
-  for (auto it = outstanding_requests_.begin(); it != outstanding_requests_.end();) {
-    auto& [request_id, request] = *it;
-    ++it;  // advance before signaling -- the coroutine may erase this entry on resume
-    if (request.response_node_id == node_id) {
-      request.exception_ptr = std::make_exception_ptr(
-          ConnectionLost(node_id, fmt_lib::format("Node {} is dead, cannot complete request", node_id)));
-      request.sem.Acquire(1);
+void MessageBroker::OnNodeConnectionLost(uint64_t node_id) {
+  // Collect matching requests first so we can log the count before signaling
+  std::vector<decltype(outstanding_requests_)::iterator> requests_to_fail;
+  for (auto it = outstanding_requests_.begin(); it != outstanding_requests_.end(); ++it) {
+    if (it->second.response_node_id == node_id) {
+      requests_to_fail.push_back(it);
     }
+  }
+  if (!requests_to_fail.empty()) {
+    log::Warn(
+        "Node {:#x} lost connection to node {:#x} due to heartbeat timeout, {} outstanding requests of this node will "
+        "be failed, heartbeat timeout is {}ms",
+        this_node_id_, node_id, requests_to_fail.size(), cluster_config_.network_config.heartbeat_timeout_ms);
+  }
+  for (auto it : requests_to_fail) {
+    auto& [request_id, request] = *it;
+    request.exception_ptr = std::make_exception_ptr(
+        ConnectionLost(node_id, fmt_lib::format("Node {:#x} is dead, cannot complete request", node_id)));
+    // this will wake up the coroutine and erase the iterator, don't use it after this
+    request.sem.Acquire(1);
   }
   deferred_replies_.erase(node_id);
 
@@ -439,7 +447,7 @@ uint64_t MessageBroker::SendTwoWayMessage(uint64_t node_id, ByteBuffer data) {
                             }};
   auto socket_it = node_id_to_send_socket_.find(node_id);
   if (socket_it == node_id_to_send_socket_.end()) {
-    throw ConnectionLost(node_id, fmt_lib::format("Node {} is trying to send request to an unconnected node {}",
+    throw ConnectionLost(node_id, fmt_lib::format("Node {:#x} is trying to send request to an unconnected node {:#x}",
                                                   this_node_id_, node_id));
   }
   auto& [target_node_id, socket] = *socket_it;

@@ -201,7 +201,7 @@ class MessageBroker {
   void HandleGossipMessage(const BrokerGossipMessage& gossip_message);
 
   void OnNodeAlive(uint64_t node_id);
-  void OnNodeDead(uint64_t node_id);
+  void OnNodeConnectionLost(uint64_t node_id);
 
   std::vector<NodeInfo> BuildAliveNodeInfoList() const;
   void EvaluateClusterStateWaiters();

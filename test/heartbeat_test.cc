@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
         std::ignore = co_await std::move(ping);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       } catch (const ex_actor::ConnectionLost& e) {
-        logging::Error("connection lost to node {}: {}", e.node_id, e.what());
+        logging::Error("connection lost to node {:#x}: {}", e.node_id, e.what());
         break;
       }
     }

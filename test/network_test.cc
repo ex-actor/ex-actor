@@ -224,7 +224,7 @@ TEST(MessageBrokerTest, GossipWithConflictingAddressThrows) {
             broker, {{.alive = true, .last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7262"}});
       },
       testing::Throws<std::exception>(
-          testing::Property(&std::exception::what, testing::HasSubstr("Node 1 has conflicting address"))));
+          testing::Property(&std::exception::what, testing::HasSubstr("Node 0x1 has conflicting address"))));
 
   stdexec::sync_wait(broker.Stop());
 }

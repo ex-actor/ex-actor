@@ -184,7 +184,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
                                             default_work_sharing_thread_pool_.GetScheduler())),
       backend_actor_(scheduler_->Clone(), ActorConfig {}, scheduler_->Clone(), this_node_id_, broker_actor_ref_),
       backend_actor_ref_(/*actor_id=*/UINT64_MAX, &backend_actor_) {
-  log::Info("ActorRegistry created, node_id={}", this_node_id_);
+  log::Info("ActorRegistry created, node_id={:#x}", this_node_id_);
 }
 
 exec::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_config) {

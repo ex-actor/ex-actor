@@ -107,7 +107,8 @@ exception_caught = False
 while time.monotonic() < deadline:
     with open(log_file.name, "r") as f:
         content = f.read()
-    if "detects that node" in content and "is dead" in content:
+    has_new_death_log = "lost connection to node" in content and "heartbeat timeout" in content
+    if has_new_death_log:
         death_detected = True
     if "connection lost to node" in content:
         exception_caught = True

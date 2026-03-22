@@ -169,10 +169,7 @@ class MessageBroker {
    */
   exec::task<void> Stop();
 
-  /**
-   * @brief Wait until predicate(alive_nodes) returns true, or timeout.
-   * @return A pair of (alive nodes snapshot, whether the condition was met).
-   */
+  /** @copydoc ex_actor::WaitClusterState */
   exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
                                                       uint64_t timeout_ms);
 

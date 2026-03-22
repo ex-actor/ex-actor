@@ -286,20 +286,14 @@ class ActorRegistry {
 
   ~ActorRegistry();
 
-  /**
-   * @brief Spawn a local actor. Returns a SpawnBuilder (which is a sender) that can optionally be configured
-   * with .WithConfig() before awaiting.
-   */
+  /** @copydoc ex_actor::Spawn */
   template <class UserClass, class... Args>
   SenderOf<ActorRef<UserClass>> auto Spawn(Args... args) {
     return SpawnBuilder<UserClass, /*kCreateFn=*/nullptr, Args...>(backend_actor_ref_, std::move(args)...)
         .ToNode(this_node_id_);
   }
 
-  /**
-   * @brief Spawn an actor (local or remote) using a factory function. Returns a SpawnBuilder (which is a sender)
-   * that can optionally be configured with .WithConfig() before awaiting.
-   */
+  /** @copydoc ex_actor::Spawn */
   template <auto kCreateFn, class... Args>
   SenderOf<ActorRef<FnReturnType<kCreateFn>>> auto Spawn(Args... args) {
     return SpawnBuilder<FnReturnType<kCreateFn>, kCreateFn, Args...>(backend_actor_ref_, std::move(args)...)
@@ -312,9 +306,7 @@ class ActorRegistry {
         backend_actor_ref_.SendLocal<&ActorRegistryBackend::DestroyActor<UserClass>>(actor_ref));
   }
 
-  /**
-   * @brief Find the actor by name at current node.
-   */
+  /** @copydoc ex_actor::GetActorRefByName */
   template <class UserClass>
   SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const std::string& name) const {
     // resolve overload ambiguity
@@ -324,9 +316,7 @@ class ActorRegistry {
     return WrapSenderWithInlineScheduler(backend_actor_ref_.SendLocal<kProcessFn>(name));
   }
 
-  /**
-   * @brief Find the actor by name at remote node.
-   */
+  /** @copydoc ex_actor::GetActorRefByName */
   template <class UserClass>
   SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint64_t& node_id,
                                                                       const std::string& name) const {
@@ -340,11 +330,7 @@ class ActorRegistry {
   exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
                                                       uint64_t timeout_ms);
 
-  /**
-   * @brief [Experimental] Switch to distributed mode by creating and starting the MessageBroker.
-   * Can be called after Init() with non-distributed mode to join or start a cluster.
-   * @note Not thread-safe. Must not be called if already in distributed mode.
-   */
+  /** @copydoc ex_actor::StartOrJoinCluster */
   exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config);
 
  private:

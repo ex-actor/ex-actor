@@ -148,6 +148,7 @@ class Coordinator {
 
 TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     constexpr int kNumReducers = 4;
     constexpr int kNumWorkers = 16;
     constexpr int kNumSources = 8;
@@ -196,14 +197,14 @@ TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
     int64_t expected_sum = total_items * (total_items + 1) * (2 * total_items + 1) / 6;
 
     EXPECT_EQ(total_sum, expected_sum) << "Total sum should match formula for sum of squares from 1 to " << total_items;
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     constexpr int kNumReducers = 8;
     constexpr int kNumWorkers = 64;
     constexpr int kNumSources = 32;
@@ -264,14 +265,14 @@ TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
     // load should be reasonably balanced
     double load_balance_ratio = static_cast<double>(max_sum) / min_sum;
     EXPECT_LT(load_balance_ratio, 2.0) << "Load imbalance too high: " << load_balance_ratio;
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     // Test with multiple stages of shuffle-merge (like multi-level MapReduce)
     constexpr int kNumStage1Reducers = 16;
     constexpr int kNumStage2Reducers = 4;
@@ -369,14 +370,14 @@ TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
     }
 
     EXPECT_EQ(final_sum, expected_final_sum) << "Stage 2 final sum should be sum of squares of stage 1 results";
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ShuffleMergeTest, ComplexDependencyGraph) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     // Test with complex dependency graph where workers communicate with multiple reducers
     constexpr int kNumReducers = 8;
     constexpr int kNumValues = 10000;
@@ -428,8 +429,7 @@ TEST(ShuffleMergeTest, ComplexDependencyGraph) {
     // Verify total: sum of squares from 1 to N = N(N+1)(2N+1)/6
     int64_t expected_sum = static_cast<int64_t>(kNumValues) * (kNumValues + 1) * (2 * kNumValues + 1) / 6;
     EXPECT_EQ(total_sum, expected_sum) << "Total sum should match mathematical formula for sum of squares";
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }

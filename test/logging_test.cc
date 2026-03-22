@@ -38,8 +38,8 @@ void CleanupLogFile(const std::string& log_file) {
 
 }  // namespace
 
-// Test 1: Init() and Shutdown() without configure logging, should see all logs
-TEST(LoggingTest, InitShutdownWithoutConfigureLogging) {
+// Test 1: Start() and Stop() without configure logging, should see all logs
+TEST(LoggingTest, StartStopWithoutConfigureLogging) {
   std::string log_file = "test_log_1.txt";
 
   // Clean up any existing log file
@@ -50,19 +50,19 @@ TEST(LoggingTest, InitShutdownWithoutConfigureLogging) {
       .log_file_path = log_file,
   });
 
-  // Init and Shutdown
-  ex_actor::Init(4);
-  ex_actor::Shutdown();
+  // Start and Stop
+  stdexec::sync_wait(ex_actor::Start(4));
+  stdexec::sync_wait(ex_actor::Stop());
 
   // flush log
   ex_actor::internal::GlobalLogger()->flush();
 
-  // Read log file and verify both Init and Shutdown logs are present
+  // Read log file and verify both Start and Stop logs are present
   std::string log_contents = ReadFile(log_file);
   EXPECT_FALSE(log_contents.empty()) << "Log file should not be empty";
-  EXPECT_TRUE(Contains(log_contents, "Initializing ex_actor")) << "Should see Init log. Log contents:\n"
+  EXPECT_TRUE(Contains(log_contents, "Initializing ex_actor")) << "Should see Start log. Log contents:\n"
                                                                << log_contents;
-  EXPECT_TRUE(Contains(log_contents, "Shutting down ex_actor")) << "Should see Shutdown log. Log contents:\n"
+  EXPECT_TRUE(Contains(log_contents, "Shutting down ex_actor")) << "Should see Stop log. Log contents:\n"
                                                                 << log_contents;
 
   // Clean up
@@ -82,9 +82,9 @@ TEST(LoggingTest, ConfigureLoggingWithErrorLevel) {
       .log_file_path = log_file,
   });
 
-  // Init and Shutdown - these produce Info level logs
-  ex_actor::Init(4);
-  ex_actor::Shutdown();
+  // Start and Stop - these produce Info level logs
+  stdexec::sync_wait(ex_actor::Start(4));
+  stdexec::sync_wait(ex_actor::Stop());
 
   // flush log
   ex_actor::internal::GlobalLogger()->flush();
@@ -92,18 +92,18 @@ TEST(LoggingTest, ConfigureLoggingWithErrorLevel) {
   // Read log file - should be empty or not contain Info logs
   std::string log_contents = ReadFile(log_file);
   EXPECT_FALSE(Contains(log_contents, "Initializing ex_actor"))
-      << "Should NOT see Init log at Error level. Log contents:\n"
+      << "Should NOT see Start log at Error level. Log contents:\n"
       << log_contents;
   EXPECT_FALSE(Contains(log_contents, "Shutting down ex_actor"))
-      << "Should NOT see Shutdown log at Error level. Log contents:\n"
+      << "Should NOT see Stop log at Error level. Log contents:\n"
       << log_contents;
 
   // Clean up
   CleanupLogFile(log_file);
 }
 
-// Test 3: Init() first with Info level, then ConfigureLogging() with Error level in the middle,
-// and Shutdown(). Should only see Init log, not Shutdown log
+// Test 3: Start() first with Info level, then ConfigureLogging() with Error level in the middle,
+// and Stop(). Should only see Start log, not Stop log
 TEST(LoggingTest, ConfigureLoggingInMiddle) {
   std::string log_file = "test_log_3.txt";
 
@@ -116,8 +116,8 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
       .log_file_path = log_file,
   });
 
-  // Init - should be logged
-  ex_actor::Init(4);
+  // Start - should be logged
+  stdexec::sync_wait(ex_actor::Start(4));
 
   // Change log level to Error in the middle
   ex_actor::ConfigureLogging({
@@ -125,8 +125,8 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
       .log_file_path = log_file,
   });
 
-  // Shutdown - should NOT be logged because level is now Error
-  ex_actor::Shutdown();
+  // Stop - should NOT be logged because level is now Error
+  stdexec::sync_wait(ex_actor::Stop());
 
   // flush log
   ex_actor::internal::GlobalLogger()->flush();
@@ -135,10 +135,10 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
   std::string log_contents = ReadFile(log_file);
   EXPECT_FALSE(log_contents.empty()) << "Log file should not be empty";
   EXPECT_TRUE(Contains(log_contents, "Initializing ex_actor"))
-      << "Should see Init log (before level change). Log contents:\n"
+      << "Should see Start log (before level change). Log contents:\n"
       << log_contents;
   EXPECT_FALSE(Contains(log_contents, "Shutting down ex_actor"))
-      << "Should NOT see Shutdown log (after level change to Error). Log contents:\n"
+      << "Should NOT see Stop log (after level change to Error). Log contents:\n"
       << log_contents;
 
   // Clean up

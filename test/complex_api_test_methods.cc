@@ -252,6 +252,7 @@ class Distributor {
 
 TEST(ComplexApiTest, VariousArgumentTypes) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<VariousArgsActor>();
     // No arguments
     int state = co_await actor.template Send<&VariousArgsActor::GetState>();
@@ -304,14 +305,14 @@ TEST(ComplexApiTest, VariousArgumentTypes) {
     co_await actor.template Send<&VariousArgsActor::ProcessNestedData>(std::move(nested), std::move(mapped));
     size_t nested_size = co_await actor.template Send<&VariousArgsActor::GetNestedDataSize>();
     EXPECT_EQ(nested_size, 6);  // 2 + 3 + 1
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MoveOnlyArguments) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<MoveOnlyArgsActor>();
     // unique_ptr<int>
     auto int_ptr = std::make_unique<int>(42);
@@ -346,14 +347,14 @@ TEST(ComplexApiTest, MoveOnlyArguments) {
     co_await actor.template Send<&MoveOnlyArgsActor::StoreMap>(std::move(map_ptr));
     size_t map_size = co_await actor.template Send<&MoveOnlyArgsActor::GetMapSize>();
     EXPECT_EQ(map_size, 3);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, ReferenceReturnTypes) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<ReferenceReturnActor>("Initial");
     std::string data = co_await actor.template Send<&ReferenceReturnActor::GetDataCopy>();
     EXPECT_EQ(data, "Initial");
@@ -368,14 +369,14 @@ TEST(ComplexApiTest, ReferenceReturnTypes) {
 
     size_t size = co_await actor.template Send<&ReferenceReturnActor::GetDataSize>();
     EXPECT_EQ(size, 8);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, ActorWithActorRefMember) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto child = co_await ex_actor::Spawn<ChildActor>();
     auto parent = co_await ex_actor::Spawn<ParentActor>(child);
     // Direct access to child
@@ -391,14 +392,14 @@ TEST(ComplexApiTest, ActorWithActorRefMember) {
     co_await parent.template Send<&ParentActor::AddToChild>(10);
     count = co_await parent.template Send<&ParentActor::GetChildCounter>();
     EXPECT_EQ(count, 12);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, ActorWithMultipleActorRefMembers) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto acc1 = co_await ex_actor::Spawn<Accumulator>();
     auto acc2 = co_await ex_actor::Spawn<Accumulator>();
     auto acc3 = co_await ex_actor::Spawn<Accumulator>();
@@ -426,14 +427,14 @@ TEST(ComplexApiTest, ActorWithMultipleActorRefMembers) {
     EXPECT_EQ(sum1, 60);
     EXPECT_EQ(sum2, 60);
     EXPECT_EQ(sum3, 60);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MixedComplexScenario) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     // Test combining multiple complex features
     // Create a complex hierarchy
     auto acc1 = co_await ex_actor::Spawn<Accumulator>();
@@ -462,8 +463,7 @@ TEST(ComplexApiTest, MixedComplexScenario) {
     co_await move_actor.template Send<&MoveOnlyArgsActor::StoreString>(std::move(str));
     std::string stored = co_await move_actor.template Send<&MoveOnlyArgsActor::GetStoredString>();
     EXPECT_EQ(stored, "Complex Test");
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }

@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
                 .gossip_interval_ms = 50,
             },
     };
-    ex_actor::Init(/*thread_pool_size=*/2);
+    co_await ex_actor::Start(/*thread_pool_size=*/2);
     co_await ex_actor::StartOrJoinCluster(cluster_config);
 
     auto [cluster_state, condition_met] =
@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
       }
     }
     co_await ex_actor::WaitOsExitSignal();
-    ex_actor::Shutdown();
+    co_await ex_actor::Stop();
   };
   stdexec::sync_wait(coroutine(std::move(listen_address), std::move(remote_address), std::move(contact_address)));
 }

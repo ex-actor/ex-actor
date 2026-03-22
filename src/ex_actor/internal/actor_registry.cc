@@ -216,7 +216,7 @@ exec::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_
 exec::task<WaitClusterStateResult> ActorRegistry::WaitClusterState(std::function<bool(const ClusterState&)> predicate,
                                                                    uint64_t timeout_ms) {
   EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty())
-      << "WaitClusterState requires distributed mode, call StartOrJoinCluster() after Init() to enable it.";
+      << "WaitClusterState requires distributed mode, call StartOrJoinCluster() after Start() to enable it.";
   co_return co_await broker_actor_ref_.SendLocal<&MessageBroker::WaitClusterState>(std::move(predicate), timeout_ms);
 }
 

@@ -79,13 +79,13 @@ static void RegisterAtExitCleanup() {
   }
   at_exit_cleanup_registered = true;
 
-  // Because Init() is called after main starts, this handler will be called before static object destruction.
-  // Once we enter static object destruction without calling Shutdown(), the program will crash due to static object
+  // Because Start() is called after main starts, this handler will be called before static object destruction.
+  // Once we enter static object destruction without calling Stop(), the program will crash due to static object
   // destruction order fiasco. So we print an error message here and force exit the program.
   //
-  // We can't call Shutdown() here for user, because thread_local objects are already destroyed, shutting down
+  // We can't call Stop() here for user, because thread_local objects are already destroyed, shutting down
   // ActorRegistry needs to use the mailbox, which has some thread_local objects, the program will crash if we call
-  // Shutdown() here. Printing an error message is the best we can do here. User need to call Shutdown() explicitly
+  // Stop() here. Printing an error message is the best we can do here. User need to call Stop() explicitly
   // before main() exits.
   std::atexit([] {
     if (!IsGlobalDefaultRegistryInitialized()) {
@@ -93,7 +93,8 @@ static void RegisterAtExitCleanup() {
     }
     log::Error(
         "ex_actor is not shutdown when exiting main(), calling std::quick_exit(1) to force exit, resources may not be "
-        "cleaned properly. To fix this error, call ex_actor::Shutdown() before main() exits.");
+        "cleaned properly. To fix this error, call co_await ex_actor::Stop() or sync_wait(ex_actor::Stop()) before "
+        "main() exits.");
     std::quick_exit(1);
   });
 }
@@ -103,15 +104,18 @@ void SetupGlobalHandlers() { RegisterAtExitCleanup(); }
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
-void Init(uint32_t thread_pool_size) {
+exec::task<void> Start(uint32_t thread_pool_size) {
   internal::log::Info("Initializing ex_actor with default scheduler, thread_pool_size={}", thread_pool_size);
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   global_default_registry = std::make_unique<ActorRegistry>(thread_pool_size);
   internal::SetupGlobalHandlers();
+  co_return;
 }
 
+void Init(uint32_t thread_pool_size) { ex::sync_wait(Start(thread_pool_size)); }
+
 exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config) {
-  EXA_THROW_CHECK(internal::IsGlobalDefaultRegistryInitialized()) << "Not initialized. Call Init() first.";
+  EXA_THROW_CHECK(internal::IsGlobalDefaultRegistryInitialized()) << "Not initialized. Call Start() first.";
   co_await internal::GetGlobalDefaultRegistry().StartOrJoinCluster(cluster_config);
 }
 
@@ -136,12 +140,15 @@ exec::task<void> WaitOsExitSignal() {
   signal_semaphore = nullptr;
 }
 
-void Shutdown() {
+exec::task<void> Stop() {
   EXA_THROW_CHECK(internal::IsGlobalDefaultRegistryInitialized()) << "Not initialized.";
   internal::log::Info("Shutting down ex_actor.");
   global_default_registry.reset();
   resource_holder.clear();
+  co_return;
 }
+
+void Shutdown() { ex::sync_wait(Stop()); }
 
 void ConfigureLogging(const LogConfig& config) { internal::GlobalLogger() = internal::CreateLoggerUsingConfig(config); }
 

@@ -29,7 +29,7 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
       .listen_address = listen_address,
       .contact_node_address = contact_address,
   };
-  ex_actor::Init(shared_pool->GetScheduler());
+  co_await ex_actor::Start(shared_pool->GetScheduler());
   co_await ex_actor::StartOrJoinCluster(cluster_config);
   ex_actor::HoldResource(shared_pool);
 
@@ -49,7 +49,7 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
 
   logging::Info("All work done");
   co_await ex_actor::WaitOsExitSignal();
-  ex_actor::Shutdown();
+  co_await ex_actor::Stop();
 }
 }  // namespace
 

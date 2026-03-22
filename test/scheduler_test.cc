@@ -87,6 +87,7 @@ TEST(SchedulerTest, SchedulerUnionTest) {
   ASSERT_NE(thread_id1, thread_id2);
 
   auto coroutine = [&]() -> exec::task<void> {
+    co_await ex_actor::Start(scheduler_union.GetScheduler());
     // create two actors, specify the scheduler index in ActorConfig.
     auto actor1 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 0});
     auto actor2 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 1});
@@ -95,10 +96,9 @@ TEST(SchedulerTest, SchedulerUnionTest) {
     uint64_t thread_id2 = co_await actor2.Send<&TestActor2::GetThreadId>();
     // the two actors should run on different thread pool
     EXPECT_NE(thread_id1, thread_id2);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(scheduler_union.GetScheduler());
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(SchedulerTest, TestResourceHolder) {
@@ -107,11 +107,11 @@ TEST(SchedulerTest, TestResourceHolder) {
   auto union_pool = std::make_unique<ex_actor::SchedulerUnion<ex_actor::WorkSharingThreadPool::Scheduler>>(
       std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {shared_pool1->GetScheduler(),
                                                                shared_pool2->GetScheduler()});
-  ex_actor::Init(union_pool->GetScheduler());
-  ex_actor::HoldResource(std::move(shared_pool1));
-  ex_actor::HoldResource(std::move(shared_pool2));
-  ex_actor::HoldResource(std::move(union_pool));
   auto coroutine = [&]() -> exec::task<void> {
+    co_await ex_actor::Start(union_pool->GetScheduler());
+    ex_actor::HoldResource(std::move(shared_pool1));
+    ex_actor::HoldResource(std::move(shared_pool2));
+    ex_actor::HoldResource(std::move(union_pool));
     // create two actors, specify the scheduler index in ActorConfig.
     auto actor1 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 0});
     auto actor2 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 1});
@@ -120,7 +120,7 @@ TEST(SchedulerTest, TestResourceHolder) {
     uint64_t thread_id2 = co_await actor2.Send<&TestActor2::GetThreadId>();
     // the two actors should run on different thread pool
     EXPECT_NE(thread_id1, thread_id2);
+    co_await ex_actor::Stop();
   };
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }

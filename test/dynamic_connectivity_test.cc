@@ -1,15 +1,12 @@
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <iostream>
 #include <random>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "ex_actor/api.h"
-
-using std::chrono::milliseconds;
 
 class Echoer {
  public:
@@ -48,10 +45,10 @@ class DynamicConnectivityTest {
 
   void Test() {
     auto config = BuildConfig();
-    ex_actor::Init(/*thread_pool_size=*/1);
-    stdexec::sync_wait(ex_actor::StartOrJoinCluster(config));
+    auto coroutine = [this, config]() -> exec::task<void> {
+      co_await ex_actor::Start(/*thread_pool_size=*/1);
+      co_await ex_actor::StartOrJoinCluster(config);
 
-    auto coroutine = [this]() -> exec::task<void> {
       // Wait for all other nodes to be discovered
       auto [cluster_state, condition_met] =
           co_await ex_actor::WaitClusterState([this](const auto& state) { return state.nodes.size() >= cluster_size_; },
@@ -68,24 +65,21 @@ class DynamicConnectivityTest {
       auto target_node_id = it->node_id;
 
       std::string str {"Hello"};
-      auto actor_creation_sender = ex_actor::Spawn<Echoer>();
-      auto [actor_ref] = stdexec::sync_wait(actor_creation_sender).value();
-      auto actor_method_calling_sender = actor_ref.Send<&Echoer::Echo>(str);
-      auto [method_calling_return_val] = stdexec::sync_wait(std::move(actor_method_calling_sender)).value();
+      auto actor_ref = co_await ex_actor::Spawn<Echoer>();
+      auto method_calling_return_val = co_await actor_ref.Send<&Echoer::Echo>(str);
       EXA_THROW_CHECK(method_calling_return_val == str)
           << ex_actor::fmt_lib::format("Error: local method calling error");
 
-      auto remote_actor_creation_sender = ex_actor::Spawn<&Echoer::Create>().ToNode(target_node_id);
-      auto [remote_actor_ref] = stdexec::sync_wait(std::move(remote_actor_creation_sender)).value();
-      auto remote_actor_calling_sender = remote_actor_ref.Send<&Echoer::Echo>(str);
-      auto [remote_method_calling_return_val] = stdexec::sync_wait(std::move(remote_actor_calling_sender)).value();
+      auto remote_actor_ref = co_await ex_actor::Spawn<&Echoer::Create>().ToNode(target_node_id);
+      auto remote_method_calling_return_val = co_await remote_actor_ref.Send<&Echoer::Echo>(str);
       EXA_THROW_CHECK(remote_method_calling_return_val == str)
           << ex_actor::fmt_lib::format("Error: remote method calling error");
+      std::cout << "All work done" << std::endl;
+      co_await ex_actor::WaitOsExitSignal();
+      co_await ex_actor::Stop();
     };
 
     stdexec::sync_wait(coroutine());
-    std::this_thread::sleep_for(std::chrono::milliseconds {1500});
-    ex_actor::Shutdown();
   }
 
  private:

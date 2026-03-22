@@ -35,8 +35,8 @@ EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping); // (1)
 exec::task<void> MainCoroutine(int argc, char** argv) {
   std::string listen_address = argv[1];
   std::string contact_address = (argc > 2) ? argv[2] : "";
-  // 2. Init the framework, then start or join a cluster.
-  ex_actor::Init(/*thread_pool_size=*/4);
+  // 2. Start the framework, then start or join a cluster.
+  co_await ex_actor::Start(/*thread_pool_size=*/4);
   co_await ex_actor::StartOrJoinCluster(ex_actor::ClusterConfig {
       // The public address other nodes use to connect to you,
       // we'll open a listening port at this address.
@@ -70,7 +70,7 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
   // will exit immediately, which might be earlier than the other node finishes its work,
   // causing error in the other node.
   co_await ex_actor::WaitOsExitSignal();
-  ex_actor::Shutdown();
+  co_await ex_actor::Stop();
 }
 
 int main(int argc, char** argv) { stdexec::sync_wait(MainCoroutine(argc, argv)); }

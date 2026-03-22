@@ -42,28 +42,47 @@ using ex_actor::internal::SenderOf;
 using ex_actor::internal::FnReturnType;
 
 /**
- * @brief Init the global default registry in single-node mode, use the default thread pool as the scheduler.
+ * @brief Start the ex_actor runtime, use the default thread pool as the scheduler.
  * @note Not thread-safe.
  */
-void Init(uint32_t thread_pool_size);
+exec::task<void> Start(uint32_t thread_pool_size);
 
 /**
- * @brief Init the global default registry in single-node mode, use user-specified scheduler.
+ * @brief Start the ex_actor runtime, use user-specified scheduler.
  * @note Not thread-safe.
  */
 template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler);
+exec::task<void> Start(Scheduler scheduler);
 
 /**
  * @brief [Experimental] Switch to distributed mode by starting or joining a cluster.
- * @note Not thread-safe. Should be called after Init() and before Shutdown(). Can't be called twice.
+ * @note Not thread-safe. Should be called after Start() and before Stop(). Can't be called twice.
  */
 exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config);
 
 /**
- * @brief Shutdown the global default registry. Must be called explicitly before `main` exits.
+ * @brief Stop the ex_actor runtime. Must be called explicitly before `main` exits.
  * @note Not thread-safe
  */
+exec::task<void> Stop();
+
+/**
+ * @brief Deprecated. Use `sync_wait(Start())` or `co_await Start()` instead.
+ */
+[[deprecated("Use sync_wait(Start(...)) or co_await Start() instead.")]]
+void Init(uint32_t thread_pool_size);
+
+/**
+ * @brief Deprecated. Use `sync_wait(Start())` or `co_await Start()` instead.
+ */
+template <ex::scheduler Scheduler>
+[[deprecated("Use sync_wait(Start(...)) or co_await Start() instead.")]]
+void Init(Scheduler scheduler);
+
+/**
+ * @brief Deprecated. Use `sync_wait(Stop())` or `co_await Stop()` instead.
+ */
+[[deprecated("Use sync_wait(Stop()) or co_await Stop() instead.")]]
 void Shutdown();
 
 /**
@@ -161,11 +180,17 @@ void ConfigureLogging(const LogConfig& config = {});
 namespace ex_actor {
 
 template <ex::scheduler Scheduler>
-void Init(Scheduler scheduler) {
+exec::task<void> Start(Scheduler scheduler) {
   internal::log::Info("Initializing ex_actor with custom scheduler.");
   EXA_THROW_CHECK(!internal::IsGlobalDefaultRegistryInitialized()) << "Already initialized.";
   AssignGlobalDefaultRegistry(std::make_unique<ActorRegistry>(std::move(scheduler)));
   internal::SetupGlobalHandlers();
+  co_return;
+}
+
+template <ex::scheduler Scheduler>
+void Init(Scheduler scheduler) {
+  ex::sync_wait(Start(std::move(scheduler)));
 }
 
 }  // namespace ex_actor

@@ -80,22 +80,24 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
 }
 
 TEST(SkynetTest, ActorRegistryCanBeInvokeInsideActorMethods) {
-  ex_actor::Init(/*thread_pool_size=*/2);
-  auto [root] = stdexec::sync_wait(ex_actor::Spawn<SkynetActor>()).value();
+  auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/2);
+    auto root = co_await ex_actor::Spawn<SkynetActor>();
 
-  int depth = 4;
+    int depth = 4;
 
-  logging::Info("Starting Skynet (Depth {}, Width 10)...", depth);
-  auto start = std::chrono::high_resolution_clock::now();
+    logging::Info("Starting Skynet (Depth {}, Width 10)...", depth);
+    auto start = std::chrono::high_resolution_clock::now();
 
-  auto task = root.SendLocal<&SkynetActor::Process>(depth, true);
-  auto [result] = ex::sync_wait(std::move(task)).value();
-  ASSERT_EQ(result, std::pow(10, depth));
+    auto result = co_await root.SendLocal<&SkynetActor::Process>(depth, true);
+    EXPECT_EQ(result, std::pow(10, depth));
 
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-  logging::Info("Result: {} ms", result);
-  logging::Info("Time: {} ms", duration);
-  ex_actor::Shutdown();
+    logging::Info("Result: {} ms", result);
+    logging::Info("Time: {} ms", duration);
+    co_await ex_actor::Stop();
+  };
+  ex::sync_wait(coroutine());
 }

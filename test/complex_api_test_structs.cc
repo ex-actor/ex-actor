@@ -244,6 +244,7 @@ class NestedStructActor {
 
 TEST(ComplexApiTest, StructArguments) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<StructActor>();
     // Test Point struct
     Point pt {.x = 3.0, .y = 4.0};
@@ -285,14 +286,14 @@ TEST(ComplexApiTest, StructArguments) {
 
     double sum = co_await actor.template Send<&StructActor::SumPacketValues>();
     EXPECT_DOUBLE_EQ(sum, 11.0);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, StructInConstructor) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     Configuration config;
     config.app_name = "TestApp";
     config.version = 2;
@@ -337,14 +338,14 @@ TEST(ComplexApiTest, StructInConstructor) {
 
     bool is_prod_after = co_await actor.template Send<&StructConstructorActor::IsProduction>();
     EXPECT_FALSE(is_prod_after);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MultipleStructArguments) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<MultiStructActor>();
     // Test with Point and Person
     Point pt {.x = 10.0, .y = 20.0};
@@ -377,14 +378,14 @@ TEST(ComplexApiTest, MultipleStructArguments) {
 
     bool has_data = co_await actor.template Send<&MultiStructActor::HasData>();
     EXPECT_TRUE(has_data);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MoveOnlyStructArgument) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<MoveOnlyStructActor>();
     // Create move-only data
     auto content = std::make_unique<std::string>("Test Content");
@@ -408,14 +409,14 @@ TEST(ComplexApiTest, MoveOnlyStructArgument) {
 
     bool has_data = co_await actor.template Send<&MoveOnlyStructActor::HasData>();
     EXPECT_TRUE(has_data);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, NestedStructArgument) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<NestedStructActor>();
     // Create nested struct
     Employee emp;
@@ -448,8 +449,7 @@ TEST(ComplexApiTest, NestedStructArgument) {
 
     int age = co_await actor.template Send<&NestedStructActor::GetAge>();
     EXPECT_EQ(age, 35);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }

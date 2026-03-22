@@ -3,46 +3,51 @@
 
 ## Using a custom scheduler
 
-You can use any std::execution scheduler as ex_actor's underlying scheduler, just pass it to the `ex_actor::Init` function.
-When you pass a scheduler to the `ex_actor::Init` function, we'll use it as the underlying scheduler, instead of using our
+You can use any std::execution scheduler as ex_actor's underlying scheduler, just pass it to the `ex_actor::Start` function.
+When you pass a scheduler to the `ex_actor::Start` function, we'll use it as the underlying scheduler, instead of using our
 default scheduler.
 
 
-Be cautious that you should shutdown the runtime before your execution resource is destroyed, or the program will crash or hang forever, because we are still using your execution resource.
+
+Be cautious that you should stop the runtime before your execution resource is destroyed, or the program will crash or hang forever, because we are still using your execution resource.
 
 <!-- doc test start -->
 ```cpp
 #include "ex_actor/api.h"
 
-int main() {
+exec::task<void> MainCoroutine() {
   ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
 
-  // pass the scheduler to the ex_actor::Init function
-  ex_actor::Init(thread_pool.GetScheduler());
+  // pass the scheduler to the ex_actor::Start function
+  co_await ex_actor::Start(thread_pool.GetScheduler());
   
-  // caution: shutdown the runtime before your execution resource is destroyed
+  // caution: stop the runtime before your execution resource is destroyed
   // or the program will crash or hang forever, because we are still using your execution resource.
-  ex_actor::Shutdown();
+  co_await ex_actor::Stop();
 }
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
-If you want ex_actor to control the lifecycle of your execution resource, you can use `ex_actor::HoldResource` to hold it, the resource will be released when calling `ex_actor::Shutdown()`.
+If you want ex_actor to control the lifecycle of your execution resource, you can use `ex_actor::HoldResource` to hold it, the resource will be released when calling `ex_actor::Stop()`.
 
 <!-- doc test start -->
 ```cpp
 #include "ex_actor/api.h"
 
-int main() {
+exec::task<void> MainCoroutine() {
   // can also be a `shared_ptr` if you want to use it elsewhere.
   auto thread_pool = std::make_unique<ex_actor::WorkSharingThreadPool>(/*thread_count=*/10);
-  ex_actor::Init(thread_pool->GetScheduler());
+  co_await ex_actor::Start(thread_pool->GetScheduler());
   ex_actor::HoldResource(std::move(thread_pool));
 
   // do some work...
 
-  ex_actor::Shutdown(); // the thread_pool will be destroyed here
+  co_await ex_actor::Stop(); // the thread_pool will be destroyed here
 }
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -58,17 +63,19 @@ We provide some handy schedulers out-of-box.
 ```cpp
 #include "ex_actor/api.h"
 
-int main() {
+exec::task<void> MainCoroutine() {
   ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/10);
-  ex_actor::Init(thread_pool.GetScheduler());
-  ex_actor::Shutdown();
+  co_await ex_actor::Start(thread_pool.GetScheduler());
+  co_await ex_actor::Stop();
 }
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
 This scheduler is suitable for most cases. It's a classic thread pool with a globally shared lock-free task queue.
 
-It's also the default scheduler we use when you don't pass a scheduler to the `ex_actor::Init`.
+It's also the default scheduler we use when you don't pass a scheduler to the `ex_actor::Start`.
 
 
 ### Work-Stealing Thread Pool
@@ -77,11 +84,13 @@ It's also the default scheduler we use when you don't pass a scheduler to the `e
 ```cpp
 #include "ex_actor/api.h"
 
-int main() {
+exec::task<void> MainCoroutine() {
   ex_actor::WorkStealingThreadPool thread_pool(/*thread_count=*/10);
-  ex_actor::Init(thread_pool.GetScheduler());
-  ex_actor::Shutdown();
+  co_await ex_actor::Start(thread_pool.GetScheduler());
+  co_await ex_actor::Stop();
 }
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
@@ -103,11 +112,11 @@ struct TestActor {
 
 exec::task<void> MainCoroutine() {
   ex_actor::PriorityThreadPool thread_pool(1);
-  ex_actor::Init(thread_pool.GetScheduler());
+  co_await ex_actor::Start(thread_pool.GetScheduler());
   auto actor = co_await ex_actor::Spawn<TestActor>().WithConfig({
     .priority = 1 // smaller number means higher priority
   });
-  ex_actor::Shutdown();
+  co_await ex_actor::Stop();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }
@@ -143,7 +152,7 @@ exec::task<void> MainCoroutine() {
     thread_pool1.GetScheduler(), thread_pool2.GetScheduler()
   });
   // 3. initialize the runtime with the scheduler union
-  ex_actor::Init(scheduler_union.GetScheduler());
+  co_await ex_actor::Start(scheduler_union.GetScheduler());
   // 4. create two actors, specify the scheduler index using .WithConfig().
   auto actor1 = co_await ex_actor::Spawn<TestActor>().WithConfig({.scheduler_index = 0});
   auto actor2 = co_await ex_actor::Spawn<TestActor>().WithConfig({.scheduler_index = 1});
@@ -152,7 +161,7 @@ exec::task<void> MainCoroutine() {
   uint64_t thread_id2 = co_await actor2.Send<&TestActor::GetThreadId>();
   // the two actors should run on different thread pool
   assert(thread_id1 != thread_id2);
-  ex_actor::Shutdown();
+  co_await ex_actor::Stop();
 }
 
 int main() { stdexec::sync_wait(MainCoroutine()); }

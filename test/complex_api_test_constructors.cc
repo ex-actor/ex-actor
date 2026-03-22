@@ -140,6 +140,7 @@ class ComplexContainerActor {
 
 TEST(ComplexApiTest, EmptyConstructorActor) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<EmptyActor>();
 
     int initial = co_await actor.template Send<&EmptyActor::GetCounter>();
@@ -155,14 +156,14 @@ TEST(ComplexApiTest, EmptyConstructorActor) {
 
     int final_count = co_await actor.template Send<&EmptyActor::GetCounter>();
     EXPECT_EQ(final_count, 7);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, SingleParameterConstructor) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<SingleParamActor>("TestActor");
 
     std::string name = co_await actor.template Send<&SingleParamActor::GetName>();
@@ -175,14 +176,14 @@ TEST(ComplexApiTest, SingleParameterConstructor) {
     co_await actor.template Send<&SingleParamActor::AppendToName>("_Suffix");
     std::string new_name = co_await actor.template Send<&SingleParamActor::GetName>();
     EXPECT_EQ(new_name, "TestActor_Suffix");
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MultipleParametersConstructor) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto actor = co_await ex_actor::Spawn<MultiParamActor>(123, "MultiActor", 2.5, true);
 
     int id = co_await actor.template Send<&MultiParamActor::GetId>();
@@ -207,14 +208,14 @@ TEST(ComplexApiTest, MultipleParametersConstructor) {
 
     bool new_enabled = co_await actor.template Send<&MultiParamActor::IsEnabled>();
     EXPECT_FALSE(new_enabled);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, MoveOnlyConstructorParameters) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto initial_data = std::make_unique<std::string>("Initial");
     auto actor = co_await ex_actor::Spawn<MoveOnlyConstructorActor>(std::move(initial_data));
 
@@ -227,14 +228,14 @@ TEST(ComplexApiTest, MoveOnlyConstructorParameters) {
 
     std::string updated_data = co_await actor.template Send<&MoveOnlyConstructorActor::GetData>();
     EXPECT_EQ(updated_data, "Updated");
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(ComplexApiTest, ComplexContainerConstructor) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     std::vector<int> ids = {1, 2, 3, 4, 5};
     std::map<std::string, int> lookup = {{"a", 10}, {"b", 20}, {"c", 30}};
     std::optional<std::string> description = "Test Actor";
@@ -272,8 +273,7 @@ TEST(ComplexApiTest, ComplexContainerConstructor) {
     EXPECT_EQ(new_size, 6);
     int last_id = co_await actor.template Send<&ComplexContainerActor::GetIdAt>(5);
     EXPECT_EQ(last_id, 6);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }

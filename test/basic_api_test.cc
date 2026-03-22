@@ -51,19 +51,19 @@ class Proxy {
 
 TEST(BasicApiTest, ActorRegistryCreationWithDefaultScheduler) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto counter = co_await ex_actor::Spawn<Counter>();
     auto getvalue_sender = counter.Send<&Counter::GetValue>();
     auto getvalue_reply = co_await std::move(getvalue_sender);
     EXPECT_EQ(getvalue_reply, 0);
-    co_return;
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto counter = co_await ex_actor::Spawn<Counter>();
     exec::async_scope scope;
     scope.spawn(counter.SendLocal<&Counter::Add>(1));
@@ -72,26 +72,28 @@ TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
     EXPECT_EQ(res, 1);
     // Wait for all spawned work to complete before destroying the scope
     co_await scope.on_empty();
-    co_return;
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     auto counter = co_await ex_actor::Spawn<Counter>();
     co_await counter.Send<&Counter::Error>();
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ASSERT_THAT([&coroutine] { ex::sync_wait(coroutine()); },
               Throws<std::exception>(Property(&std::exception::what, HasSubstr("error0"))));
-  ex_actor::Shutdown();
+  // The exception above causes the coroutine to unwind before reaching Stop(),
+  // so we must explicitly shut down to avoid leaving stale global state for subsequent tests.
+  ex::sync_wait(ex_actor::Stop());
 }
 
 TEST(BasicApiTest, NestActorRefCase) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     ex_actor::ActorRef counter = co_await ex_actor::Spawn<Counter>();
     exec::async_scope scope;
     for (int i = 0; i < 100; ++i) {
@@ -105,15 +107,14 @@ TEST(BasicApiTest, NestActorRefCase) {
     auto res3 = co_await proxy.Send<&Proxy::GetValue2>();
     EXPECT_EQ(res2, 100);
     EXPECT_EQ(res3, 100);
-    co_return;
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(BasicApiTest, SpawnWithFullConfig) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     /*
     before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
     here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
@@ -141,10 +142,9 @@ TEST(BasicApiTest, SpawnWithFullConfig) {
     ex_actor::ActorConfig config = {.max_message_executed_per_activation = 10};
     co_await ex_actor::Spawn<Proxy>(counter).WithConfig(config);
     co_await ex_actor::DestroyActor(counter);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 class TestActorWithNamedLookup {
@@ -156,6 +156,7 @@ class TestActorWithNamedLookup {
 
 TEST(BasicApiTest, LookUpNamedActor) {
   auto coroutine = []() -> exec::task<void> {
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     ex_actor::ActorConfig config {.actor_name = "counter"};
     co_await ex_actor::Spawn<Counter>().WithConfig(config);
     auto test_retriever_actor = co_await ex_actor::Spawn<TestActorWithNamedLookup>();
@@ -167,10 +168,9 @@ TEST(BasicApiTest, LookUpNamedActor) {
     auto getvalue_sender = actor.Send<&Counter::GetValue>();
     auto getvalue_reply = co_await std::move(getvalue_sender);
     EXPECT_EQ(getvalue_reply, 0);
+    co_await ex_actor::Stop();
   };
-  ex_actor::Init(/*thread_pool_size=*/10);
   ex::sync_wait(coroutine());
-  ex_actor::Shutdown();
 }
 
 TEST(BasicApiTest, RemoteActorRefSlicedToLocalActorRefShouldThrowOnUse) {
@@ -194,11 +194,11 @@ struct Derived : Base {
 
 TEST(BasicApiTest, ActorCanBePolymorphic) {
   auto coroutine = []() -> exec::task<void> {
-    ex_actor::Init(/*thread_pool_size=*/10);
+    co_await ex_actor::Start(/*thread_pool_size=*/10);
     ex_actor::ActorRef<Base> base = co_await ex_actor::Spawn<Derived>();
     std::string foo_reply = co_await base.Send<&Base::Foo>();
     EXPECT_EQ(foo_reply, "Derived::Foo");
-    ex_actor::Shutdown();
+    co_await ex_actor::Stop();
   };
   ex::sync_wait(coroutine());
 }

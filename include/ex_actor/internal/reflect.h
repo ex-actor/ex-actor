@@ -111,10 +111,16 @@ constexpr auto UnwrapReturnSenderIfNested() {
 
 template <auto kFunc>
 std::string GetUniqueNameForFunction() {
-  // TODO: according to the standard, typeid().name() is not guaranteed to be unique, but in modern gcc&clang,
-  // it's an unique mangled name. So it works now, maybe replace it with a more robust way in the future.
-  return typeid(kFunc).name();
+  // The compiler-provided function signature string embeds the actual NTTP value
+  // (the fully-qualified function pointer name), making it unique per distinct
+  // function pointer — unlike typeid().name() which only reflects the *type*.
+#if defined(_MSC_VER)
+  return __FUNCSIG__;
+#else
+  return __PRETTY_FUNCTION__;
+#endif
 }
+
 template <auto kFn>
 using FnReturnType = std::decay_t<typename Signature<decltype(kFn)>::ReturnType>;
 

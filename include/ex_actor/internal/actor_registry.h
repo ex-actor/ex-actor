@@ -333,6 +333,8 @@ class ActorRegistry {
   /** @copydoc ex_actor::StartOrJoinCluster */
   exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config);
 
+  uint64_t GetNodeId() const { return this_node_id_; }
+
  private:
   uint64_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;

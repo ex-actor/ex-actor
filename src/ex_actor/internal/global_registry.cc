@@ -143,6 +143,8 @@ void Shutdown() {
   resource_holder.clear();
 }
 
+uint64_t GetNodeId() { return internal::GetGlobalDefaultRegistry().GetNodeId(); }
+
 void ConfigureLogging(const LogConfig& config) { internal::GlobalLogger() = internal::CreateLoggerUsingConfig(config); }
 
 }  // namespace ex_actor

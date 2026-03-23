@@ -149,6 +149,11 @@ SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint64
 }
 
 /**
+ * @brief Get the node id of this node.
+ */
+uint64_t GetNodeId();
+
+/**
  * @brief Configure the logging of ex_actor.
  * @note Not thread-safe, please call it only when no logs are printing.
  */

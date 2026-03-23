@@ -333,6 +333,7 @@ class ActorRegistry {
   /** @copydoc ex_actor::StartOrJoinCluster */
   exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config);
 
+  /** @copydoc ex_actor::GetNodeId */
   uint64_t GetNodeId() const { return this_node_id_; }
 
  private:

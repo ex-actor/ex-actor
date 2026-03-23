@@ -98,15 +98,24 @@ class ActorRegistryBackend {
   template <class UserClass>
   exec::task<void> DestroyActor(const ActorRef<UserClass>& actor_ref) {
     auto actor_id = actor_ref.GetActorId();
-    EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
-    auto actor = std::move(actor_id_to_actor_.at(actor_id));
-    actor_id_to_actor_.erase(actor_id);
+    auto node_id = actor_ref.GetNodeId();
 
-    auto actor_name = actor->GetActorConfig().actor_name;
-    if (actor_name.has_value()) {
-      actor_name_to_id_.erase(actor_name.value());
+    if (node_id == this_node_id_) {
+      co_await DestroyLocalActor(actor_id);
+      co_return;
     }
-    co_await actor->AsyncDestroy();
+
+    EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Trying to destroy a remote actor, but not in distributed mode";
+
+    NetworkRequest request {ActorDestroyRequest {.actor_id = actor_id}};
+    ByteBuffer response_buf =
+        co_await broker_actor_ref_.SendLocal<&MessageBroker::SendRequest>(node_id, Serialize(request));
+    auto reply = Deserialize<NetworkReply>(response_buf);
+
+    auto& ret = std::get<ActorDestroyReply>(reply.variant);
+    if (!ret.success) {
+      EXA_THROW << "Got actor destroy error from remote node: " << ret.error;
+    }
   }
 
   template <class UserClass>
@@ -150,6 +159,8 @@ class ActorRegistryBackend {
    */
   exec::task<ByteBuffer> HandleNetworkRequest(ByteBuffer request_buffer);
 
+  exec::task<void> DestroyLocalActor(uint64_t actor_id);
+
  private:
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
   exec::task<ActorRef<UserClass>> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
@@ -178,6 +189,7 @@ class ActorRegistryBackend {
   ByteBuffer SerializeReply(const NetworkReply& reply);
   void HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out);
   exec::task<ByteBuffer> HandleActorMethodCallRequest(ActorMethodCallRequest msg);
+  exec::task<ByteBuffer> HandleActorDestroyRequest(ActorDestroyRequest msg);
 };
 
 // -----------SpawnBuilder: a builder-style sender for actor spawning-----------

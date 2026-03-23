@@ -47,6 +47,18 @@ exec::task<void> ActorRegistryBackend::AsyncDestroyAllActors() {
   log::Info("All actors destroyed");
 }
 
+exec::task<void> ActorRegistryBackend::DestroyLocalActor(uint64_t actor_id) {
+  EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
+  auto actor = std::move(actor_id_to_actor_.at(actor_id));
+  actor_id_to_actor_.erase(actor_id);
+
+  auto actor_name = actor->GetActorConfig().actor_name;
+  if (actor_name.has_value()) {
+    actor_name_to_id_.erase(actor_name.value());
+  }
+  co_await actor->AsyncDestroy();
+}
+
 exec::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer request_buffer) {
   auto request = Deserialize<NetworkRequest>(request_buffer);
 
@@ -67,6 +79,10 @@ exec::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer req
     } else {
       co_return SerializeReply(NetworkReply {ActorLookUpReply {.success = false}});
     }
+  }
+
+  if (auto* msg = std::get_if<ActorDestroyRequest>(&request.variant)) {
+    co_return co_await HandleActorDestroyRequest(std::move(*msg));
   }
 
   EXA_THROW << "Unknown network request variant";
@@ -153,6 +169,16 @@ exec::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorM
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
     co_return SerializeReply(NetworkReply {ActorMethodCallReply {.success = false, .error = std::move(error_msg)}});
+  }
+}
+
+exec::task<ByteBuffer> ActorRegistryBackend::HandleActorDestroyRequest(ActorDestroyRequest msg) {
+  try {
+    co_await DestroyLocalActor(msg.actor_id);
+    co_return SerializeReply(NetworkReply {ActorDestroyReply {.success = true}});
+  } catch (std::exception& error) {
+    auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
+    co_return SerializeReply(NetworkReply {ActorDestroyReply {.success = false, .error = std::move(error_msg)}});
   }
 }
 

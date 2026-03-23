@@ -68,8 +68,12 @@ struct ActorLookUpRequest {
   std::string actor_name;
 };
 
+struct ActorDestroyRequest {
+  uint64_t actor_id {};
+};
+
 struct NetworkRequest {
-  std::variant<ActorCreationRequest, ActorMethodCallRequest, ActorLookUpRequest> variant;
+  std::variant<ActorCreationRequest, ActorMethodCallRequest, ActorLookUpRequest, ActorDestroyRequest> variant;
 };
 
 // ===================================================
@@ -93,8 +97,13 @@ struct ActorLookUpReply {
   uint64_t actor_id {};
 };
 
+struct ActorDestroyReply {
+  bool success {};
+  std::string error;
+};
+
 struct NetworkReply {
-  std::variant<ActorCreationReply, ActorMethodCallReply, ActorLookUpReply> variant;
+  std::variant<ActorCreationReply, ActorMethodCallReply, ActorLookUpReply, ActorDestroyReply> variant;
 };
 
 // ===================================================

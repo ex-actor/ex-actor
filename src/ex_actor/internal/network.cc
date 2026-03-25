@@ -342,8 +342,12 @@ void MessageBroker::StartPeriodicalTaskScheduler() {
 void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_message) {
   for (const auto& incoming_node_state : gossip_message.node_states) {
     auto [iter, inserted] = node_id_to_state_.try_emplace(incoming_node_state.node_id, incoming_node_state);
+    if (inserted && !incoming_node_state.alive) {
+      // a new dead node found, ignore it
+      continue;
+    }
     if (inserted) {
-      // new node found
+      // new alive node found
       OnNodeAlive(incoming_node_state.node_id);
       continue;
     }
@@ -352,12 +356,12 @@ void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_messag
     EXA_THROW_CHECK_EQ(cur_node_state.address, incoming_node_state.address)
         << fmt_lib::format("Node {:#x} has conflicting address, {} vs {}.", cur_node_state.node_id,
                            cur_node_state.address, incoming_node_state.address);
-    if (incoming_node_state.alive) {
-      EXA_THROW_CHECK(cur_node_state.alive)
-          << "Can't transform from dead to alive now, will support in the future once failover is implemented";
-    }
     bool new_node_dead = cur_node_state.alive && !incoming_node_state.alive;
-    cur_node_state.alive = incoming_node_state.alive;
+    if (!incoming_node_state.alive) {
+      // now if a node dead, it never comes back alive
+      // TODO: support re-activation of dead nodes
+      cur_node_state.alive = false;
+    }
     cur_node_state.last_seen_timestamp_ms =
         std::max(cur_node_state.last_seen_timestamp_ms, incoming_node_state.last_seen_timestamp_ms);
     if (new_node_dead) {
@@ -419,12 +423,10 @@ void MessageBroker::OnNodeConnectionLost(uint64_t node_id) {
       requests_to_fail.push_back(it);
     }
   }
-  if (!requests_to_fail.empty()) {
-    log::Warn(
-        "Node {:#x} lost connection to node {:#x} due to heartbeat timeout, {} outstanding requests of this node will "
-        "be failed, heartbeat timeout is {}ms",
-        this_node_id_, node_id, requests_to_fail.size(), cluster_config_.network_config.heartbeat_timeout_ms);
-  }
+  log::Info(
+      "Node {:#x} lost connection to node {:#x} due to heartbeat timeout, {} outstanding requests of this node will "
+      "be failed, heartbeat timeout is {}ms",
+      this_node_id_, node_id, requests_to_fail.size(), cluster_config_.network_config.heartbeat_timeout_ms);
   for (auto it : requests_to_fail) {
     auto& [request_id, request] = *it;
     request.exception_ptr = std::make_exception_ptr(
@@ -433,6 +435,7 @@ void MessageBroker::OnNodeConnectionLost(uint64_t node_id) {
     request.sem.Acquire(1);
   }
   deferred_replies_.erase(node_id);
+  node_id_to_send_socket_.erase(node_id);
 
   EvaluateClusterStateWaiters();
 }

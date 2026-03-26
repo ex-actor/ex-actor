@@ -205,6 +205,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
         return gen() & 0x7FFF'FFFF'FFFF'FFFF;
       }()),
       default_work_sharing_thread_pool_(thread_pool_size),
+      control_plane_thread_pool_(/*thread_count=*/1),
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
@@ -218,8 +219,11 @@ exec::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_
   EXA_THROW_CHECK(broker_actor_ref_.IsEmpty()) << "Already in distributed mode.";
   EXA_THROW_CHECK(!cluster_config.listen_address.empty()) << "listen_address must not be empty";
 
-  broker_actor_ =
-      std::make_unique<Actor<MessageBroker>>(scheduler_->Clone(), ActorConfig {}, this_node_id_, cluster_config);
+  auto control_plane_scheduler = std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
+      control_plane_thread_pool_.GetScheduler());
+  broker_actor_ = std::make_unique<Actor<MessageBroker>>(std::move(control_plane_scheduler), ActorConfig {},
+                                                         this_node_id_, cluster_config);
+
   broker_actor_ref_ = LocalActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
   NotifyOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
 

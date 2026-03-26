@@ -351,6 +351,7 @@ class ActorRegistry {
  private:
   uint64_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;
+  WorkSharingThreadPool control_plane_thread_pool_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   std::unique_ptr<Actor<MessageBroker>> broker_actor_;
   LocalActorRef<MessageBroker> broker_actor_ref_;

@@ -11,6 +11,7 @@ function(ex_actor_test NAME)
 endfunction()
 
 ex_actor_test(basic_api_test)
+ex_actor_test(serialization_test)
 ex_actor_test(util_test)
 ex_actor_test(scheduler_test)
 ex_actor_test(stress_test)

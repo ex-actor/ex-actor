@@ -204,6 +204,9 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
   };
 
   static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
+    if (rfl_type.is_empty) {
+      return ex_actor::internal::ActorRef<U>();
+    }
     // this_node_id(0) and TypeErasedActor*(nullptr) are placeholders;
     // filled later in the Parser::read below.
     ex_actor::internal::ActorRef<U> actor(/*this_node_id=*/0, rfl_type.node_id, rfl_type.actor_id, /*actor=*/nullptr,

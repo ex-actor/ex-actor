@@ -103,7 +103,9 @@ void HoldResource(std::shared_ptr<void> resource);
  * @endcode
  */
 template <class UserClass, class... Args>
-SenderOf<ActorRef<UserClass>> auto Spawn(Args... args) {
+SenderOf<ActorRef<UserClass>> auto Spawn(Args... args)
+  requires(std::is_constructible_v<UserClass, Args...>)
+{
   return internal::GetGlobalDefaultRegistry().Spawn<UserClass, Args...>(std::move(args)...);
 }
 
@@ -120,7 +122,9 @@ SenderOf<ActorRef<UserClass>> auto Spawn(Args... args) {
  * @endcode
  */
 template <auto kCreateFn, class... Args>
-SenderOf<ActorRef<FnReturnType<kCreateFn>>> auto Spawn(Args... args) {
+SenderOf<ActorRef<FnReturnType<kCreateFn>>> auto Spawn(Args... args)
+  requires(std::is_invocable_v<decltype(kCreateFn), Args...>)
+{
   return internal::GetGlobalDefaultRegistry().Spawn<kCreateFn, Args...>(std::move(args)...);
 }
 

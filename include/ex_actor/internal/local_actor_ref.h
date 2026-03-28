@@ -63,9 +63,9 @@ class LocalActorRef {
    * @brief Send message to a local actor. No heap allocation.
    */
   template <auto kMethod, class... Args>
-  [[nodiscard]] ex::sender auto SendLocal(Args... args) const {
-    static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
-                  "method is not invocable with the provided arguments");
+  [[nodiscard]] ex::sender auto SendLocal(Args... args) const
+    requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
+  {
     EXA_THROW_CHECK(!IsEmpty()) << "Empty LocalActorRef, cannot call method on it.";
     EXA_THROW_CHECK(type_erased_actor_ != nullptr)
         << "Local actor instance not set, it's typically because you converted a remote ActorRef to LocalActorRef.";

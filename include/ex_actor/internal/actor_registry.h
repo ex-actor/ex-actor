@@ -65,9 +65,6 @@ class ActorRegistryBackend {
   template <auto kCreateFn, class... Args>
   exec::task<ActorRef<FnReturnType<kCreateFn>>> SpawnWithCreateFn(uint64_t node_id, ActorConfig config, Args... args) {
     using UserClass = FnReturnType<kCreateFn>;
-    static_assert(std::is_invocable_v<decltype(kCreateFn), Args...>,
-                  "Class can't be created by given args and create function");
-
     if (node_id == this_node_id_) {
       co_return co_await SpawnLocal<UserClass, kCreateFn>(node_id, std::move(config), std::move(args)...);
     }
@@ -300,14 +297,18 @@ class ActorRegistry {
 
   /** @copydoc ex_actor::Spawn */
   template <class UserClass, class... Args>
-  SenderOf<ActorRef<UserClass>> auto Spawn(Args... args) {
+  SenderOf<ActorRef<UserClass>> auto Spawn(Args... args)
+    requires(std::is_constructible_v<UserClass, Args...>)
+  {
     return SpawnBuilder<UserClass, /*kCreateFn=*/nullptr, Args...>(backend_actor_ref_, std::move(args)...)
         .ToNode(this_node_id_);
   }
 
   /** @copydoc ex_actor::Spawn */
   template <auto kCreateFn, class... Args>
-  SenderOf<ActorRef<FnReturnType<kCreateFn>>> auto Spawn(Args... args) {
+  SenderOf<ActorRef<FnReturnType<kCreateFn>>> auto Spawn(Args... args)
+    requires(std::is_invocable_v<decltype(kCreateFn), Args...>)
+  {
     return SpawnBuilder<FnReturnType<kCreateFn>, kCreateFn, Args...>(backend_actor_ref_, std::move(args)...)
         .ToNode(this_node_id_);
   }

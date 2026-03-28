@@ -86,7 +86,9 @@ class ActorRef : public LocalActorRef<UserClass> {
    * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>
-  [[nodiscard]] auto Send(Args... args) const {
+  [[nodiscard]] auto Send(Args... args) const
+    requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
+  {
     // Add a fallback inline_scheduler for it.
     return WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...));
   }
@@ -95,7 +97,9 @@ class ActorRef : public LocalActorRef<UserClass> {
    * @brief Send message to a local actor. Has better performance than the generic Send(). No heap allocation.
    */
   template <auto kMethod, class... Args>
-  [[nodiscard]] ex::sender auto SendLocal(Args... args) const {
+  [[nodiscard]] ex::sender auto SendLocal(Args... args) const
+    requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
+  {
     EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
     return LocalActorRef<UserClass>::template SendLocal<kMethod>(std::move(args)...);
   }
@@ -109,9 +113,9 @@ class ActorRef : public LocalActorRef<UserClass> {
 
   template <auto kMethod, class... Args>
   [[nodiscard]] auto SendInternal(Args... args) const
-      -> exec::task<typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type> {
-    static_assert(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>,
-                  "method is not invocable with the provided arguments");
+      -> exec::task<typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type>
+    requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
+  {
     if (this->IsEmpty()) [[unlikely]] {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }

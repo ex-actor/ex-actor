@@ -154,10 +154,9 @@ MessageBroker::MessageBroker(uint64_t this_node_id, ClusterConfig cluster_config
                                       .address = cluster_config_.listen_address};
   if (!cluster_config_.contact_node_address.empty()) {
     EXA_THROW_CHECK_NE(cluster_config_.contact_node_address, cluster_config_.listen_address);
-    // will be moved into node_id_to_send_socket_ once got gossip from it
     contact_node_send_socket_ = zmq::socket_t(zmq_context_, zmq::socket_type::dealer);
-    contact_node_send_socket_->set(zmq::sockopt::linger, 0);
-    contact_node_send_socket_->connect(cluster_config_.contact_node_address);
+    contact_node_send_socket_.set(zmq::sockopt::linger, 0);
+    contact_node_send_socket_.connect(cluster_config_.contact_node_address);
   }
 }
 
@@ -285,8 +284,9 @@ void MessageBroker::BroadcastGossip() {
     auto& socket = MapAt(node_id_to_send_socket_, node_id);
     EXA_THROW_CHECK(socket.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::none));
   }
-  if (contact_node_send_socket_.has_value()) {
-    EXA_THROW_CHECK(contact_node_send_socket_->send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::none));
+  // no matter the contact node is in `node_id_to_state_` or not, we always send a copy to it
+  if (contact_node_send_socket_.handle() != nullptr) {
+    EXA_THROW_CHECK(contact_node_send_socket_.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::none));
   }
 }
 
@@ -397,15 +397,9 @@ void MessageBroker::OnNodeAlive(uint64_t node_id) {
             new_node.address);
 
   // Create send socket
-  if (new_node.address != cluster_config_.contact_node_address) {
-    auto& socket = (node_id_to_send_socket_[new_node.node_id] = zmq::socket_t(zmq_context_, zmq::socket_type::dealer));
-    socket.set(zmq::sockopt::linger, 0);
-    socket.connect(new_node.address);
-  } else if (contact_node_send_socket_.has_value()) {
-    // contact node is already connected at start, just move it to node_id_to_send_socket_
-    node_id_to_send_socket_[new_node.node_id] = std::move(contact_node_send_socket_.value());
-    contact_node_send_socket_ = std::nullopt;
-  }
+  auto& socket = (node_id_to_send_socket_[new_node.node_id] = zmq::socket_t(zmq_context_, zmq::socket_type::dealer));
+  socket.set(zmq::sockopt::linger, 0);
+  socket.connect(new_node.address);
 
   EvaluateClusterStateWaiters();
 

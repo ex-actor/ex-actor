@@ -674,6 +674,138 @@ TEST(MessageBrokerTest, ContactNodeRestartWithSameAddressDifferentNodeId) {
 }
 
 // ============================================================
+// Death is not propagated via gossip: a bad connection between 2 nodes
+// must not cause other nodes to consider them dead
+// ============================================================
+
+TEST(MessageBrokerTest, DeadNodeIsNotBroadcastViaGossip) {
+  // Node 0 knows about node 1 and node 2.
+  // Node 1 times out from node 0's perspective, but node 2 should NOT learn
+  // about node 1's death through gossip — each node decides independently.
+  //
+  // To exercise the real BroadcastGossip path, broker0 sends gossip over ZMQ
+  // to a recv socket that feeds into broker2's DispatchReceivedMessage.
+  auto config0 = MakeConfig("tcp://127.0.0.1:7400",
+                            /*contact_address=*/"tcp://127.0.0.1:7402",
+                            /*heartbeat_timeout_ms=*/1);
+  ex_actor::internal::MessageBroker broker0(/*this_node_id=*/0, config0);
+
+  auto config2 = MakeConfig("tcp://127.0.0.1:7402",
+                            /*contact_address=*/"",
+                            /*heartbeat_timeout_ms=*/60000);
+  ex_actor::internal::MessageBroker broker2(/*this_node_id=*/2, config2);
+
+  // Set up a ZMQ recv socket on broker2's address to capture what broker0 sends
+  zmq::context_t capture_ctx {1};
+  zmq::socket_t capture_socket {capture_ctx, zmq::socket_type::dealer};
+  capture_socket.bind("tcp://127.0.0.1:7402");
+  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
+  capture_socket.set(zmq::sockopt::linger, 0);
+
+  // Both brokers discover node 1
+  DispatchGossip(broker0,
+                 {{.alive = true, .last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7401"},
+                  {.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7402"}});
+  DispatchGossip(broker2,
+                 {{.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 0, .address = "tcp://127.0.0.1:7400"},
+                  {.alive = true, .last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7401"}});
+
+  // Node 1 times out from broker0's perspective
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  broker0.CheckHeartbeatTimeout();
+
+  // broker0 broadcasts gossip over ZMQ (contact node socket points to 7402)
+  broker0.BroadcastGossip();
+
+  // Receive the gossip message that broker0 actually sent
+  zmq::message_t captured_msg;
+  auto recv_result = capture_socket.recv(captured_msg);
+  ASSERT_TRUE(recv_result.has_value()) << "Expected to receive a gossip message from broker0";
+
+  // Feed the captured raw gossip into broker2
+  ex_actor::internal::ByteBuffer raw(static_cast<const std::byte*>(captured_msg.data()),
+                                     static_cast<const std::byte*>(captured_msg.data()) + captured_msg.size());
+  stdexec::sync_wait(broker2.DispatchReceivedMessage(std::move(raw)));
+
+  // broker2 should still see node 1 as alive — the death was not propagated.
+  // Use async_scope + manual timeout check to avoid blocking forever if the
+  // bug is present (node 1 would be dead and the predicate never satisfied).
+  exec::async_scope scope;
+  std::atomic<bool> node1_alive = false;
+  scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
+      broker2.WaitClusterState(
+          [](const ex_actor::ClusterState& state) {
+            return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+          },
+          /*timeout_ms=*/0) |
+      stdexec::then([&node1_alive](const ex_actor::WaitClusterStateResult& res) {
+        node1_alive.store(res.condition_met, std::memory_order_relaxed);
+      })));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  broker2.CheckClusterStateWaiterTimeout();
+  stdexec::sync_wait(scope.on_empty());
+
+  EXPECT_TRUE(node1_alive.load(std::memory_order_relaxed))
+      << "Node 2 should still see node 1 as alive; "
+         "only the node-0-to-node-1 connection was bad";
+
+  capture_socket.close();
+  stdexec::sync_wait(broker0.Stop());
+  stdexec::sync_wait(broker2.Stop());
+}
+
+TEST(MessageBrokerTest, HandleGossipMessageRejectsDeadNodeState) {
+  auto config = MakeConfig("tcp://127.0.0.1:7410");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
+
+  // Discover node 1 first so it exists in the state map
+  DispatchGossip(broker,
+                 {{.alive = true, .last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7411"}});
+
+  // A gossip message claiming node 1 is dead should be rejected
+  EXPECT_THAT(
+      [&]() {
+        DispatchGossip(
+            broker,
+            {{.alive = false, .last_seen_timestamp_ms = 200, .node_id = 1, .address = "tcp://127.0.0.1:7411"}});
+      },
+      testing::Throws<std::exception>(
+          testing::Property(&std::exception::what, testing::HasSubstr("Invalid gossip message"))));
+
+  stdexec::sync_wait(broker.Stop());
+}
+
+TEST(MessageBrokerTest, HandleGossipMessageIgnoresNewDeadNode) {
+  auto config = MakeConfig("tcp://127.0.0.1:7420");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
+
+  // A gossip message about a previously unknown dead node should be silently ignored
+  DispatchGossip(broker,
+                 {{.alive = false, .last_seen_timestamp_ms = 100, .node_id = 5, .address = "tcp://127.0.0.1:7425"}});
+
+  // Node 5 should not appear in the cluster state
+  exec::async_scope scope;
+  std::atomic<bool> condition_met = true;
+  scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
+      broker.WaitClusterState(
+          [](const ex_actor::ClusterState& state) {
+            return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 5; });
+          },
+          /*timeout_ms=*/0) |
+      stdexec::then(
+          [&condition_met](const ex_actor::WaitClusterStateResult& res) { condition_met = res.condition_met; })));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  broker.CheckClusterStateWaiterTimeout();
+
+  stdexec::sync_wait(scope.on_empty());
+  EXPECT_FALSE(condition_met) << "A previously unknown dead node should not appear in the cluster state";
+
+  stdexec::sync_wait(broker.Stop());
+}
+
+// ============================================================
 // BroadcastGossip after gossip discovery sends to all discovered peers
 // ============================================================
 

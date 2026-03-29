@@ -564,6 +564,49 @@ TEST(MessageBrokerTest, HeartbeatTimeoutUsesWallClockEpoch) {
 }
 
 // ============================================================
+// CheckHeartbeatTimeout: clock skew (future timestamp) must not kill node
+// ============================================================
+
+TEST(MessageBrokerTest, CheckHeartbeatTimeoutToleratesClockSkew) {
+  auto config = MakeConfig("tcp://127.0.0.1:7367",
+                           /*contact_address=*/"tcp://127.0.0.1:7368",
+                           /*heartbeat_timeout_ms=*/100);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
+
+  // Simulate a remote node whose clock is slightly ahead of the local clock.
+  // Its last_seen_timestamp_ms will be in the future relative to our GetTimeMs().
+  // Without the clock-skew guard, the unsigned subtraction
+  //   (now_ms - last_seen_timestamp_ms) would underflow to a huge value,
+  // exceeding heartbeat_timeout_ms and falsely declaring the node dead.
+  uint64_t future_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+          .count() +
+      5000;
+
+  DispatchGossip(broker, {{.alive = true,
+                           .last_seen_timestamp_ms = future_ms,
+                           .node_id = 1,
+                           .address = "tcp://127.0.0.1:7368"}});
+
+  // Even after sleeping past the heartbeat timeout, the future timestamp must
+  // not cause an unsigned-underflow false positive.
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  broker.CheckHeartbeatTimeout();
+
+  // Node 1 should still be alive.
+  auto [result] = stdexec::sync_wait(broker.WaitClusterState(
+                                         [](const ex_actor::ClusterState& state) {
+                                           return std::ranges::any_of(
+                                               state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                                         },
+                                         /*timeout_ms=*/10))
+                      .value();
+  EXPECT_TRUE(result.condition_met) << "Node with future timestamp should not be killed by heartbeat check";
+
+  stdexec::sync_wait(broker.Stop());
+}
+
+// ============================================================
 // CheckHeartbeatTimeout: self node is never deactivated
 // ============================================================
 

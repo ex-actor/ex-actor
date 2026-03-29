@@ -291,11 +291,15 @@ void MessageBroker::BroadcastGossip() {
 }
 
 void MessageBroker::CheckHeartbeatTimeout() {
+  auto now_ms = GetTimeMs();
   for (auto& [node_id, state] : node_id_to_state_) {
-    if (!state.alive                 // already dead
-        || node_id == this_node_id_  // ourselves
-        || GetTimeMs() - state.last_seen_timestamp_ms <
-               cluster_config_.network_config.heartbeat_timeout_ms  // not timeout yet
+    // When using system_clock, remote timestamps may be slightly ahead of local clock due to
+    // clock skew across machines. Treat future timestamps as "just seen" to avoid unsigned
+    // underflow in the subtraction, which would falsely trigger a heartbeat timeout.
+    if (!state.alive ||                            // already dead
+        node_id == this_node_id_ ||                // ourselves
+        state.last_seen_timestamp_ms >= now_ms ||  // timestamp in the future due to clock skew
+        now_ms - state.last_seen_timestamp_ms < cluster_config_.network_config.heartbeat_timeout_ms  // not timeout yet
     ) {
       continue;
     }

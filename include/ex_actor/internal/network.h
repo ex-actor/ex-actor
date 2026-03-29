@@ -234,8 +234,8 @@ class MessageBroker {
   std::mt19937_64 rng_ {std::random_device {}()};
 
   zmq::context_t zmq_context_ {/*io_threads_=*/1};
-  // connected at start, then moved to node_id_to_send_socket_ once got gossip from it
-  std::optional<zmq::socket_t> contact_node_send_socket_;
+  // connected at start, used for bootstrapping the network
+  zmq::socket_t contact_node_send_socket_;
   std::unordered_map<uint64_t, zmq::socket_t> node_id_to_send_socket_;
 
   LocalActorRef<MessageBroker> self_actor_ref_;

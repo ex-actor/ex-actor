@@ -142,7 +142,7 @@ class ActorRef : public LocalActorRef<UserClass> {
 
     auto& ret = std::get<ActorMethodCallReply>(reply.variant);
     if (!ret.success) {
-      EXA_THROW << ret.error;
+      EXA_THROW << "Got error from remote actor on node " << node_id_ << ": " << ret.error;
     }
     if constexpr (std::is_void_v<UnwrappedType>) {
       co_return;

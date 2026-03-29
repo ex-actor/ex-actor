@@ -630,6 +630,50 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutDoesNotDeactivateSelf) {
 }
 
 // ============================================================
+// Contact node dies and restarts with same address but different node ID
+// ============================================================
+
+TEST(MessageBrokerTest, ContactNodeRestartWithSameAddressDifferentNodeId) {
+  auto config = MakeConfig("tcp://127.0.0.1:7390",
+                           /*contact_address=*/"tcp://127.0.0.1:7391",
+                           /*heartbeat_timeout_ms=*/1);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
+
+  // Discover the contact node (node 1) via gossip
+  DispatchGossip(broker, {{.alive = true,
+                           .last_seen_timestamp_ms = 1,
+                           .node_id = 1,
+                           .address = "tcp://127.0.0.1:7391"}});
+
+  // Wait for the heartbeat to expire, then declare node 1 dead
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  broker.CheckHeartbeatTimeout();
+
+  // The contact node restarts with the same address but a new node ID (node 2).
+  // Before the fix, OnNodeAlive would crash here because the contact_node_send_socket_
+  // had already been moved into node_id_to_send_socket_ for node 1.
+  EXPECT_NO_THROW(DispatchGossip(broker, {{.alive = true,
+                                           .last_seen_timestamp_ms = 99999,
+                                           .node_id = 2,
+                                           .address = "tcp://127.0.0.1:7391"}}));
+
+  // The restarted node should be visible in the cluster state
+  auto [result] = stdexec::sync_wait(broker.WaitClusterState(
+                                         [](const ex_actor::ClusterState& state) {
+                                           return std::ranges::any_of(
+                                               state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
+                                         },
+                                         /*timeout_ms=*/10))
+                      .value();
+  EXPECT_TRUE(result.condition_met);
+
+  // BroadcastGossip should also work without crashing
+  EXPECT_NO_THROW(broker.BroadcastGossip());
+
+  stdexec::sync_wait(broker.Stop());
+}
+
+// ============================================================
 // BroadcastGossip after gossip discovery sends to all discovered peers
 // ============================================================
 

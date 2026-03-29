@@ -209,7 +209,7 @@ TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
     constexpr int kNumSources = 32;
     constexpr int kDataSizePerSource = 500;
 
-    auto start_time = std::chrono::steady_clock::now();
+    auto start_time = std::chrono::system_clock::now();
 
     // Create actor hierarchy
     std::vector<ex_actor::ActorRef<Reducer>> reducers;
@@ -248,7 +248,7 @@ TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
       min_sum = std::min(min_sum, sum);
     }
 
-    auto end_time = std::chrono::steady_clock::now();
+    auto end_time = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
     // Verify workflow completed in reasonable time (less than 5 seconds)

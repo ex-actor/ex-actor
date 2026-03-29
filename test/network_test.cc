@@ -491,7 +491,7 @@ TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
 
   // Update last_seen via gossip with current time
   uint64_t now_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
           .count();
   DispatchGossip(broker,
                  {{.alive = true, .last_seen_timestamp_ms = now_ms, .node_id = 1, .address = "tcp://127.0.0.1:7361"}});
@@ -507,6 +507,58 @@ TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
                                          /*timeout_ms=*/10))
                       .value();
   EXPECT_TRUE(result.condition_met);
+
+  stdexec::sync_wait(broker.Stop());
+}
+
+// ============================================================
+// Timestamps use wall-clock (system_clock), not boot-relative (steady_clock).
+// A remote node gossips its last_seen using wall-clock epoch time.
+// If the local node measured time from a different epoch (e.g. steady_clock
+// whose epoch is boot time), the heartbeat-timeout subtraction would produce
+// a wildly wrong result and the node would be falsely declared dead.
+// ============================================================
+
+TEST(MessageBrokerTest, HeartbeatTimeoutUsesWallClockEpoch) {
+  auto config = MakeConfig("tcp://127.0.0.1:7365",
+                           /*contact_address=*/"tcp://127.0.0.1:7366",
+                           /*heartbeat_timeout_ms=*/5000);
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
+
+  // Simulate a remote node sending its last_seen in wall-clock (system_clock) epoch ms.
+  // This value is astronomically larger than any steady_clock uptime value.
+  uint64_t wall_clock_now_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+          .count();
+
+  DispatchGossip(broker, {{.alive = true,
+                           .last_seen_timestamp_ms = wall_clock_now_ms,
+                           .node_id = 1,
+                           .address = "tcp://127.0.0.1:7366"}});
+
+  // If the broker internally uses steady_clock, GetTimeMs() returns a small
+  // uptime-based value.  The check `GetTimeMs() - last_seen_timestamp_ms`
+  // would underflow (uint64_t) and be much larger than heartbeat_timeout_ms,
+  // falsely killing the node.  With system_clock, the difference is ~0 ms so
+  // the node stays alive.
+  broker.CheckHeartbeatTimeout();
+
+  exec::async_scope scope;
+  std::atomic<bool> condition_met = false;
+  scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
+      broker.WaitClusterState(
+          [](const ex_actor::ClusterState& state) {
+            return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+          },
+          /*timeout_ms=*/0) |
+      stdexec::then(
+          [&condition_met](const ex_actor::WaitClusterStateResult& res) { condition_met = res.condition_met; })));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  broker.CheckClusterStateWaiterTimeout();
+
+  stdexec::sync_wait(scope.on_empty());
+  EXPECT_TRUE(condition_met) << "Node 1 should still be alive; wall-clock timestamp was just set";
 
   stdexec::sync_wait(broker.Stop());
 }

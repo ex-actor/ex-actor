@@ -37,7 +37,7 @@ namespace ex_actor::internal {
 
 namespace {
 inline uint64_t GetTimeMs() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
       .count();
 }
 
@@ -125,7 +125,7 @@ void PeriodicalTaskScheduler::Loop(const std::stop_token& stop_token) {
       continue;
     }
 
-    auto next_run = std::chrono::steady_clock::time_point(std::chrono::milliseconds(tasks_.top().next_run_ms));
+    auto next_run = std::chrono::system_clock::time_point(std::chrono::milliseconds(tasks_.top().next_run_ms));
     cv_.wait_until(lock, next_run, [&] { return stop_token.stop_requested(); });
 
     if (stop_token.stop_requested()) break;

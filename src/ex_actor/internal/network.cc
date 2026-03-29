@@ -274,6 +274,11 @@ void MessageBroker::BroadcastGossip() {
   gossip_message.from_node_id = this_node_id_;
   gossip_message.node_states.reserve(node_id_to_state_.size());
   for (const auto& [node_id, node_state] : node_id_to_state_) {
+    if (!node_state.alive) {
+      // Only broadcast alive nodes. Each node determines the liveness of its peers independently by heartbeat timeout.
+      // As a result, a node will only be considered dead when no one can see it.
+      continue;
+    }
     gossip_message.node_states.emplace_back(node_state);
   }
   BrokerMessage broker_msg {.variant = std::move(gossip_message)};
@@ -360,17 +365,10 @@ void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_messag
     EXA_THROW_CHECK_EQ(cur_node_state.address, incoming_node_state.address)
         << fmt_lib::format("Node {:#x} has conflicting address, {} vs {}.", cur_node_state.node_id,
                            cur_node_state.address, incoming_node_state.address);
-    bool new_node_dead = cur_node_state.alive && !incoming_node_state.alive;
-    if (!incoming_node_state.alive) {
-      // now if a node dead, it never comes back alive
-      // TODO: support re-activation of dead nodes
-      cur_node_state.alive = false;
-    }
+    EXA_THROW_CHECK(incoming_node_state.alive)
+        << fmt_lib::format("Invalid gossip message: node {:#x} is dead", incoming_node_state.node_id);
     cur_node_state.last_seen_timestamp_ms =
         std::max(cur_node_state.last_seen_timestamp_ms, incoming_node_state.last_seen_timestamp_ms);
-    if (new_node_dead) {
-      OnNodeConnectionLost(incoming_node_state.node_id);
-    }
   }
 }
 

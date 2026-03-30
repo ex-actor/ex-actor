@@ -68,7 +68,7 @@
       "scriptEnv": [
         {
           "name": "CPM_SOURCE_CACHE",
-          "value": "${HOME}/.cpm/cache"
+          "value": "${HOME}/.cache/CPM"
         }
       ]
     }

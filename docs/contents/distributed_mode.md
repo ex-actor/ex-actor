@@ -99,13 +99,13 @@ The process will block on `ex_actor::WaitOsExitSignal()`. You should kill them m
 
 ## Fault tolerance
 
-When a node can't be reached by any node in the cluster, it's considered dead, all in-flight remote calls will throw `ex_actor::ConnectionLost`, by catching this exception you can handle the failure gracefully.
+When a node can't be reached by any node in the cluster, it's considered dead, all in-flight remote calls will throw `ex_actor::NetworkError`, by catching this exception you can handle the failure gracefully. (`ex_actor::ConnectionLost` is a type alias kept for backward compatibility.)
 
 ```cpp
 try {
   co_await ref.Send<&YourClass::Method>();
-} catch (const ex_actor::ConnectionLost& e) {
-  // e.node_id tells you which node was lost
+} catch (const ex_actor::NetworkError& e) {
+  // e.remote_node_id tells you which node was lost
   // e.what() has a human-readable message
 }
 ```
@@ -116,7 +116,7 @@ For example, now a node dies, you want to recreate your actor to another node:
 bool connection_lost = false;
 try {
   co_await ref.Send<&YourClass::Method>();
-} catch (const ex_actor::ConnectionLost& e) {
+} catch (const ex_actor::NetworkError& e) {
   connection_lost = true;
 }
 

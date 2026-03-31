@@ -28,6 +28,7 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
   ex_actor::ClusterConfig cluster_config {
       .listen_address = listen_address,
       .contact_node_address = contact_address,
+      .network_config = {.heartbeat_timeout_ms = 5000},
   };
   ex_actor::Init(shared_pool->GetScheduler());
   co_await ex_actor::StartOrJoinCluster(cluster_config);

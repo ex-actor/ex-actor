@@ -9,6 +9,7 @@
 
 #include "ex_actor/api.h"
 
+namespace ex = stdexec;
 namespace fs = std::filesystem;
 
 namespace {
@@ -142,5 +143,40 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
       << log_contents;
 
   // Clean up
+  CleanupLogFile(log_file);
+}
+
+class DummyActor {
+ public:
+  void Foo() {}
+};
+
+TEST(LoggingTest, AttachDebugInfoLineNumber) {
+  std::string log_file = "test_log_debug_info.txt";
+  CleanupLogFile(log_file);
+  ex_actor::ConfigureLogging({.log_file_path = log_file});
+  ex_actor::Init(1);
+
+  auto coroutine = [&]() -> exec::task<void> {
+    auto actor = co_await ex_actor::Spawn<DummyActor>();
+
+    // The next line's line number will be captured
+    int line = __LINE__ + 1;
+    co_await actor.Send<&DummyActor::Foo>().AttachDebugInfo("verify line number");
+
+    ex_actor::internal::GlobalLogger()->flush();
+    std::string log_contents = ReadFile(log_file);
+
+    // Verify that the log contains the correct file name and line number
+    std::string expected_loc = "logging_test.cc:" + std::to_string(line);
+    EXPECT_TRUE(Contains(log_contents, expected_loc)) << "Log should contain " << expected_loc << ". Log contents:\n"
+                                                      << log_contents;
+    EXPECT_TRUE(Contains(log_contents, "verify line number"));
+    EXPECT_TRUE(Contains(log_contents, "[&DummyActor::Foo]"));
+    co_return;
+  };
+
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
   CleanupLogFile(log_file);
 }

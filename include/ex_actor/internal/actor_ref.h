@@ -16,6 +16,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <source_location>
+#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -25,8 +27,41 @@
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
-
 namespace ex_actor::internal {
+
+template <typename Sender>
+class [[nodiscard]] SendBuilder : public ex::sender_t {
+ public:
+  // Use stdexec::env<> instead of deprecated empty_env
+  using completion_signatures = stdexec::completion_signatures_of_t<Sender, stdexec::env<>>;
+
+  explicit SendBuilder(Sender&& sender, std::string op_name = "")
+      : sender_(std::move(sender)), op_name_(std::move(op_name)) {}
+
+  auto AttachDebugInfo(std::string message, std::source_location loc = std::source_location::current()) && {
+    log::LogAttachDebugInfo(op_name_, message, loc);
+    return std::move(*this);
+  }
+
+  template <ex::receiver R>
+  auto connect(R&& receiver) && {
+    return ex::connect(std::move(sender_), std::forward<R>(receiver));
+  }
+
+  auto get_env() const noexcept { return stdexec::get_env(sender_); }
+
+  // Forward co_await to the underlying sender.
+  auto operator co_await() && -> decltype(auto) {
+    return [](Sender&& s) -> exec::task<typename decltype(stdexec::sync_wait(std::declval<Sender>()))::value_type> {
+      co_return co_await std::move(s);
+    }(std::move(sender_));
+  }
+
+ private:
+  Sender sender_;
+  std::string op_name_;
+};
+
 template <class UserClass>
 class ActorRef : public LocalActorRef<UserClass> {
  public:
@@ -90,7 +125,8 @@ class ActorRef : public LocalActorRef<UserClass> {
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
     // Add a fallback inline_scheduler for it.
-    return WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...));
+    return SendBuilder(WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...)),
+                       GetUniqueNameForFunction<kMethod>());
   }
 
   /**

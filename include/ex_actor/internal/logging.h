@@ -200,6 +200,23 @@ void Critical(FormatWithLoc<std::type_identity_t<Args>...> fmt_with_loc, Args&&.
                                 std::forward<Args>(args)...);
 }
 
+/**
+ * @brief Special log function for AttachDebugInfo feature.
+ */
+inline void LogAttachDebugInfo(const std::string& op_name, const std::string& message,
+                               const std::source_location& loc) {
+  std::string_view name = op_name;
+  auto pos = name.find("kFunc = ");
+  if (pos != std::string_view::npos) {
+    name.remove_prefix(pos + 8);
+    auto end = name.find_first_of(";]");
+    if (end != std::string_view::npos) {
+      name = name.substr(0, end);
+    }
+  }
+  internal::GlobalLogger()->log(ToSpdlogSourceLoc(loc), spdlog::level::info, "DebugInfo [{}] - {}", name, message);
+}
+
 }  // namespace ex_actor::internal::log
 
 // Backward-compatibility aliases — these namespaces were removed in favor of ex_actor.

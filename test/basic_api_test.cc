@@ -202,3 +202,23 @@ TEST(BasicApiTest, ActorCanBePolymorphic) {
   };
   ex::sync_wait(coroutine());
 }
+
+TEST(BasicApiTest, SendWithDebugInfo) {
+  auto coroutine = []() -> exec::task<void> {
+    auto counter = co_await ex_actor::Spawn<Counter>();
+
+    // Test Send with AttachDebugInfo
+    auto res = co_await counter.Send<&Counter::GetValue>().AttachDebugInfo("Checking initial value");
+    EXPECT_EQ(res, 0);
+
+    co_await counter.Send<&Counter::Add>(10).AttachDebugInfo("Adding 10 to counter");
+
+    res = co_await counter.Send<&Counter::GetValue>().AttachDebugInfo("Checking value after add");
+    EXPECT_EQ(res, 10);
+
+    co_return;
+  };
+  ex_actor::Init(/*thread_pool_size=*/10);
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}

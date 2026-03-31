@@ -203,18 +203,8 @@ void Critical(FormatWithLoc<std::type_identity_t<Args>...> fmt_with_loc, Args&&.
 /**
  * @brief Special log function for AttachDebugInfo feature.
  */
-inline void LogAttachDebugInfo(const std::string& op_name, const std::string& message,
-                               const std::source_location& loc) {
-  std::string_view name = op_name;
-  auto pos = name.find("kFunc = ");
-  if (pos != std::string_view::npos) {
-    name.remove_prefix(pos + 8);
-    auto end = name.find_first_of(";]");
-    if (end != std::string_view::npos) {
-      name = name.substr(0, end);
-    }
-  }
-  internal::GlobalLogger()->log(ToSpdlogSourceLoc(loc), spdlog::level::info, "DebugInfo [{}] - {}", name, message);
+inline void LogAttachDebugInfo(std::string_view message, std::source_location loc) {
+  internal::GlobalLogger()->log(ToSpdlogSourceLoc(loc), spdlog::level::info, "DebugInfo: {}", message);
 }
 
 }  // namespace ex_actor::internal::log

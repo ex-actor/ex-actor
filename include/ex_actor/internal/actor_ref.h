@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <source_location>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -27,6 +28,7 @@
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
+
 namespace ex_actor::internal {
 
 template <typename Sender>
@@ -38,8 +40,8 @@ class [[nodiscard]] SendBuilder : public ex::sender_t {
   explicit SendBuilder(Sender&& sender, std::string op_name = "")
       : sender_(std::move(sender)), op_name_(std::move(op_name)) {}
 
-  auto AttachDebugInfo(std::string message, std::source_location loc = std::source_location::current()) && {
-    log::LogAttachDebugInfo(op_name_, message, loc);
+  auto AttachDebugInfo(std::string_view message, std::source_location loc = std::source_location::current()) && {
+    log::LogAttachDebugInfo(message, loc);
     return std::move(*this);
   }
 
@@ -49,13 +51,6 @@ class [[nodiscard]] SendBuilder : public ex::sender_t {
   }
 
   auto get_env() const noexcept { return stdexec::get_env(sender_); }
-
-  // Forward co_await to the underlying sender.
-  auto operator co_await() && -> decltype(auto) {
-    return [](Sender&& s) -> exec::task<typename decltype(stdexec::sync_wait(std::declval<Sender>()))::value_type> {
-      co_return co_await std::move(s);
-    }(std::move(sender_));
-  }
 
  private:
   Sender sender_;

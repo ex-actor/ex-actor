@@ -172,7 +172,6 @@ TEST(LoggingTest, AttachDebugInfoLineNumber) {
     EXPECT_TRUE(Contains(log_contents, expected_loc)) << "Log should contain " << expected_loc << ". Log contents:\n"
                                                       << log_contents;
     EXPECT_TRUE(Contains(log_contents, "verify line number"));
-    EXPECT_TRUE(Contains(log_contents, "[&DummyActor::Foo]"));
     co_return;
   };
 

@@ -925,7 +925,7 @@ function(CPMAddPackage)
 
     else()
       # Enable shallow clone when GIT_TAG is not a commit hash. Our guess may not be accurate, but
-      # it should guarantee no commit hash get mis-detected.
+      # it should guarantee no commit hash get misdetected.
       if(NOT DEFINED CPM_ARGS_GIT_SHALLOW)
         cpm_is_git_tag_commit_hash("${CPM_ARGS_GIT_TAG}" IS_HASH)
         if(NOT ${IS_HASH})

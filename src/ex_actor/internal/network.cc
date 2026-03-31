@@ -287,11 +287,17 @@ void MessageBroker::BroadcastGossip() {
   for (uint64_t node_id : node_ids) {
     auto& node_state = MapAt(node_id_to_state_, node_id);
     auto& socket = MapAt(node_id_to_send_socket_, node_id);
-    EXA_THROW_CHECK(socket.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::none));
+    auto result = socket.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::dontwait);
+    if (!result.has_value()) {
+      log::Warn("Node {:#x} failed to send gossip to node {:#x}: send buffer full", this_node_id_, node_id);
+    }
   }
   // no matter the contact node is in `node_id_to_state_` or not, we always send a copy to it
   if (contact_node_send_socket_.handle() != nullptr) {
-    EXA_THROW_CHECK(contact_node_send_socket_.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::none));
+    auto result = contact_node_send_socket_.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::dontwait);
+    if (!result.has_value()) {
+      log::Warn("Node {:#x} failed to send gossip to contact node: send buffer full", this_node_id_);
+    }
   }
 }
 
@@ -426,7 +432,7 @@ void MessageBroker::OnNodeConnectionLost(uint64_t node_id) {
   for (auto it : requests_to_fail) {
     auto& [request_id, request] = *it;
     request.exception_ptr = std::make_exception_ptr(
-        ConnectionLost(node_id, fmt_lib::format("Node {:#x} is dead, cannot complete request", node_id)));
+        NetworkError(node_id, fmt_lib::format("Node {:#x} is dead, cannot complete request", node_id)));
     // this will wake up the coroutine and erase the iterator, don't use it after this
     request.sem.Acquire(1);
   }
@@ -446,11 +452,16 @@ uint64_t MessageBroker::SendTwoWayMessage(uint64_t node_id, ByteBuffer data) {
                             }};
   auto socket_it = node_id_to_send_socket_.find(node_id);
   if (socket_it == node_id_to_send_socket_.end()) {
-    throw ConnectionLost(node_id, fmt_lib::format("Node {:#x} is trying to send request to an unconnected node {:#x}",
-                                                  this_node_id_, node_id));
+    throw NetworkError(node_id, fmt_lib::format("Node {:#x} is trying to send request to an unconnected node {:#x}",
+                                                this_node_id_, node_id));
   }
   auto& [target_node_id, socket] = *socket_it;
-  EXA_THROW_CHECK(socket.send(ByteBufferToZmqBuffer(Serialize(broker_msg)), zmq::send_flags::none));
+  auto result = socket.send(ByteBufferToZmqBuffer(Serialize(broker_msg)), zmq::send_flags::dontwait);
+  if (!result.has_value()) {
+    throw NetworkError(node_id,
+                       fmt_lib::format("Node {:#x} failed to send message to node {:#x}: send buffer full (EAGAIN)",
+                                       this_node_id_, node_id));
+  }
   return request_id;
 }
 
@@ -479,7 +490,11 @@ void MessageBroker::SendReply(uint64_t request_node_id, uint64_t request_id, Byt
                                 .request_id = request_id,
                                 .payload = std::move(data),
                             }};
-  EXA_THROW_CHECK(socket.send(ByteBufferToZmqBuffer(Serialize(broker_msg)), zmq::send_flags::none));
+  auto result = socket.send(ByteBufferToZmqBuffer(Serialize(broker_msg)), zmq::send_flags::dontwait);
+  if (!result.has_value()) {
+    log::Warn("Node {:#x} failed to send reply to node {:#x}: send buffer full. It's likely the remote node is dead.",
+              this_node_id_, request_node_id);
+  }
 }
 
 std::vector<NodeInfo> MessageBroker::BuildAliveNodeInfoList() const {

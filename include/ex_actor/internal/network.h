@@ -65,12 +65,13 @@ struct ClusterState {
 };
 
 /// Thrown when a remote operation fails due to the target node being
-/// unreachable (dead, timed-out heartbeat, connection refused, etc.).
-struct ConnectionLost : public std::runtime_error {
-  uint64_t node_id;
+/// unreachable (dead, timed-out heartbeat, connection refused, etc.),
+/// or when a network send operation cannot complete without blocking.
+struct NetworkError : public std::runtime_error {
+  uint64_t remote_node_id;
 
-  explicit ConnectionLost(uint64_t node_id, const std::string& message)
-      : std::runtime_error(message), node_id(node_id) {}
+  explicit NetworkError(uint64_t remote_node_id, const std::string& message)
+      : std::runtime_error(message), remote_node_id(remote_node_id) {}
 };
 
 struct WaitClusterStateResult {

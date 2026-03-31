@@ -78,7 +78,7 @@ TEST(MessageBrokerTest, SendRequestToUnconnectedNodeThrows) {
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   EXPECT_THAT([&]() { stdexec::sync_wait(broker.SendRequest(/*to_node_id=*/99, {})); },
-              testing::Throws<ex_actor::ConnectionLost>(testing::Property(
+              testing::Throws<ex_actor::NetworkError>(testing::Property(
                   &std::exception::what, testing::HasSubstr("trying to send request to an unconnected node"))));
 
   stdexec::sync_wait(broker.Stop());

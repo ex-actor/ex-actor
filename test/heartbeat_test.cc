@@ -58,8 +58,8 @@ int main(int argc, char** argv) {
         auto ping = ping_worker.Send<&PingWorker::Ping>("hello");
         std::ignore = co_await std::move(ping);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      } catch (const ex_actor::ConnectionLost& e) {
-        logging::Error("connection lost to node {:#x}: {}", e.node_id, e.what());
+      } catch (const ex_actor::NetworkError& e) {
+        logging::Error("connection lost to node {:#x}: {}", e.remote_node_id, e.what());
         break;
       }
     }

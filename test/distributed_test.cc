@@ -134,6 +134,7 @@ TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
     ex_actor::ClusterConfig cluster_config {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
     };
     ex_actor::ActorRegistry registry(/*thread_pool_size=*/4);
     co_await registry.StartOrJoinCluster(cluster_config);
@@ -175,6 +176,7 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     ex_actor::ClusterConfig cluster_config {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
     co_await registry.StartOrJoinCluster(cluster_config);
@@ -295,6 +297,7 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
     ex_actor::ClusterConfig cluster_config {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
     co_await registry.StartOrJoinCluster(cluster_config);
@@ -349,6 +352,7 @@ TEST(DistributedTest, ActorRefSerializationTest) {
     ex_actor::ClusterConfig cluster_config {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
     co_await registry.StartOrJoinCluster(cluster_config);
@@ -420,6 +424,7 @@ TEST(DistributedTest, DestroyRemoteActor) {
     ex_actor::ClusterConfig cluster_config {
         .listen_address = addresses.at(index),
         .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
     };
     ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
     co_await registry.StartOrJoinCluster(cluster_config);

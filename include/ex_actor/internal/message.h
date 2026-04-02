@@ -111,7 +111,6 @@ struct NetworkReply {
 // ===================================================
 
 struct NodeState {
-  bool alive = true;
   uint64_t last_seen_timestamp_ms = 0;
   uint64_t node_id = 0;
   std::string address;

@@ -148,6 +148,8 @@ class PeriodicalTaskScheduler {
  * @brief The network message broker, designed to be used as an Actor, so no locks are needed for the state.
  */
 class MessageBroker {
+  friend class MessageBrokerTestHelper;
+
  public:
   using RequestHandler = std::function<exec::task<ByteBuffer>(ByteBuffer)>;
 
@@ -225,6 +227,7 @@ class MessageBroker {
   ClusterConfig cluster_config_;
   uint64_t send_request_id_counter_ = 0;
 
+  // pending replies to peers that are not yet discovered.
   std::unordered_map</*node_id*/ uint64_t, std::vector<ReplyOperation>> deferred_replies_;
   std::unordered_map</*request_id*/ uint64_t, OutstandingRequest> outstanding_requests_;
 

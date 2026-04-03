@@ -121,6 +121,32 @@ std::string GetUniqueNameForFunction() {
 #endif
 }
 
+template <auto kMethod>
+consteval std::string_view GetShortMethodName() {
+#if defined(__GNUC__) || defined(__clang__)
+  std::string_view name = __PRETTY_FUNCTION__;
+  size_t start = name.find("kMethod = ");
+  if (start == std::string_view::npos) return "???";
+  start += 10; // len("kMethod = ")
+  if (name[start] == '&') start++;
+  size_t end = name.find_last_of("]");
+  if (end == std::string_view::npos) return name.substr(start);
+  name = name.substr(start, end - start);
+  // Strip compiler fluff like "; std::string_view = ..."
+  size_t fluff = name.find_first_of("; ");
+  if (fluff != std::string_view::npos) {
+    return name.substr(0, fluff);
+  }
+  return name;
+#elif defined(_MSC_VER)
+  std::string_view name = __FUNCSIG__;
+  // TODO: Implement for MSVC if needed, MSVC format is different
+  return name;
+#else
+  return "???";
+#endif
+}
+
 template <auto kFn>
 using FnReturnType = std::decay_t<typename Signature<decltype(kFn)>::ReturnType>;
 

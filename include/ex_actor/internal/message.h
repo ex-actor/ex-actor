@@ -62,6 +62,7 @@ struct ActorMethodCallRequest {
   std::string handler_key;
   uint64_t actor_id {};
   ByteBuffer serialized_args;  // serialized ActorMethodCallArgs
+  log::DebugInfo debug_info;
 };
 
 struct ActorLookUpRequest {
@@ -90,6 +91,7 @@ struct ActorMethodCallReply {
   bool success {};
   ByteBuffer serialized_result;  // serialized ActorMethodReturnValue
   std::string error;
+  std::optional<log::ActorExceptionData> actor_error;
 };
 
 struct ActorLookUpReply {

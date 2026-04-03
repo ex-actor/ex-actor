@@ -34,27 +34,47 @@ namespace ex_actor::internal {
 template <typename Sender>
 class [[nodiscard]] SendBuilder : public ex::sender_t {
  public:
-  // Use stdexec::env<> instead of deprecated empty_env
   using completion_signatures = stdexec::completion_signatures_of_t<Sender, stdexec::env<>>;
 
-  explicit SendBuilder(Sender&& sender, std::string op_name = "")
-      : sender_(std::move(sender)), op_name_(std::move(op_name)) {}
+  explicit SendBuilder(Sender&& sender, std::string_view method_name)
+      : sender_(std::move(sender)), method_name_(method_name) {}
 
   auto AttachDebugInfo(std::string_view message, std::source_location loc = std::source_location::current()) && {
-    log::LogAttachDebugInfo(message, loc);
+    user_context_ = std::string(message);
+    loc_ = loc;
     return std::move(*this);
   }
 
   template <ex::receiver R>
   auto connect(R&& receiver) && {
-    return ex::connect(std::move(sender_), std::forward<R>(receiver));
+    auto l_error = [method = std::move(method_name_), context = std::move(user_context_), loc = loc_](std::exception_ptr ep) {
+      try {
+        std::rethrow_exception(ep);
+      } catch (log::ActorException& e) {
+        e.AppendFrame(method, context, loc.file_name(), loc.line());
+        return ex::just_error(std::make_exception_ptr(std::move(e)));
+      } catch (const std::exception& e) {
+        log::ActorExceptionData data;
+        data.trace_id = (log::GetCurrentDebugInfo() ? log::GetCurrentDebugInfo()->trace_id : 0);
+        data.original_what = e.what();
+        data.original_type = typeid(e).name();
+        data.stack_trace.push_back(log::Frame{
+            .method_name = std::string(method), .user_context = context, .file = loc.file_name(), .line = loc.line()});
+        return ex::just_error(std::make_exception_ptr(log::ActorException(std::move(data))));
+      } catch (...) {
+        return ex::just_error(std::move(ep));
+      }
+    };
+    return ex::connect(ex::let_error(std::move(sender_), std::move(l_error)), std::forward<R>(receiver));
   }
 
   auto get_env() const noexcept { return stdexec::get_env(sender_); }
 
  private:
   Sender sender_;
-  std::string op_name_;
+  std::string_view method_name_;
+  std::optional<std::string> user_context_;
+  std::source_location loc_;
 };
 
 template <class UserClass>
@@ -121,7 +141,7 @@ class ActorRef : public LocalActorRef<UserClass> {
   {
     // Add a fallback inline_scheduler for it.
     return SendBuilder(WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...)),
-                       GetUniqueNameForFunction<kMethod>());
+                       GetShortMethodName<kMethod>());
   }
 
   /**
@@ -131,8 +151,15 @@ class ActorRef : public LocalActorRef<UserClass> {
   [[nodiscard]] ex::sender auto SendLocal(Args... args) const
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
+    return SendLocal<kMethod>(nullptr, std::move(args)...);
+  }
+
+  template <auto kMethod, class... Args>
+  [[nodiscard]] ex::sender auto SendLocal(std::shared_ptr<const log::DebugInfo> debug_info, Args... args) const
+    requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
+  {
     EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
-    return LocalActorRef<UserClass>::template SendLocal<kMethod>(std::move(args)...);
+    return LocalActorRef<UserClass>::template SendLocal<kMethod>(std::move(debug_info), std::move(args)...);
   }
 
   uint64_t GetNodeId() const { return node_id_; }
@@ -147,11 +174,16 @@ class ActorRef : public LocalActorRef<UserClass> {
       -> exec::task<typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type>
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
+    auto debug_info = log::GetCurrentDebugInfo();
+    if (!debug_info) {
+      debug_info = log::CreateNewDebugInfo();
+      log::SetCurrentDebugInfo(debug_info);
+    }
     if (this->IsEmpty()) [[unlikely]] {
       throw std::runtime_error("Empty ActorRef, cannot call method on it.");
     }
     if (node_id_ == this_node_id_) {
-      co_return co_await SendLocal<kMethod>(std::move(args)...);
+      co_return co_await SendLocal<kMethod>(std::move(debug_info), std::move(args)...);
     }
 
     // remote call
@@ -164,6 +196,7 @@ class ActorRef : public LocalActorRef<UserClass> {
         .handler_key = GetUniqueNameForFunction<kMethod>(),
         .actor_id = this->actor_id_,
         .serialized_args = Serialize(method_call_args),
+        .debug_info = *debug_info,
     }};
 
     using UnwrappedType = decltype(UnwrapReturnSenderIfNested<kMethod>())::type;
@@ -173,6 +206,9 @@ class ActorRef : public LocalActorRef<UserClass> {
 
     auto& ret = std::get<ActorMethodCallReply>(reply.variant);
     if (!ret.success) {
+      if (ret.actor_error) {
+        throw log::ActorException(std::move(*ret.actor_error));
+      }
       EXA_THROW << "Got error from remote actor on node " << node_id_ << ": " << ret.error;
     }
     if constexpr (std::is_void_v<UnwrappedType>) {

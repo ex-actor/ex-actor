@@ -18,9 +18,12 @@
 #include <memory>
 #include <source_location>
 #include <sstream>
+#include <iomanip>
+#include <exception>
 
 #include <rfl/to_view.hpp>
 #include <spdlog/spdlog.h>
+#include "ex_actor/internal/alias.h"
 
 namespace ex_actor {
 enum class LogLevel : uint8_t {
@@ -200,12 +203,94 @@ void Critical(FormatWithLoc<std::type_identity_t<Args>...> fmt_with_loc, Args&&.
                                 std::forward<Args>(args)...);
 }
 
+struct DebugInfo {
+  uint64_t trace_id = 0;
+};
+
 /**
- * @brief Special log function for AttachDebugInfo feature.
+ * @brief Structured data representing an exception in the actor system.
+ * Carries the original error message and the accumulated distributed stack trace.
  */
-inline void LogAttachDebugInfo(std::string_view message, std::source_location loc) {
-  internal::GlobalLogger()->log(ToSpdlogSourceLoc(loc), spdlog::level::info, "DebugInfo: {}", message);
-}
+struct Frame {
+  std::string method_name;
+  std::optional<std::string> user_context;
+  std::string file;
+  uint32_t line = 0;
+
+  std::string ToString() const {
+    std::string short_file = file;
+    // Heuristic: relative paths from common root directories
+    for (const char* p : {"/test/", "/src/", "/include/"}) {
+      size_t pos = file.find(p);
+      if (pos != std::string::npos) {
+        short_file = file.substr(pos + 1);
+        break;
+      }
+    }
+
+    auto location = (!short_file.empty()) ? fmt_lib::format(" @ {}:{}", short_file, line) : "";
+    auto context = user_context.has_value() && !user_context->empty()
+                       ? fmt_lib::format(" ({})", *user_context)
+                       : "";
+    return fmt_lib::format("{}{}{}", method_name, context, location);
+  }
+};
+
+struct ActorExceptionData {
+  uint64_t trace_id = 0;
+  std::string original_what;
+  std::string original_type;
+  std::vector<Frame> stack_trace;
+};
+
+class ActorException : public std::exception {
+ public:
+  explicit ActorException(ActorExceptionData data) : data_(std::move(data)) {
+    UpdateMessage();
+  }
+
+  const char* what() const noexcept override { return msg_.c_str(); }
+  const ActorExceptionData& GetData() const { return data_; }
+
+  void AppendFrame(std::string_view method_name, 
+                   std::optional<std::string_view> user_context = std::nullopt,
+                   std::string_view file = "", uint32_t line = 0) {
+    data_.stack_trace.push_back(Frame{
+        .method_name = std::string(method_name),
+        .user_context = user_context.has_value() 
+                         ? std::make_optional(std::string(*user_context)) 
+                         : std::nullopt,
+        .file = std::string(file),
+        .line = line});
+    UpdateMessage();
+  }
+
+ private:
+  void UpdateMessage() {
+    std::ostringstream oss;
+    oss << "ActorException: [" << data_.original_type << "] " << data_.original_what << "\n";
+    oss << "Trace:";
+    for (size_t i = 0; i < data_.stack_trace.size(); ++i) {
+      oss << "\n  #" << std::left << std::setw(2) << i << data_.stack_trace[i].ToString();
+    }
+    msg_ = oss.str();
+  }
+
+  ActorExceptionData data_;
+  std::string msg_;
+};
+
+std::shared_ptr<const DebugInfo> GetCurrentDebugInfo();
+void SetCurrentDebugInfo(std::shared_ptr<const DebugInfo> info);
+void ClearCurrentDebugInfo();
+std::shared_ptr<const DebugInfo> CreateNewDebugInfo();
+
+/**
+ * @brief 
+ * Deprecated as we shift towards zero-overhead forward tracing.
+ */
+[[deprecated("Use SendBuilder::AttachDebugInfo instead")]] 
+void LogAttachDebugInfo(std::string_view message, std::source_location loc = std::source_location::current());
 
 }  // namespace ex_actor::internal::log
 

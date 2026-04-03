@@ -2,6 +2,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include <random>
+
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
@@ -59,4 +61,21 @@ void InstallFallbackExceptionHandler() {
     std::abort();
   });
 };
+
+namespace log {
+thread_local std::shared_ptr<const DebugInfo> kCurrentDebugInfo;
+std::shared_ptr<const DebugInfo> GetCurrentDebugInfo() { return kCurrentDebugInfo; }
+void SetCurrentDebugInfo(std::shared_ptr<const DebugInfo> info) { kCurrentDebugInfo = std::move(info); }
+void ClearCurrentDebugInfo() { kCurrentDebugInfo.reset(); }
+
+std::shared_ptr<const DebugInfo> CreateNewDebugInfo() {
+  static thread_local std::mt19937_64 engine(std::random_device {}());
+  return std::make_shared<const DebugInfo>(DebugInfo {.trace_id = engine()});
+}
+
+void LogAttachDebugInfo(std::string_view message, std::source_location loc) {
+  internal::GlobalLogger()->log(ToSpdlogSourceLoc(loc), spdlog::level::info, "DebugInfo (Legacy): {}", message);
+}
+}  // namespace log
+
 }  // namespace ex_actor::internal

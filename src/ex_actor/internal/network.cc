@@ -54,6 +54,12 @@ ByteBuffer ZmqMsgToByteBuffer(zmq::message_t&& msg) {
 /// non-copy, return a view of the ByteBuffer
 zmq::const_buffer ByteBufferToZmqBuffer(const ByteBuffer& bytes) { return zmq::buffer(bytes.data(), bytes.size()); }
 
+/// All sockets are configured with unlimited sndhwm, so send should never fail with EAGAIN.
+void ZmqSendOrDie(zmq::socket_t& socket, zmq::const_buffer buf) {
+  auto result = socket.send(buf, zmq::send_flags::dontwait);
+  EXA_THROW_CHECK(result.has_value()) << "ZMQ send failed unexpectedly (sndhwm should be unlimited)";
+}
+
 }  // namespace
 
 // ----------------------RecvSocketPuller--------------------------
@@ -148,14 +154,13 @@ void PeriodicalTaskScheduler::Loop(const std::stop_token& stop_token) {
 MessageBroker::MessageBroker(uint64_t this_node_id, ClusterConfig cluster_config)
     : this_node_id_(this_node_id), cluster_config_(std::move(cluster_config)) {
   EXA_THROW_CHECK(!cluster_config_.listen_address.empty()) << "listen_address must not be empty";
-  node_id_to_state_[this_node_id_] = {.alive = true,
-                                      .last_seen_timestamp_ms = GetTimeMs(),
-                                      .node_id = this_node_id_,
-                                      .address = cluster_config_.listen_address};
+  node_id_to_state_[this_node_id_] = {
+      .last_seen_timestamp_ms = GetTimeMs(), .node_id = this_node_id_, .address = cluster_config_.listen_address};
   if (!cluster_config_.contact_node_address.empty()) {
     EXA_THROW_CHECK_NE(cluster_config_.contact_node_address, cluster_config_.listen_address);
     contact_node_send_socket_ = zmq::socket_t(zmq_context_, zmq::socket_type::dealer);
     contact_node_send_socket_.set(zmq::sockopt::linger, 0);
+    contact_node_send_socket_.set(zmq::sockopt::sndhwm, 0);
     contact_node_send_socket_.connect(cluster_config_.contact_node_address);
   }
 }
@@ -251,7 +256,7 @@ std::vector<uint64_t> MessageBroker::GetRandomPeers(size_t fanout) {
   std::vector<uint64_t> node_ids;
   node_ids.reserve(node_id_to_state_.size());
   for (const auto& [node_id, node_state] : node_id_to_state_) {
-    if (node_id != this_node_id_ && node_state.alive) {
+    if (node_id != this_node_id_) {
       node_ids.emplace_back(node_id);
     }
   }
@@ -274,11 +279,6 @@ void MessageBroker::BroadcastGossip() {
   gossip_message.from_node_id = this_node_id_;
   gossip_message.node_states.reserve(node_id_to_state_.size());
   for (const auto& [node_id, node_state] : node_id_to_state_) {
-    if (!node_state.alive) {
-      // Only broadcast alive nodes. Each node determines the liveness of its peers independently by heartbeat timeout.
-      // As a result, a node will only be considered dead when no one can see it.
-      continue;
-    }
     gossip_message.node_states.emplace_back(node_state);
   }
   BrokerMessage broker_msg {.variant = std::move(gossip_message)};
@@ -287,34 +287,30 @@ void MessageBroker::BroadcastGossip() {
   for (uint64_t node_id : node_ids) {
     auto& node_state = MapAt(node_id_to_state_, node_id);
     auto& socket = MapAt(node_id_to_send_socket_, node_id);
-    auto result = socket.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::dontwait);
-    if (!result.has_value()) {
-      log::Warn("Node {:#x} failed to send gossip to node {:#x}: send buffer full", this_node_id_, node_id);
-    }
+    ZmqSendOrDie(socket, ByteBufferToZmqBuffer(serialized));
   }
   // no matter the contact node is in `node_id_to_state_` or not, we always send a copy to it
   if (contact_node_send_socket_.handle() != nullptr) {
-    auto result = contact_node_send_socket_.send(ByteBufferToZmqBuffer(serialized), zmq::send_flags::dontwait);
-    if (!result.has_value()) {
-      log::Warn("Node {:#x} failed to send gossip to contact node: send buffer full", this_node_id_);
-    }
+    ZmqSendOrDie(contact_node_send_socket_, ByteBufferToZmqBuffer(serialized));
   }
 }
 
 void MessageBroker::CheckHeartbeatTimeout() {
   auto now_ms = GetTimeMs();
+  std::vector<uint64_t> nodes_to_remove;
   for (auto& [node_id, state] : node_id_to_state_) {
     // When using system_clock, remote timestamps may be slightly ahead of local clock due to
     // clock skew across machines. Treat future timestamps as "just seen" to avoid unsigned
     // underflow in the subtraction, which would falsely trigger a heartbeat timeout.
-    if (!state.alive ||                            // already dead
-        node_id == this_node_id_ ||                // ourselves
+    if (node_id == this_node_id_ ||                // ourselves
         state.last_seen_timestamp_ms >= now_ms ||  // timestamp in the future due to clock skew
         now_ms - state.last_seen_timestamp_ms < cluster_config_.network_config.heartbeat_timeout_ms  // not timeout yet
     ) {
       continue;
     }
-    MapAt(node_id_to_state_, node_id).alive = false;
+    nodes_to_remove.push_back(node_id);
+  }
+  for (uint64_t node_id : nodes_to_remove) {
     OnNodeConnectionLost(node_id);
   }
 }
@@ -334,6 +330,7 @@ void MessageBroker::StartRecvSocketPuller() {
   zmq::socket_t recv_socket {zmq_context_, zmq::socket_type::dealer};
   recv_socket.bind(cluster_config_.listen_address);
   recv_socket.set(zmq::sockopt::linger, 0);
+  recv_socket.set(zmq::sockopt::sndhwm, 0);
   log::Info("Node {:#x}'s recv socket bound to {}", this_node_id_, cluster_config_.listen_address);
 
   recv_socket_puller_ = std::make_unique<RecvSocketPuller>(std::move(recv_socket), [this](ByteBuffer raw) {
@@ -357,10 +354,6 @@ void MessageBroker::StartPeriodicalTaskScheduler() {
 void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_message) {
   for (const auto& incoming_node_state : gossip_message.node_states) {
     auto [iter, inserted] = node_id_to_state_.try_emplace(incoming_node_state.node_id, incoming_node_state);
-    if (inserted && !incoming_node_state.alive) {
-      // a new dead node found, ignore it
-      continue;
-    }
     if (inserted) {
       // new alive node found
       OnNodeAlive(incoming_node_state.node_id);
@@ -371,8 +364,6 @@ void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_messag
     EXA_THROW_CHECK_EQ(cur_node_state.address, incoming_node_state.address)
         << fmt_lib::format("Node {:#x} has conflicting address, {} vs {}.", cur_node_state.node_id,
                            cur_node_state.address, incoming_node_state.address);
-    EXA_THROW_CHECK(incoming_node_state.alive)
-        << fmt_lib::format("Invalid gossip message: node {:#x} is dead", incoming_node_state.node_id);
     cur_node_state.last_seen_timestamp_ms =
         std::max(cur_node_state.last_seen_timestamp_ms, incoming_node_state.last_seen_timestamp_ms);
   }
@@ -403,6 +394,7 @@ void MessageBroker::OnNodeAlive(uint64_t node_id) {
   // Create send socket
   auto& socket = (node_id_to_send_socket_[new_node.node_id] = zmq::socket_t(zmq_context_, zmq::socket_type::dealer));
   socket.set(zmq::sockopt::linger, 0);
+  socket.set(zmq::sockopt::sndhwm, 0);
   socket.connect(new_node.address);
 
   EvaluateClusterStateWaiters();
@@ -436,8 +428,11 @@ void MessageBroker::OnNodeConnectionLost(uint64_t node_id) {
     // this will wake up the coroutine and erase the iterator, don't use it after this
     request.sem.Acquire(1);
   }
-  deferred_replies_.erase(node_id);
+  node_id_to_state_.erase(node_id);
   node_id_to_send_socket_.erase(node_id);
+
+  // `deferred_replies_` should not be cleared.
+  // Because the node might be alive again, the death might just be a transient network issue.
 
   EvaluateClusterStateWaiters();
 }
@@ -456,26 +451,15 @@ uint64_t MessageBroker::SendTwoWayMessage(uint64_t node_id, ByteBuffer data) {
                                                 this_node_id_, node_id));
   }
   auto& [target_node_id, socket] = *socket_it;
-  auto result = socket.send(ByteBufferToZmqBuffer(Serialize(broker_msg)), zmq::send_flags::dontwait);
-  if (!result.has_value()) {
-    throw NetworkError(node_id,
-                       fmt_lib::format("Node {:#x} failed to send message to node {:#x}: send buffer full (EAGAIN)",
-                                       this_node_id_, node_id));
-  }
+  ZmqSendOrDie(socket, ByteBufferToZmqBuffer(Serialize(broker_msg)));
   return request_id;
 }
 
 void MessageBroker::SendReply(uint64_t request_node_id, uint64_t request_id, ByteBuffer data) {
   auto socket_it = node_id_to_send_socket_.find(request_node_id);
   if (socket_it == node_id_to_send_socket_.end()) {
-    // The requesting node connected to our recv socket and sent a request, but we haven't
-    // discovered it via gossip yet, so we have no send socket to reply through.
-    // This is possible because connection establishment is one-directional: when node A
-    // discovers us via gossip, it creates a DEALER socket and connects to our recv socket,
-    // allowing it to send requests immediately. However, gossip propagation is asynchronous,
-    // so we may not have received a gossip message containing node A's info yet.
-    // Buffer the reply until EstablishConnection() creates the reverse connection and
-    // the broker flushes it.
+    // It's possible due to the async nature of gossip protocol. When A discovers B via gossip, B may not discover A
+    // yet. Pend the reply until we discover the peer.
     deferred_replies_[request_node_id].push_back(ReplyOperation {
         .request_node_id = request_node_id,
         .request_id = request_id,
@@ -490,20 +474,14 @@ void MessageBroker::SendReply(uint64_t request_node_id, uint64_t request_id, Byt
                                 .request_id = request_id,
                                 .payload = std::move(data),
                             }};
-  auto result = socket.send(ByteBufferToZmqBuffer(Serialize(broker_msg)), zmq::send_flags::dontwait);
-  if (!result.has_value()) {
-    log::Warn("Node {:#x} failed to send reply to node {:#x}: send buffer full. It's likely the remote node is dead.",
-              this_node_id_, request_node_id);
-  }
+  ZmqSendOrDie(socket, ByteBufferToZmqBuffer(Serialize(broker_msg)));
 }
 
 std::vector<NodeInfo> MessageBroker::BuildAliveNodeInfoList() const {
   std::vector<NodeInfo> result;
   result.reserve(node_id_to_state_.size());
   for (const auto& [node_id, state] : node_id_to_state_) {
-    if (state.alive) {
-      result.push_back(NodeInfo {.node_id = node_id, .address = state.address});
-    }
+    result.push_back(NodeInfo {.node_id = node_id, .address = state.address});
   }
   return result;
 }

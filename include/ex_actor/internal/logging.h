@@ -45,7 +45,19 @@ spdlog::level::level_enum ToSpdlogLevel(LogLevel level);
 
 std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const LogConfig& config);
 
-std::unique_ptr<spdlog::logger>& GlobalLogger();
+/**
+ * @brief Get the global logger as a shared_ptr for thread-safe access.
+ */
+std::shared_ptr<spdlog::logger> GlobalLogger();
+
+/**
+ * @brief Configure the logging of ex_actor.
+ *
+ * This function is thread-safe and can be called at any time.
+ * Concurrent log operations will continue using the old logger until completion,
+ * while new operations use the new logger.
+ */
+void ConfigureLogging(const LogConfig& config = {});
 
 void InstallFallbackExceptionHandler();
 

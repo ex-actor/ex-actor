@@ -157,12 +157,6 @@ SenderOf<std::optional<ActorRef<UserClass>>> auto GetActorRefByName(const uint64
  */
 uint64_t GetNodeId();
 
-/**
- * @brief Configure the logging of ex_actor.
- * @note Not thread-safe, please call it only when no logs are printing.
- */
-void ConfigureLogging(const LogConfig& config = {});
-
 }  // namespace ex_actor
 
 // -----------template function implementations(non-template funcs are written in .cc file)-------------

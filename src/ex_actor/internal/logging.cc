@@ -1,5 +1,6 @@
 #include "ex_actor/internal/logging.h"
 
+#include <atomic>
 #include <spdlog/spdlog.h>
 
 #include "spdlog/sinks/basic_file_sink.h"
@@ -38,10 +39,23 @@ std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const ex_actor::LogConfi
   return logger;
 }
 
-std::unique_ptr<spdlog::logger>& GlobalLogger() {
-  static std::unique_ptr<spdlog::logger> global_logger = CreateLoggerUsingConfig({});
-  return global_logger;
+// Thread-safe global logger using atomic shared_ptr
+// This allows ConfigureLogging to atomically replace the logger while
+// concurrent log operations continue using the old logger safely.
+// The old logger is destroyed only when all references are released.
+static std::atomic<std::shared_ptr<spdlog::logger>> g_global_logger {
+  CreateLoggerUsingConfig({}).release()
+};
+
+std::shared_ptr<spdlog::logger> GlobalLogger() {
+  return g_global_logger.load(std::memory_order_acquire);
 }
+
+namespace ex_actor {
+void ConfigureLogging(const LogConfig& config) {
+  g_global_logger.store(CreateLoggerUsingConfig(config).release(), std::memory_order_release);
+}
+}  // namespace ex_actor
 
 void InstallFallbackExceptionHandler() {
   std::set_terminate([] {

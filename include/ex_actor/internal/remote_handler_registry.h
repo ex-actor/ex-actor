@@ -39,6 +39,7 @@ class RemoteActorRequestHandlerRegistry {
     TypeErasedActor* actor;
     ByteBuffer serialized_args;
     ActorRefSerdeContext actor_ref_serde_ctx;
+    std::shared_ptr<const log::DebugInfo> debug_info;
   };
   struct RemoteActorCreationHandlerContext {
     ByteBuffer serialized_args;
@@ -152,15 +153,26 @@ class RemoteFuncHandlerRegistrar {
     ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
         DeserializeFnArgs<kMethod>(context.serialized_args, context.actor_ref_serde_ctx);
 
-    if constexpr (std::is_void_v<UnwrappedType>) {
-      co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
-      co_return NetworkReply {ActorMethodCallReply {.success = true}};
-    } else {
-      auto return_value =
-          co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+    try {
+      if constexpr (std::is_void_v<UnwrappedType>) {
+        co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(context.debug_info),
+                                                                         std::move(call_args.args_tuple));
+        co_return NetworkReply {ActorMethodCallReply {.success = true}};
+      } else {
+        auto return_value = co_await context.actor->template CallActorMethodUseTuple<kMethod>(
+            std::move(context.debug_info), std::move(call_args.args_tuple));
+        co_return NetworkReply {ActorMethodCallReply {
+            .success = true,
+            .serialized_result = Serialize(ActorMethodReturnValue<UnwrappedType> {std::move(return_value)})}};
+      }
+    } catch (log::ActorException& e) {
       co_return NetworkReply {ActorMethodCallReply {
-          .success = true,
-          .serialized_result = Serialize(ActorMethodReturnValue<UnwrappedType> {std::move(return_value)})}};
+          .success = false, .error = e.what(), .actor_error = std::move(e.GetData())}};
+    } catch (const std::exception& e) {
+      co_return NetworkReply {
+          ActorMethodCallReply {.success = false, .error = e.what()}};
+    } catch (...) {
+      co_return NetworkReply {ActorMethodCallReply {.success = false, .error = "Unknown error"}};
     }
   };
 };

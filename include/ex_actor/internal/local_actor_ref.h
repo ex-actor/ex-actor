@@ -20,6 +20,7 @@
 
 #include "ex_actor/internal/actor.h"
 #include "ex_actor/internal/constants.h"
+#include "ex_actor/internal/alias.h"
 
 namespace ex_actor::internal {
 
@@ -66,14 +67,28 @@ class LocalActorRef {
   [[nodiscard]] ex::sender auto SendLocal(Args... args) const
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
+    return SendLocal<kMethod>(nullptr, std::move(args)...);
+  }
+
+  template <auto kMethod, class... Args>
+  [[nodiscard]] ex::sender auto SendLocal(std::shared_ptr<const log::DebugInfo> debug_info, Args... args) const
+    requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
+  {
     EXA_THROW_CHECK(!IsEmpty()) << "Empty LocalActorRef, cannot call method on it.";
     EXA_THROW_CHECK(type_erased_actor_ != nullptr)
         << "Local actor instance not set, it's typically because you converted a remote ActorRef to LocalActorRef.";
-    return type_erased_actor_->template CallActorMethod<kMethod>(std::move(args)...);
+    return type_erased_actor_->template CallActorMethodUseTuple<kMethod>(std::move(debug_info),
+                                                                        std::make_tuple(std::move(args)...));
   }
 
   bool IsEmpty() const { return is_empty_; }
   uint64_t GetActorId() const { return actor_id_; }
+
+  std::string Description() const {
+    if (is_empty_) return "Actor(empty)";
+    if (type_erased_actor_) return type_erased_actor_->Description();
+    return fmt_lib::format("Actor(id:{:#x},type:{})", actor_id_, typeid(UserClass).name());
+  }
 
  protected:
   bool is_empty_;

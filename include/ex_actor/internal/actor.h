@@ -42,16 +42,17 @@ class TypeErasedActor {
   virtual void PushMessage(ActorMessage* task) = 0;
   virtual exec::task<void> AsyncDestroy() = 0;
 
+  virtual void PullMailboxAndRun() = 0;
+  virtual std::string Description() const = 0;
+
   template <auto kMethod, class... Args>
   ex::sender auto CallActorMethod(Args... args);
 
   template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethodUseTuple(std::tuple<Args...> args_tuple);
+  ex::sender auto CallActorMethodUseTuple(std::shared_ptr<const log::DebugInfo> debug_info, std::tuple<Args...> args_tuple);
 
   const ActorConfig& GetActorConfig() const { return actor_config_; }
   void* GetUserClassInstanceAddress() const { return cached_user_class_instance_address_; }
-
-  virtual void PullMailboxAndRun() = 0;
 
  protected:
   void* cached_user_class_instance_address_ = nullptr;
@@ -262,19 +263,19 @@ class Actor : public TypeErasedActor {
     }
   }
 
-  std::string Description() {
+  std::string Description() const override {
     return fmt_lib::format("Actor {}(type:{},name:{})", (void*)this, typeid(UserClass).name(),
-                           actor_config_.actor_name.value_or("null"));
+                           actor_config_.actor_name.value_or("???"));
   }
 };  // class Actor
 
 template <auto kMethod, class... Args>
 ex::sender auto TypeErasedActor::CallActorMethod(Args... args) {
-  return CallActorMethodUseTuple<kMethod>(std::make_tuple(std::move(args)...));
+  return CallActorMethodUseTuple<kMethod>(nullptr, std::make_tuple(std::move(args)...));
 }
 
 template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::tuple<Args...> args_tuple) {
+ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::shared_ptr<const log::DebugInfo> debug_info, std::tuple<Args...> args_tuple) {
   using Sig = Signature<decltype(kMethod)>;
   using ReturnType = Sig::ReturnType;
   using UserClass = Sig::ClassType;
@@ -284,18 +285,53 @@ ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::tuple<Args...> arg
   EXA_THROW_CHECK(cached_user_class_instance_address_ != nullptr);
   auto* user_class_instance = static_cast<UserClass*>(cached_user_class_instance_address_);
 
+  auto log_and_propagate_error = [this, debug_info](std::exception_ptr ep) {
+    try {
+      std::rethrow_exception(ep);
+    } catch (log::ActorException& e) {
+      return ex::just_error(std::make_exception_ptr(std::move(e)));
+    } catch (const std::exception& e) {
+      log::ActorExceptionData data;
+      data.original_what = e.what();
+      data.original_type = typeid(e).name();
+      if (debug_info) {
+        data.trace_id = debug_info->trace_id;
+      }
+      // TODO: Consider integrating ActorConfig (e.g., actor_name) more deeply 
+      // into the distributed trace frames in the future if needed.
+      // TODO: Further refine and complete distributed mode tracing (e.g., across network boundaries).
+      log::Error("[Trace:{}] Initial failure in {}: {}", data.trace_id, this->Description(), e.what());
+      return ex::just_error(std::make_exception_ptr(log::ActorException(std::move(data))));
+    } catch (...) {
+      log::ActorExceptionData data;
+      data.original_what = "Unknown Exception";
+      data.original_type = "unknown";
+      if (debug_info) {
+        data.trace_id = debug_info->trace_id;
+      }
+      log::Error("[Trace:{}] Initial unknown failure in {}", data.trace_id, this->Description());
+      return ex::just_error(std::make_exception_ptr(log::ActorException(std::move(data))));
+    }
+  };
+
   if constexpr (kIsNested) {
-    return std::move(start) | ex::let_value([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {
+    return std::move(start) | ex::let_value([user_class_instance, args_tuple = std::move(args_tuple), debug_info = std::move(debug_info)]() mutable {
+             log::SetCurrentDebugInfo(debug_info);
+             struct Guard { ~Guard() { log::ClearCurrentDebugInfo(); } } guard;
              return std::apply(
                  [user_class_instance](auto&&... args) { return (user_class_instance->*kMethod)(std::move(args)...); },
                  std::move(args_tuple));
-           });
+           })
+           | ex::let_error(std::move(log_and_propagate_error));
   } else {
-    return std::move(start) | ex::then([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {
+    return std::move(start) | ex::then([user_class_instance, args_tuple = std::move(args_tuple), debug_info = std::move(debug_info)]() mutable {
+             log::SetCurrentDebugInfo(debug_info);
+             struct Guard { ~Guard() { log::ClearCurrentDebugInfo(); } } guard;
              return std::apply(
                  [user_class_instance](auto&&... args) { return (user_class_instance->*kMethod)(std::move(args)...); },
                  std::move(args_tuple));
-           });
+           })
+           | ex::let_error(std::move(log_and_propagate_error));
   }
 }
 }  // namespace ex_actor::internal

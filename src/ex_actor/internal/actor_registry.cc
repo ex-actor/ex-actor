@@ -163,9 +163,13 @@ exec::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorM
     auto task = handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
         .actor = actor_id_to_actor_.at(msg.actor_id).get(),
         .serialized_args = std::move(msg.serialized_args),
-        .actor_ref_serde_ctx = info});
+        .actor_ref_serde_ctx = info,
+        .debug_info = std::make_shared<const log::DebugInfo>(std::move(msg.debug_info))});
     auto reply = co_await std::move(task);
     co_return SerializeReply(reply);
+  } catch (log::ActorException& error) {
+    co_return SerializeReply(NetworkReply {ActorMethodCallReply {
+        .success = false, .error = error.what(), .actor_error = std::move(error.GetData())}});
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
     co_return SerializeReply(NetworkReply {ActorMethodCallReply {.success = false, .error = std::move(error_msg)}});

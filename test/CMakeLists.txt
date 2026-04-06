@@ -24,6 +24,7 @@ ex_actor_test(control_plane_isolation_test TIMEOUT 15)
 ex_actor_test(network_test TIMEOUT 15)
 ex_actor_test(skynet_test TIMEOUT 10)
 ex_actor_test(logging_test)
+ex_actor_test(debug_info_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # multi-process test

@@ -97,7 +97,7 @@ class RemoteFuncHandlerRegistrar {
                   "kActorCreateFn must return a non-fundamental value");
     auto check_fn_class = []<class C, auto kMemberFn>() {
       using MemberFnSig = Signature<decltype(kMemberFn)>;
-      static_assert(std::is_same_v<C, typename MemberFnSig::ClassType>,
+      static_assert(std::is_base_of_v<typename MemberFnSig::ClassType, C>,
                     "Actor methods' class does not match the create function's class");
     };
     (check_fn_class.template operator()<typename CreateFnSig::ReturnType, kActorMethods>(), ...);

@@ -32,8 +32,8 @@
 #include <exec/task.hpp>
 #include <zmq.hpp>
 
+#include "ex_actor/internal/basic_actor_ref.h"
 #include "ex_actor/internal/constants.h"
-#include "ex_actor/internal/local_actor_ref.h"
 #include "ex_actor/internal/message.h"
 #include "ex_actor/internal/util.h"
 
@@ -159,7 +159,7 @@ class MessageBroker {
   /**
    * @brief Called by the framework after the actor is spawned to inject the self actor ref.
    */
-  void OnSpawned(LocalActorRef<MessageBroker> self_actor_ref);
+  void OnSpawned(BasicActorRef<MessageBroker> self_actor_ref);
 
   /**
    * @brief Start the recv socket puller and periodical task scheduler.
@@ -242,7 +242,7 @@ class MessageBroker {
   zmq::socket_t contact_node_send_socket_;
   std::unordered_map<uint64_t, zmq::socket_t> node_id_to_send_socket_;
 
-  LocalActorRef<MessageBroker> self_actor_ref_;
+  BasicActorRef<MessageBroker> self_actor_ref_;
   RequestHandler request_handler_;
   exec::async_scope async_scope_;
   std::unique_ptr<RecvSocketPuller> recv_socket_puller_;

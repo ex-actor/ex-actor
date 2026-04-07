@@ -42,7 +42,7 @@ namespace ex_actor::internal {
 class ActorRegistryBackend {
  public:
   explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint64_t this_node_id,
-                                LocalActorRef<MessageBroker> broker_actor_ref);
+                                BasicActorRef<MessageBroker> broker_actor_ref);
 
   exec::task<void> AsyncDestroyAllActors();
 
@@ -149,7 +149,7 @@ class ActorRegistryBackend {
   /**
    * @brief Update the broker actor ref. Called when switching to distributed mode after init.
    */
-  void SetBrokerActorRef(LocalActorRef<MessageBroker> broker_actor_ref);
+  void SetBrokerActorRef(BasicActorRef<MessageBroker> broker_actor_ref);
 
   /**
    * @brief Handle a network request. Returns the serialized reply data.
@@ -177,7 +177,7 @@ class ActorRegistryBackend {
   std::mt19937 random_num_generator_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   uint64_t this_node_id_ = 0;
-  LocalActorRef<MessageBroker> broker_actor_ref_;
+  BasicActorRef<MessageBroker> broker_actor_ref_;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
 
@@ -217,7 +217,7 @@ class SpawnBuilder : public ex::sender_t {
   using completion_signatures = ex::completion_signatures<ex::set_value_t(ActorRef<UserClass>),
                                                           ex::set_error_t(std::exception_ptr), ex::set_stopped_t()>;
 
-  explicit SpawnBuilder(LocalActorRef<ActorRegistryBackend> backend_ref, Args... args)
+  explicit SpawnBuilder(BasicActorRef<ActorRegistryBackend> backend_ref, Args... args)
       : backend_ref_(std::move(backend_ref)), args_(std::move(args)...) {}
 
   SpawnBuilder& ToNode(uint64_t node_id) & {
@@ -269,7 +269,7 @@ class SpawnBuilder : public ex::sender_t {
         std::forward<Tuple>(args));
   }
 
-  LocalActorRef<ActorRegistryBackend> backend_ref_;
+  BasicActorRef<ActorRegistryBackend> backend_ref_;
   uint64_t node_id_ = 0;
   ActorConfig config_ {};
   std::tuple<Args...> args_;
@@ -355,9 +355,9 @@ class ActorRegistry {
   WorkSharingThreadPool control_plane_thread_pool_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   std::unique_ptr<Actor<MessageBroker>> broker_actor_;
-  LocalActorRef<MessageBroker> broker_actor_ref_;
+  BasicActorRef<MessageBroker> broker_actor_ref_;
   Actor<ActorRegistryBackend> backend_actor_;
-  LocalActorRef<ActorRegistryBackend> backend_actor_ref_;
+  BasicActorRef<ActorRegistryBackend> backend_actor_ref_;
 
   explicit ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeErasedActorScheduler> scheduler);
 };

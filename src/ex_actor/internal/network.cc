@@ -171,7 +171,7 @@ MessageBroker::~MessageBroker() {
   }
 }
 
-void MessageBroker::OnSpawned(LocalActorRef<MessageBroker> self_actor_ref) { self_actor_ref_ = self_actor_ref; }
+void MessageBroker::OnSpawned(BasicActorRef<MessageBroker> self_actor_ref) { self_actor_ref_ = self_actor_ref; }
 
 void MessageBroker::Start(RequestHandler request_handler) {
   EXA_THROW_CHECK(!self_actor_ref_.IsEmpty()) << "OnSpawned() must be called before Start()";

@@ -24,14 +24,14 @@
 namespace ex_actor::internal {
 
 template <class UserClass>
-class LocalActorRef {
+class BasicActorRef {
  public:
-  LocalActorRef() : is_empty_(true) {}
+  BasicActorRef() : is_empty_(true) {}
 
-  LocalActorRef(uint64_t actor_id, TypeErasedActor* actor)
+  BasicActorRef(uint64_t actor_id, TypeErasedActor* actor)
       : is_empty_(false), actor_id_(actor_id), type_erased_actor_(actor) {}
 
-  friend bool operator==(const LocalActorRef& lhs, const LocalActorRef& rhs) {
+  friend bool operator==(const BasicActorRef& lhs, const BasicActorRef& rhs) {
     if (lhs.is_empty_ && rhs.is_empty_) {
       return true;
     }
@@ -39,23 +39,23 @@ class LocalActorRef {
   }
 
   template <class U>
-  friend class LocalActorRef;
+  friend class BasicActorRef;
 
   template <class U>
   friend class ActorRef;
 
-  // Converting constructor from LocalActorRef<U> where U* is convertible to UserClass*
+  // Converting constructor from BasicActorRef<U> where U* is convertible to UserClass*
   template <class Other>
     requires std::is_convertible_v<Other*, UserClass*>
   // NOLINTNEXTLINE(google-explicit-constructor) - implicit conversion is intentional for polymorphism support
-  LocalActorRef(const LocalActorRef<Other>& other)
+  BasicActorRef(const BasicActorRef<Other>& other)
       : is_empty_(other.is_empty_), actor_id_(other.actor_id_), type_erased_actor_(other.type_erased_actor_) {}
 
   // Converting assignment operator - delegates to converting constructor
   template <class Other>
     requires std::is_convertible_v<Other*, UserClass*>
-  LocalActorRef<UserClass>& operator=(const LocalActorRef<Other>& other) {
-    *this = LocalActorRef<UserClass>(other);
+  BasicActorRef<UserClass>& operator=(const BasicActorRef<Other>& other) {
+    *this = BasicActorRef<UserClass>(other);
     return *this;
   }
 
@@ -66,9 +66,9 @@ class LocalActorRef {
   [[nodiscard]] ex::sender auto SendLocal(Args... args) const
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
-    EXA_THROW_CHECK(!IsEmpty()) << "Empty LocalActorRef, cannot call method on it.";
-    EXA_THROW_CHECK(type_erased_actor_ != nullptr)
-        << "Local actor instance not set, it's typically because you converted a remote ActorRef to LocalActorRef.";
+    EXA_THROW_CHECK(!IsEmpty()) << "Empty BasicActorRef, cannot call method on it.";
+    EXA_THROW_CHECK(type_erased_actor_ != nullptr) << "Underlying actor instance not set, it's typically because you "
+                                                      "converted a remote ActorRef to BasicActorRef.";
     return type_erased_actor_->template CallActorMethod<kMethod>(std::move(args)...);
   }
 
@@ -84,13 +84,13 @@ class LocalActorRef {
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
-using internal::LocalActorRef;
+using internal::BasicActorRef;
 }  // namespace ex_actor
 
 namespace std {
 template <class UserClass>
-struct hash<ex_actor::LocalActorRef<UserClass>> {
-  size_t operator()(const ex_actor::LocalActorRef<UserClass>& ref) const {
+struct hash<ex_actor::BasicActorRef<UserClass>> {
+  size_t operator()(const ex_actor::BasicActorRef<UserClass>& ref) const {
     if (ref.IsEmpty()) {
       return ex_actor::internal::kEmptyActorRefHashVal;
     }

@@ -27,12 +27,12 @@ namespace ex_actor::internal {
 
 // ----------------------ActorRegistryBackend--------------------------
 ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint64_t this_node_id,
-                                           LocalActorRef<MessageBroker> broker_actor_ref)
+                                           BasicActorRef<MessageBroker> broker_actor_ref)
     : scheduler_(std::move(scheduler)), this_node_id_(this_node_id), broker_actor_ref_(broker_actor_ref) {
   InitRandomNumGenerator();
 }
 
-void ActorRegistryBackend::SetBrokerActorRef(LocalActorRef<MessageBroker> broker_actor_ref) {
+void ActorRegistryBackend::SetBrokerActorRef(BasicActorRef<MessageBroker> broker_actor_ref) {
   broker_actor_ref_ = broker_actor_ref;
 }
 
@@ -224,7 +224,7 @@ exec::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_
   broker_actor_ = std::make_unique<Actor<MessageBroker>>(std::move(control_plane_scheduler), ActorConfig {},
                                                          this_node_id_, cluster_config);
 
-  broker_actor_ref_ = LocalActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
+  broker_actor_ref_ = BasicActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
   NotifyOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
 
   // Update the backend actor's broker ref so it can forward network requests

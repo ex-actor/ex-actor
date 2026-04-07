@@ -459,18 +459,16 @@ TEST(DistributedTest, DestroyRemoteActor) {
     co_await registry.DestroyActor(remote_actor);
 
     // After destroying, calling the actor should fail
-    EXPECT_THAT(
-        [&]() -> void { stdexec::sync_wait(remote_actor.Send<&PingWorker::Ping>("after_destroy")); },
-        Throws<std::exception>(Property(&std::exception::what, HasSubstr("maybe it's already destroyed"))));
+    EXPECT_THAT([&]() -> void { stdexec::sync_wait(remote_actor.Send<&PingWorker::Ping>("after_destroy")); },
+                Throws<std::exception>(Property(&std::exception::what, HasSubstr("maybe it's already destroyed"))));
 
     // After destroying, looking up the actor by name should return empty
     auto lookup = co_await registry.GetActorRefByName<PingWorker>(remote_node_id, "ToDestroy");
     EXPECT_FALSE(lookup.has_value());
 
     // Destroying the same actor again should fail
-    EXPECT_THAT(
-        [&]() -> void { stdexec::sync_wait(registry.DestroyActor(remote_actor)); },
-        Throws<std::exception>(Property(&std::exception::what, HasSubstr("not found"))));
+    EXPECT_THAT([&]() -> void { stdexec::sync_wait(registry.DestroyActor(remote_actor)); },
+                Throws<std::exception>(Property(&std::exception::what, HasSubstr("not found"))));
 
     bar.arrive_and_wait();
   };
@@ -480,6 +478,62 @@ TEST(DistributedTest, DestroyRemoteActor) {
 
   node_0.join();
   node_1.join();
+}
+
+struct DistributedBase {
+  virtual std::string Foo() { return "DistributedBase::Foo"; }
+  virtual ~DistributedBase() = default;
+};
+
+struct DistributedDerived : DistributedBase {
+  std::string Foo() override { return "DistributedDerived::Foo"; }
+  static DistributedDerived Create() { return DistributedDerived(); }
+};
+EXA_REMOTE(&DistributedDerived::Create, &DistributedDerived::Foo, &DistributedBase::Foo);
+
+TEST(DistributedTest, ActorCanBePolymorphic) {
+  std::barrier bar {2};
+  auto node_main = [&bar](size_t index) -> exec::task<void> {
+    std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
+    ex_actor::ClusterConfig cluster_config {
+        .listen_address = addresses.at(index),
+        .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
+    };
+    ex_actor::ActorRegistry registry(/*thread_pool_size=*/4);
+    co_await registry.StartOrJoinCluster(cluster_config);
+
+    auto [cluster_state, condition_met] =
+        co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
+    EXPECT_TRUE(condition_met);
+    EXPECT_GE(cluster_state.nodes.size(), 2U);
+    if (cluster_state.nodes.size() < 2U) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+
+    std::string remote_address = addresses.at(1 - index);
+    auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(it, cluster_state.nodes.end());
+    if (it == cluster_state.nodes.end()) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+    auto remote_node_id = it->node_id;
+
+    ex_actor::ActorRef<DistributedBase> derived =
+        co_await registry.Spawn<&DistributedDerived::Create>().ToNode(remote_node_id);
+    std::string foo_reply = co_await derived.Send<&DistributedBase::Foo>();
+    EXPECT_EQ(foo_reply, "DistributedDerived::Foo");
+
+    ex_actor::ActorRef<DistributedBase> base = derived;
+    EXPECT_EQ(base.GetActorId(), derived.GetActorId());
+    EXPECT_EQ(base.GetNodeId(), derived.GetNodeId());
+    bar.arrive_and_wait();
+  };
+  std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });
+  std::jthread node_1([&] { stdexec::sync_wait(node_main(1)); });
 }
 
 // Verifies that a non-movable actor can be spawned via a factory function.

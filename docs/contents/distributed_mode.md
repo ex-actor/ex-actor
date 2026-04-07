@@ -30,7 +30,8 @@ class PingWorker {
 // 1. Register the class & methods using EXA_REMOTE macro.
 // The first argument is a function to create your class,
 // the rest are methods you want to call remotely.
-EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping); // (1)
+// Why need such boilerplate? (1) Note about inheritance: (2)
+EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping); 
 
 exec::task<void> MainCoroutine(int argc, char** argv) {
   std::string listen_address = argv[1];
@@ -60,7 +61,7 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
 
   // 5. Create actor at remote node and play!
   auto ping_worker = co_await
-      ex_actor::Spawn<&PingWorker::Create>(/*name=*/"Alice") // (2)
+      ex_actor::Spawn<&PingWorker::Create>(/*name=*/"Alice") // (3)
       .ToNode(remote_node_id);
   std::string ping_res = co_await ping_worker.Send<&PingWorker::Ping>("hello");
   assert(ping_res == "ack from Alice, msg got: hello");
@@ -76,9 +77,11 @@ exec::task<void> MainCoroutine(int argc, char** argv) {
 int main(int argc, char** argv) { stdexec::sync_wait(MainCoroutine(argc, argv)); }
 ```
 
-1.  Such boilerplate is caused by the lack of reflection before C++26. We'll eliminate it in C++26, stay tuned!
+1.  In C++20, there is no way to get your class's methods at compile-time, so we need you to list them manually. We'll eliminate it in C++26 with reflection, stay tuned!
 
-2.  Note here in Spawn<>, you should provide the factory function pointer (the first argument of EXA_REMOTE) as the template argument. This differs from local actors, where you would pass the class type itself.
+2.  If you want to call a virtual method through base class, you need to register the base class's methods as well, like `EXA_REMOTE(&Derived::Create, &Base::Foo, &Derived::Foo)`;
+
+3.  Note here in Spawn<>, you should provide the factory function pointer (the first argument of EXA_REMOTE) as the template argument. This differs from local actors, where you would pass the class type itself.
 
 
 Compile this program into a binary, let's say `distributed_node`.

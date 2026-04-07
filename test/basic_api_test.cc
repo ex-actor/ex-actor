@@ -180,7 +180,7 @@ TEST(BasicApiTest, RemoteActorRefSlicedToBasicActorRefShouldThrowOnUse) {
   // but calling SendLocal on it will throw because type_erased_actor_ is nullptr.
   ex_actor::BasicActorRef<Counter> local_ref = remote_ref;
   EXPECT_THAT([&] { std::ignore = local_ref.SendLocal<&Counter::GetValue>(); },
-              Throws<std::exception>(Property(&std::exception::what, HasSubstr("Local actor instance not set"))));
+              Throws<std::exception>(Property(&std::exception::what, HasSubstr("Underlying actor instance not set"))));
 }
 
 struct Base {

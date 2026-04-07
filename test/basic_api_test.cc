@@ -173,12 +173,12 @@ TEST(BasicApiTest, LookUpNamedActor) {
   ex_actor::Shutdown();
 }
 
-TEST(BasicApiTest, RemoteActorRefSlicedToLocalActorRefShouldThrowOnUse) {
+TEST(BasicApiTest, RemoteActorRefSlicedToBasicActorRefShouldThrowOnUse) {
   ex_actor::internal::ActorRef<Counter> remote_ref(
       /*this_node_id=*/1, /*node_id=*/2, /*actor_id=*/42, /*actor=*/nullptr, /*broker_actor_ref=*/ {});
-  // Slicing a remote ActorRef to LocalActorRef is allowed at the type level (due to inheritance),
+  // Slicing a remote ActorRef to BasicActorRef is allowed at the type level (due to inheritance),
   // but calling SendLocal on it will throw because type_erased_actor_ is nullptr.
-  ex_actor::LocalActorRef<Counter> local_ref = remote_ref;
+  ex_actor::BasicActorRef<Counter> local_ref = remote_ref;
   EXPECT_THAT([&] { std::ignore = local_ref.SendLocal<&Counter::GetValue>(); },
               Throws<std::exception>(Property(&std::exception::what, HasSubstr("Local actor instance not set"))));
 }

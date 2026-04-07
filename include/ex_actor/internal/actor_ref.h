@@ -19,7 +19,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "ex_actor/internal/local_actor_ref.h"
+#include "ex_actor/internal/basic_actor_ref.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/message.h"
 #include "ex_actor/internal/network.h"
@@ -28,13 +28,13 @@
 
 namespace ex_actor::internal {
 template <class UserClass>
-class ActorRef : public LocalActorRef<UserClass> {
+class ActorRef : public BasicActorRef<UserClass> {
  public:
-  ActorRef() : LocalActorRef<UserClass>() {}
+  ActorRef() : BasicActorRef<UserClass>() {}
 
   ActorRef(uint64_t this_node_id, uint64_t node_id, uint64_t actor_id, TypeErasedActor* actor,
-           const LocalActorRef<MessageBroker>& broker_actor_ref)
-      : LocalActorRef<UserClass>(actor_id, actor),
+           const BasicActorRef<MessageBroker>& broker_actor_ref)
+      : BasicActorRef<UserClass>(actor_id, actor),
         this_node_id_(this_node_id),
         node_id_(node_id),
         broker_actor_ref_(broker_actor_ref) {}
@@ -47,7 +47,7 @@ class ActorRef : public LocalActorRef<UserClass> {
   }
 
   void SetLocalRuntimeInfo(uint64_t this_node_id, TypeErasedActor* actor,
-                           const LocalActorRef<MessageBroker>& broker_actor_ref) {
+                           const BasicActorRef<MessageBroker>& broker_actor_ref) {
     this_node_id_ = this_node_id;
     this->type_erased_actor_ = actor;
     broker_actor_ref_ = broker_actor_ref;
@@ -63,7 +63,7 @@ class ActorRef : public LocalActorRef<UserClass> {
     requires std::is_convertible_v<Other*, UserClass*>
   // NOLINTNEXTLINE(google-explicit-constructor) - implicit conversion is intentional for polymorphism support
   ActorRef(const ActorRef<Other>& other)
-      : LocalActorRef<UserClass>(other),
+      : BasicActorRef<UserClass>(other),
         this_node_id_(other.this_node_id_),
         node_id_(other.node_id_),
         broker_actor_ref_(other.broker_actor_ref_) {}
@@ -101,7 +101,7 @@ class ActorRef : public LocalActorRef<UserClass> {
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
     EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
-    return LocalActorRef<UserClass>::template SendLocal<kMethod>(std::move(args)...);
+    return BasicActorRef<UserClass>::template SendLocal<kMethod>(std::move(args)...);
   }
 
   uint64_t GetNodeId() const { return node_id_; }
@@ -109,7 +109,7 @@ class ActorRef : public LocalActorRef<UserClass> {
  private:
   uint64_t this_node_id_ = 0;
   uint64_t node_id_ = 0;
-  LocalActorRef<MessageBroker> broker_actor_ref_;
+  BasicActorRef<MessageBroker> broker_actor_ref_;
 
   template <auto kMethod, class... Args>
   [[nodiscard]] auto SendInternal(Args... args) const
@@ -161,8 +161,8 @@ void NotifyOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref
 }
 
 template <class UserClass>
-void NotifyOnSpawned(TypeErasedActor* actor, const LocalActorRef<UserClass>& self_ref) {
-  if constexpr (requires(UserClass& user_class, LocalActorRef<UserClass> self_ref) {
+void NotifyOnSpawned(TypeErasedActor* actor, const BasicActorRef<UserClass>& self_ref) {
+  if constexpr (requires(UserClass& user_class, BasicActorRef<UserClass> self_ref) {
                   user_class.OnSpawned(self_ref);
                 }) {
     static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(self_ref);
@@ -194,7 +194,7 @@ namespace ex_actor::internal {
 struct ActorRefSerdeContext {
   uint64_t this_node_id = 0;
   std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
-  LocalActorRef<MessageBroker> broker_actor_ref;
+  BasicActorRef<MessageBroker> broker_actor_ref;
 };
 }  // namespace ex_actor::internal
 

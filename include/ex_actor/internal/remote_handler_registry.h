@@ -126,8 +126,6 @@ class RemoteFuncHandlerRegistrar {
     using ActorClass = Signature<decltype(kCreateFn)>::ReturnType;
     ActorCreationArgs creation_args =
         DeserializeFnArgs<kCreateFn>(context.serialized_args, context.actor_ref_serde_ctx);
-    // Note: Object slicing detection is performed in Actor<UserClass, kCreateFn>::Actor() constructor
-    // via typeid comparison. If the object type doesn't match UserClass, a warning will be logged.
     std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, kCreateFn>::CreateUseArgTuple(
         std::move(context.scheduler), std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
     auto this_node_id = context.actor_ref_serde_ctx.this_node_id;

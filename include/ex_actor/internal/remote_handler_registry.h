@@ -106,7 +106,7 @@ class RemoteFuncHandlerRegistrar {
       if constexpr (std::is_member_function_pointer_v<decltype(kFuncPtr)>) {
         RemoteActorRequestHandlerRegistry::GetInstance().RegisterRemoteActorMethodCallHandler(
             func_name, [this](RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
-              return DeserializeAndInvokeActorMethod<kFuncPtr>(std::move(context));
+              return DeserializeAndInvokeActorMethod<typename CreateFnSig::ReturnType, kFuncPtr>(std::move(context));
             });
       } else {
         RemoteActorRequestHandlerRegistry::GetInstance().RegisterRemoteActorCreationHandler(
@@ -142,7 +142,7 @@ class RemoteFuncHandlerRegistrar {
   /**
    * @returns A coroutine carrying the serialized result of the actor method call.
    */
-  template <auto kMethod>
+  template <class ActualClass, auto kMethod>
   exec::task<NetworkReply> DeserializeAndInvokeActorMethod(
       RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
     EXA_THROW_CHECK(context.actor != nullptr);
@@ -152,12 +152,17 @@ class RemoteFuncHandlerRegistrar {
     ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> call_args =
         DeserializeFnArgs<kMethod>(context.serialized_args, context.actor_ref_serde_ctx);
 
+    using MethodClass = typename Sig::ClassType;
+    void* instance_address = context.actor->GetUserClassInstanceAddress();
+    auto* actual_class_ptr = static_cast<ActualClass*>(instance_address);
+    auto* adjusted_ptr = static_cast<MethodClass*>(actual_class_ptr);
+
     if constexpr (std::is_void_v<UnwrappedType>) {
-      co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+      co_await CallActorMethodUseTuple<kMethod>(context.actor, adjusted_ptr, std::move(call_args.args_tuple));
       co_return NetworkReply {ActorMethodCallReply {.success = true}};
     } else {
       auto return_value =
-          co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+          co_await CallActorMethodUseTuple<kMethod>(context.actor, adjusted_ptr, std::move(call_args.args_tuple));
       co_return NetworkReply {ActorMethodCallReply {
           .success = true,
           .serialized_result = Serialize(ActorMethodReturnValue<UnwrappedType> {std::move(return_value)})}};

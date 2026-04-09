@@ -42,12 +42,6 @@ class TypeErasedActor {
   virtual void PushMessage(ActorMessage* task) = 0;
   virtual exec::task<void> AsyncDestroy() = 0;
 
-  template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethod(Args... args);
-
-  template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethodUseTuple(std::tuple<Args...> args_tuple);
-
   const ActorConfig& GetActorConfig() const { return actor_config_; }
   void* GetUserClassInstanceAddress() const { return cached_user_class_instance_address_; }
 
@@ -160,6 +154,11 @@ class Actor : public TypeErasedActor {
   explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args... args)
       : TypeErasedActor(std::move(actor_config)), scheduler_(std::move(scheduler)) {
     if constexpr (kCreateFn != nullptr) {
+      using ReturnType = FnReturnType<kCreateFn>;
+      static_assert(
+          std::is_same_v<ReturnType, UserClass>,
+          "The return type of kCreateFn must match the Actor's UserClass template parameter to avoid slicing.");
+
       // Use `new` directly so the prvalue returned by kCreateFn is used to
       // initialize the heap object, benefiting from guaranteed copy elision
       // (C++17 [dcl.init]/17.6.1) and not requiring UserClass to be movable.
@@ -268,33 +267,24 @@ class Actor : public TypeErasedActor {
   }
 };  // class Actor
 
-template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethod(Args... args) {
-  return CallActorMethodUseTuple<kMethod>(std::make_tuple(std::move(args)...));
-}
-
-template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::tuple<Args...> args_tuple) {
+template <auto kMethod, class PtrClass, class... Args>
+  requires(std::is_invocable_v<decltype(kMethod), PtrClass*, Args...>)
+ex::sender auto CallActorMethodUseTuple(TypeErasedActor* actor, PtrClass* adjusted_ptr,
+                                        std::tuple<Args...> args_tuple) {
   using Sig = Signature<decltype(kMethod)>;
   using ReturnType = Sig::ReturnType;
-  using UserClass = Sig::ClassType;
   constexpr bool kIsNested = ex::sender<ReturnType>;
-  auto start = ex::schedule(StdExecSchedulerForActorMessageSubmission(this));
-
-  EXA_THROW_CHECK(cached_user_class_instance_address_ != nullptr);
-  auto* user_class_instance = static_cast<UserClass*>(cached_user_class_instance_address_);
+  auto start = ex::schedule(StdExecSchedulerForActorMessageSubmission(actor));
 
   if constexpr (kIsNested) {
-    return std::move(start) | ex::let_value([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {
-             return std::apply(
-                 [user_class_instance](auto&&... args) { return (user_class_instance->*kMethod)(std::move(args)...); },
-                 std::move(args_tuple));
+    return std::move(start) | ex::let_value([adjusted_ptr, args_tuple = std::move(args_tuple)]() mutable {
+             return std::apply([adjusted_ptr](auto&&... args) { return (adjusted_ptr->*kMethod)(std::move(args)...); },
+                               std::move(args_tuple));
            });
   } else {
-    return std::move(start) | ex::then([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {
-             return std::apply(
-                 [user_class_instance](auto&&... args) { return (user_class_instance->*kMethod)(std::move(args)...); },
-                 std::move(args_tuple));
+    return std::move(start) | ex::then([adjusted_ptr, args_tuple = std::move(args_tuple)]() mutable {
+             return std::apply([adjusted_ptr](auto&&... args) { return (adjusted_ptr->*kMethod)(std::move(args)...); },
+                               std::move(args_tuple));
            });
   }
 }

@@ -26,10 +26,13 @@ namespace ex_actor::internal {
 template <class UserClass>
 class BasicActorRef {
  public:
-  BasicActorRef() : is_empty_(true) {}
+  BasicActorRef() = default;
 
   BasicActorRef(uint64_t actor_id, TypeErasedActor* actor)
-      : is_empty_(false), actor_id_(actor_id), type_erased_actor_(actor) {}
+      : is_empty_(false),
+        actor_id_(actor_id),
+        type_erased_actor_(actor),
+        adjusted_ptr_(actor != nullptr ? static_cast<UserClass*>(actor->GetUserClassInstanceAddress()) : nullptr) {}
 
   friend bool operator==(const BasicActorRef& lhs, const BasicActorRef& rhs) {
     if (lhs.is_empty_ && rhs.is_empty_) {
@@ -49,13 +52,19 @@ class BasicActorRef {
     requires std::is_convertible_v<Other*, UserClass*>
   // NOLINTNEXTLINE(google-explicit-constructor) - implicit conversion is intentional for polymorphism support
   BasicActorRef(const BasicActorRef<Other>& other)
-      : is_empty_(other.is_empty_), actor_id_(other.actor_id_), type_erased_actor_(other.type_erased_actor_) {}
+      : is_empty_(other.is_empty_),
+        actor_id_(other.actor_id_),
+        type_erased_actor_(other.type_erased_actor_),
+        adjusted_ptr_(static_cast<UserClass*>(other.adjusted_ptr_)) {}
 
   // Converting assignment operator - delegates to converting constructor
   template <class Other>
     requires std::is_convertible_v<Other*, UserClass*>
   BasicActorRef<UserClass>& operator=(const BasicActorRef<Other>& other) {
-    *this = BasicActorRef<UserClass>(other);
+    is_empty_ = other.is_empty_;
+    actor_id_ = other.actor_id_;
+    type_erased_actor_ = other.type_erased_actor_;
+    adjusted_ptr_ = static_cast<UserClass*>(other.adjusted_ptr_);
     return *this;
   }
 
@@ -69,16 +78,17 @@ class BasicActorRef {
     EXA_THROW_CHECK(!IsEmpty()) << "Empty BasicActorRef, cannot call method on it.";
     EXA_THROW_CHECK(type_erased_actor_ != nullptr) << "Underlying actor instance not set, it's typically because you "
                                                       "converted a remote ActorRef to BasicActorRef.";
-    return type_erased_actor_->template CallActorMethod<kMethod>(std::move(args)...);
+    return CallActorMethodUseTuple<kMethod>(type_erased_actor_, adjusted_ptr_, std::make_tuple(std::move(args)...));
   }
 
   bool IsEmpty() const { return is_empty_; }
   uint64_t GetActorId() const { return actor_id_; }
 
  protected:
-  bool is_empty_;
+  bool is_empty_ = true;
   uint64_t actor_id_ = 0;
   TypeErasedActor* type_erased_actor_ = nullptr;
+  UserClass* adjusted_ptr_ = nullptr;
 };
 
 }  // namespace ex_actor::internal

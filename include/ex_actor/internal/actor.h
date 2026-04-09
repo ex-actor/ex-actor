@@ -45,8 +45,8 @@ class TypeErasedActor {
   template <auto kMethod, class... Args>
   ex::sender auto CallActorMethod(Args... args);
 
-  template <auto kMethod, class... Args>
-  ex::sender auto CallActorMethodUseTuple(std::tuple<Args...> args_tuple);
+  template <auto kMethod, class ActualClass = typename Signature<decltype(kMethod)>::ClassType, class... Args>
+  ex::sender auto CallActorMethodUseTuple(void* instance_ptr, std::tuple<Args...> args_tuple);
 
   const ActorConfig& GetActorConfig() const { return actor_config_; }
   void* GetUserClassInstanceAddress() const { return cached_user_class_instance_address_; }
@@ -168,6 +168,15 @@ class Actor : public TypeErasedActor {
       user_class_instance_ = std::make_unique<UserClass>(std::move(args)...);
     }
     cached_user_class_instance_address_ = user_class_instance_.get();
+
+    // Check for object slicing: verify that the actual object type matches UserClass
+    if (typeid(*user_class_instance_) != typeid(UserClass)) {
+      log::Warn(
+          "Actor type mismatch detected (possible object slicing). Expected UserClass: {}, Actual object type: {}. "
+          "This may cause issues with polymorphism and multi-inheritance. Consider using Spawn<ActualDerivedClass>() "
+          "instead of Spawn<BaseClass>().",
+          typeid(UserClass).name(), typeid(*user_class_instance_).name());
+    }
   }
 
   template <typename... Args>
@@ -270,19 +279,25 @@ class Actor : public TypeErasedActor {
 
 template <auto kMethod, class... Args>
 ex::sender auto TypeErasedActor::CallActorMethod(Args... args) {
-  return CallActorMethodUseTuple<kMethod>(std::make_tuple(std::move(args)...));
+  return CallActorMethodUseTuple<kMethod>(nullptr, std::make_tuple(std::move(args)...));
 }
 
-template <auto kMethod, class... Args>
-ex::sender auto TypeErasedActor::CallActorMethodUseTuple(std::tuple<Args...> args_tuple) {
+template <auto kMethod, class ActualClass, class... Args>
+ex::sender auto TypeErasedActor::CallActorMethodUseTuple(void* instance_ptr, std::tuple<Args...> args_tuple) {
   using Sig = Signature<decltype(kMethod)>;
   using ReturnType = Sig::ReturnType;
-  using UserClass = Sig::ClassType;
+  using MethodClass = Sig::ClassType;
   constexpr bool kIsNested = ex::sender<ReturnType>;
   auto start = ex::schedule(StdExecSchedulerForActorMessageSubmission(this));
 
-  EXA_THROW_CHECK(cached_user_class_instance_address_ != nullptr);
-  auto* user_class_instance = static_cast<UserClass*>(cached_user_class_instance_address_);
+  // If instance_ptr is provided (from SendLocal), it's already adjusted to MethodClass.
+  // Otherwise (from remote call), we need to adjust it using the two-step cast.
+  if (instance_ptr == nullptr) {
+    EXA_THROW_CHECK(cached_user_class_instance_address_ != nullptr);
+    auto* most_derived_instance = static_cast<ActualClass*>(cached_user_class_instance_address_);
+    instance_ptr = static_cast<MethodClass*>(most_derived_instance);
+  }
+  auto* user_class_instance = static_cast<MethodClass*>(instance_ptr);
 
   if constexpr (kIsNested) {
     return std::move(start) | ex::let_value([user_class_instance, args_tuple = std::move(args_tuple)]() mutable {

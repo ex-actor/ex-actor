@@ -106,7 +106,7 @@ class RemoteFuncHandlerRegistrar {
       if constexpr (std::is_member_function_pointer_v<decltype(kFuncPtr)>) {
         RemoteActorRequestHandlerRegistry::GetInstance().RegisterRemoteActorMethodCallHandler(
             func_name, [this](RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
-              return DeserializeAndInvokeActorMethod<kFuncPtr>(std::move(context));
+              return DeserializeAndInvokeActorMethod<typename CreateFnSig::ReturnType, kFuncPtr>(std::move(context));
             });
       } else {
         RemoteActorRequestHandlerRegistry::GetInstance().RegisterRemoteActorCreationHandler(
@@ -126,6 +126,8 @@ class RemoteFuncHandlerRegistrar {
     using ActorClass = Signature<decltype(kCreateFn)>::ReturnType;
     ActorCreationArgs creation_args =
         DeserializeFnArgs<kCreateFn>(context.serialized_args, context.actor_ref_serde_ctx);
+    // Note: Object slicing detection is performed in Actor<UserClass, kCreateFn>::Actor() constructor
+    // via typeid comparison. If the object type doesn't match UserClass, a warning will be logged.
     std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, kCreateFn>::CreateUseArgTuple(
         std::move(context.scheduler), std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
     auto this_node_id = context.actor_ref_serde_ctx.this_node_id;
@@ -142,7 +144,7 @@ class RemoteFuncHandlerRegistrar {
   /**
    * @returns A coroutine carrying the serialized result of the actor method call.
    */
-  template <auto kMethod>
+  template <class ActualClass, auto kMethod>
   exec::task<NetworkReply> DeserializeAndInvokeActorMethod(
       RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
     EXA_THROW_CHECK(context.actor != nullptr);
@@ -153,11 +155,12 @@ class RemoteFuncHandlerRegistrar {
         DeserializeFnArgs<kMethod>(context.serialized_args, context.actor_ref_serde_ctx);
 
     if constexpr (std::is_void_v<UnwrappedType>) {
-      co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+      co_await context.actor->template CallActorMethodUseTuple<kMethod, ActualClass>(nullptr,
+                                                                                     std::move(call_args.args_tuple));
       co_return NetworkReply {ActorMethodCallReply {.success = true}};
     } else {
-      auto return_value =
-          co_await context.actor->template CallActorMethodUseTuple<kMethod>(std::move(call_args.args_tuple));
+      auto return_value = co_await context.actor->template CallActorMethodUseTuple<kMethod, ActualClass>(
+          nullptr, std::move(call_args.args_tuple));
       co_return NetworkReply {ActorMethodCallReply {
           .success = true,
           .serialized_result = Serialize(ActorMethodReturnValue<UnwrappedType> {std::move(return_value)})}};

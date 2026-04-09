@@ -99,11 +99,27 @@ class Duck : public Animal, public Swimmer {
   std::string Swim() override { return "paddling"; }
 };
 
+// ==================== Slicing Hierarchy ====================
+
+struct SlicedBase {
+  virtual ~SlicedBase() = default;
+  virtual std::string GetType() { return "Base"; }
+};
+
+struct SlicedDerived : public SlicedBase {
+  // This factory returns by value as SlicedBase, causing slicing inside the factory.
+  static SlicedBase CreateSlicing() { return SlicedDerived(); }
+  static SlicedDerived CreateCorrect() { return SlicedDerived(); }
+  std::string GetType() override { return "Derived"; }
+};
+
 // Register remote handlers
 EXA_REMOTE(&Dog::Create, &Dog::Speak);
 EXA_REMOTE(&Cat::Create, &Cat::Speak);
 EXA_REMOTE(&Derived::Create, &BaseA::GetA, &BaseB::GetB);
 EXA_REMOTE(&Duck::Create, &Animal::Speak, &Swimmer::Swim);
+EXA_REMOTE(&SlicedDerived::CreateSlicing, &SlicedBase::GetType);
+EXA_REMOTE(&SlicedDerived::CreateCorrect);
 
 // IMPORTANT: We only register GetA, NOT GetB for DerivedPartial
 EXA_REMOTE(&DerivedPartial::Create, &BasePartialA::GetA);
@@ -180,6 +196,38 @@ TEST_F(MultipleInheritanceTest, LocalUnregisteredMethodSucceeds) {
     // GetB is NOT registered in EXA_REMOTE, but SendLocal (and Send in local mode)
     // works because it uses direct memory access rather than handler lookup.
     EXPECT_EQ(co_await ref.Send<&BasePartialB::GetB>(), 200);
+    co_return;
+  };
+  stdexec::sync_wait(test_coro());
+}
+
+/**
+ * @brief the framework prevents and detects object slicing.
+ */
+TEST_F(MultipleInheritanceTest, SlicingDetectionAndPrevention) {
+  auto test_coro = []() -> exec::task<void> {
+    // 1. If a factory returns SlicedBase by value, slicing happens immediately.
+    // The framework correctly creates an Actor<SlicedBase>.
+    auto base_ref = co_await Spawn<&SlicedDerived::CreateSlicing>();
+    EXPECT_EQ(co_await base_ref.Send<&SlicedBase::GetType>(), "Base");
+
+    // 2. Demonstrate compile-time type safety:
+    // ActorRef<Base> returned by Spawn<&CreateSlicing> cannot be assigned to ActorRef<Derived>.
+    using BaseRef = ActorRef<SlicedBase>;
+    using DerivedRef = ActorRef<SlicedDerived>;
+    using SpawnResultTuple = std::decay_t<decltype(stdexec::sync_wait(Spawn<&SlicedDerived::CreateSlicing>()).value())>;
+    using SpawnedActorRef = std::tuple_element_t<0, SpawnResultTuple>;
+
+    static_assert(std::is_same_v<SpawnedActorRef, BaseRef>,
+                  "Spawn should return ActorRef<Base> for a factory returning Base");
+
+    static_assert(!std::is_convertible_v<BaseRef, DerivedRef>,
+                  "ActorRef<Base> should not be convertible to ActorRef<Derived> (no implicit downcast)");
+
+    // 3. Correct usage preserves polymorphism:
+    auto derived_ref = co_await Spawn<&SlicedDerived::CreateCorrect>();
+    EXPECT_EQ(co_await derived_ref.Send<&SlicedBase::GetType>(), "Derived");
+
     co_return;
   };
   stdexec::sync_wait(test_coro());

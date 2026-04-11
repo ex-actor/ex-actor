@@ -31,46 +31,32 @@ For deeper dive we recommend you to use AI coding tools like [Cursor](https://cu
 
 ## How to build from source
 
-### Linux
+Works on both Linux/macOS and Windows (requires Python 3 and CMake).
 
 ```bash
 cd ex-actor
 
-# If it fails due to network issues, just retry it.
-# In this script I set the cache dir for CPM; previously successful downloads will be cached.
-./scripts/regen_build_dir.sh
+# Generate the build directory (requires python3 and CMake)
+# If it fails or blocks due to network issues, just retry it.
+# Previously downloaded dependencies are kept in ~/.cache/CPM, so they won't be downloaded again.
+python3 scripts/regen_build_dir.py
 
-pushd build
+cd build
+
 # Build
 cmake --build . --config Release
-
 # Run all tests
 ctest -C Release --output-on-failure
+# Run a specific test
+ctest -C Release --output-on-failure -R basic_api_test
 
-# Run specific test
-# option 1, handy for test without arguments
-./test/Release/basic_api_test
-# option 2, for test with arguments/wrapper script
-ctest -C Release --output-on-failure -R multi_process_test
-
-# Format code
-./scripts/format.sh
-```
-
-### Windows
-
-```powershell
-cd ex-actor
-cmake -S . -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release
-
-# Run all tests
-ctest -C Release --output-on-failure
+# Format code (Linux/macOS only, requires clang-format and buildifier)
+python3 scripts/format.py
 ```
 
 ## Clangd related
 
-`regen_build_dir.sh` will generate `compile_commands.json` for you automatically.
+`regen_build_dir.py` will generate `compile_commands.json` for you automatically.
 
 You should also add `--compile-commands-dir=<ex_actor_root_folder>` to your `clangd` configuration so that headers in external
 folders can be parsed correctly. See <https://clangd.llvm.org/faq#how-do-i-fix-errors-i-get-when-opening-headers-outside-of-my-project-directory>

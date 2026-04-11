@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.25.0 FATAL_ERROR)
+# CMake 4.x errors on cmake_minimum_required(VERSION < 3.5). Clamp to 3.5 for old deps like libzmq.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.0)
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
 project(ex_actor VERSION 0.1)
 include(cmake/CPM.cmake)
 include(CMakePackageConfigHelpers)

@@ -23,7 +23,7 @@ pushd ex-actor
   fi
 
   # Build & install ex-actor
-  ./scripts/regen_build_dir.sh "${LAUNCHER_FLAGS[@]}"
+  python3 scripts/regen_build_dir.py "${LAUNCHER_FLAGS[@]}"
   cmake --build build --config Release
   cmake --install build --prefix "${HOME}/.cmake/packages/"
 popd

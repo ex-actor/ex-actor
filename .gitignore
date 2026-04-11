@@ -13,3 +13,4 @@ docs/contents/contributing.md
 Testing/
 core.*
 *.log
+vcpkg

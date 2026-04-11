@@ -34,7 +34,7 @@ jobs:
 
       - name: Generate compile_commands.json
         run: |
-          ./scripts/regen_build_dir.sh
+          python3 scripts/regen_build_dir.py
 
       - name: Install clangd
         run: |

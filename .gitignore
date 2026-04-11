@@ -14,3 +14,4 @@ Testing/
 core.*
 *.log
 vcpkg
+__pycache__

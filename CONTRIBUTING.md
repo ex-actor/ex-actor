@@ -31,7 +31,13 @@ For deeper dive we recommend you to use AI coding tools like [Cursor](https://cu
 
 ## How to build from source
 
-Works on both Linux/macOS and Windows (requires Python 3 and CMake).
+This project requires C++20. The following compilers are tested in CI:
+
+| Compiler | Tested versions |
+|----------|-----------------|
+| GCC      | 11 - 14         |
+| Clang    | 16 - 18         |
+| MSVC     | 14.44 (VS 2022 17.14) |
 
 ```bash
 cd ex-actor

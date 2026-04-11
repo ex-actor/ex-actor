@@ -2,13 +2,15 @@
 
 ## Supported Compilers
 
-We've tested on:
+This project requires C++20. The following compilers are tested in CI:
 
-  - gcc 11 - 14
-  - clang 16 - 18
-  - MSVC 14.44 (windows support is experimental)
+| Compiler | Tested versions |
+|----------|-----------------|
+| GCC      | 11 - 14         |
+| Clang    | 16 - 18         |
+| MSVC     | 14.44 (VS 2022 17.14) |
 
-Don't forget to set `--std=c++20` or above when compiling.
+Windows support is experimental.
 
 ## CMake Projects
 

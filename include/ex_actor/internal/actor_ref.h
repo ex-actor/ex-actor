@@ -47,7 +47,10 @@ class ActorRef : public BasicActorRef<UserClass> {
         broker_actor_ref_(broker_actor_ref) {}
 
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
-    if (lhs.is_empty_ && rhs.is_empty_) {
+    if (lhs.is_empty_ != rhs.is_empty_) {
+      return false;
+    }
+    if (lhs.is_empty_) {
       return true;
     }
     return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_ &&
@@ -198,7 +201,11 @@ struct hash<ex_actor::ActorRef<UserClass>> {
     if (ref.IsEmpty()) {
       return ex_actor::internal::kEmptyActorRefHashVal;
     }
-    return std::hash<uint64_t>()(ref.GetActorId()) ^ std::hash<uint64_t>()(ref.GetNodeId());
+    size_t h = std::hash<uint64_t>()(ref.GetNodeId());
+    auto combine = [&](uint64_t v) { h ^= std::hash<uint64_t>()(v) + 0x9e3779b9 + (h << 6) + (h >> 2); };
+    combine(ref.GetActorId());
+    combine(ref.GetActorTypeHash());
+    return h;
   }
 };
 }  // namespace std
@@ -266,6 +273,7 @@ struct Parser<capnproto::ReaderWithContext<ex_actor::internal::ActorRefSerdeCont
     const auto& info = reader.info;
     actor_ref.SetLocalRuntimeInfo(info.this_node_id, actor_ref.GetActorTypeHash(),
                                   info.actor_look_up_fn(actor_ref.GetActorId()), info.broker_actor_ref);
+
     return actor_ref;
   }
 

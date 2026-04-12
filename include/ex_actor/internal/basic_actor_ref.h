@@ -43,7 +43,10 @@ class BasicActorRef {
         actor_type_hash_(actor_type_hash) {}
 
   friend bool operator==(const BasicActorRef& lhs, const BasicActorRef& rhs) {
-    if (lhs.is_empty_ && rhs.is_empty_) {
+    if (lhs.is_empty_ != rhs.is_empty_) {
+      return false;
+    }
+    if (lhs.is_empty_) {
       return true;
     }
     return lhs.actor_id_ == rhs.actor_id_ && lhs.actor_type_hash_ == rhs.actor_type_hash_;

@@ -74,8 +74,10 @@ exec::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer req
 
   if (auto* msg = std::get_if<ActorLookUpRequest>(&request.variant)) {
     if (actor_name_to_id_.contains(msg->actor_name)) {
+      auto actor_id = actor_name_to_id_.at(msg->actor_name);
+      auto type_hash = actor_id_to_actor_.at(actor_id)->GetActorTypeHash();
       co_return SerializeReply(
-          NetworkReply {ActorLookUpReply {.success = true, .actor_id = actor_name_to_id_.at(msg->actor_name)}});
+          NetworkReply {ActorLookUpReply {.success = true, .actor_id = actor_id, .actor_type_hash = type_hash}});
     } else {
       co_return SerializeReply(NetworkReply {ActorLookUpReply {.success = false}});
     }
@@ -126,8 +128,10 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
           << "An actor with the same name already exists, name=" << result.actor_name.value();
       actor_name_to_id_[result.actor_name.value()] = actor_id;
     }
+    auto type_hash = result.actor->GetActorTypeHash();
     actor_id_to_actor_[actor_id] = std::move(result.actor);
-    reply_out = SerializeReply(NetworkReply {ActorCreationReply {.success = true, .actor_id = actor_id}});
+    reply_out = SerializeReply(
+        NetworkReply {ActorCreationReply {.success = true, .actor_id = actor_id, .actor_type_hash = type_hash}});
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
     reply_out = SerializeReply(NetworkReply {ActorCreationReply {.success = false, .error = std::move(error_msg)}});
@@ -144,7 +148,8 @@ exec::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorM
 
   RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandler handler = nullptr;
   try {
-    handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorMethodCallHandler(msg.handler_key);
+    handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorMethodCallHandler(msg.handler_key,
+                                                                                               msg.actor_type_hash);
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
     co_return SerializeReply(NetworkReply {ActorMethodCallReply {.success = false, .error = std::move(error_msg)}});

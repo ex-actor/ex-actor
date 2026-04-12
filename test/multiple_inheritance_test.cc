@@ -275,3 +275,40 @@ TEST(MultipleInheritanceRemoteTest, RemoteUnregisteredMethodFails) {
     co_return;
   });
 }
+
+/**
+ * @brief Verifies that multiple actor types can share the same base class method for remote calls.
+ */
+struct SharedBase {
+  virtual ~SharedBase() = default;
+  std::string species;
+  SharedBase(std::string s) : species(std::move(s)) {}
+  std::string Eat(std::string food) { return species + " eats " + food; }
+};
+
+struct DerivedDog : SharedBase {
+  DerivedDog() : SharedBase("Dog") {}
+  static DerivedDog Create() { return DerivedDog(); }
+};
+
+struct DerivedCat : SharedBase {
+  DerivedCat() : SharedBase("Cat") {}
+  static DerivedCat Create() { return DerivedCat(); }
+};
+
+EXA_REMOTE(&DerivedDog::Create, &SharedBase::Eat);
+EXA_REMOTE(&DerivedCat::Create, &SharedBase::Eat);
+
+TEST(MultipleInheritanceRemoteTest, SharedBaseMethodSucceeds) {
+  RunTwoNodeTest([](size_t index, uint64_t remote_id, ActorRegistry& registry) -> exec::task<void> {
+    if (index == 0) {
+      auto dog = co_await registry.Spawn<&DerivedDog::Create>().ToNode(remote_id);
+      auto cat = co_await registry.Spawn<&DerivedCat::Create>().ToNode(remote_id);
+
+      // Both should work correctly even though they share the same &SharedBase::Eat
+      EXPECT_EQ(co_await dog.Send<&SharedBase::Eat>("bone"), "Dog eats bone");
+      EXPECT_EQ(co_await cat.Send<&SharedBase::Eat>("fish"), "Cat eats fish");
+    }
+    co_return;
+  });
+}

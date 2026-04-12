@@ -109,6 +109,33 @@ constexpr auto UnwrapReturnSenderIfNested() {
   }
 }
 
+template <typename T>
+constexpr std::string_view GetTypeName() {
+#if defined(_MSC_VER)
+  return __FUNCSIG__;
+#elif defined(__clang__)
+  return __PRETTY_FUNCTION__;
+#elif defined(__GNUC__)
+  return __PRETTY_FUNCTION__;
+#else
+  static_assert(false, "unsupported compiler.");
+#endif
+}
+
+constexpr uint64_t FnvHash(std::string_view s) {
+  uint64_t hash = 14695981039346656037ULL;
+  for (char c : s) {
+    hash ^= static_cast<uint64_t>(static_cast<unsigned char>(c));
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+template <typename T>
+constexpr uint64_t GetHashValue() {
+  return FnvHash(GetTypeName<T>());
+}
+
 template <auto kFunc>
 std::string GetUniqueNameForFunction() {
   // The compiler-provided function signature string embeds the actual NTTP value

@@ -60,6 +60,7 @@ struct ActorCreationRequest {
 
 struct ActorMethodCallRequest {
   std::string handler_key;
+  uint64_t actor_type_hash {};
   uint64_t actor_id {};
   ByteBuffer serialized_args;  // serialized ActorMethodCallArgs
 };
@@ -83,6 +84,7 @@ struct NetworkRequest {
 struct ActorCreationReply {
   bool success {};
   uint64_t actor_id {};
+  uint64_t actor_type_hash {};
   std::string error;
 };
 
@@ -95,6 +97,7 @@ struct ActorMethodCallReply {
 struct ActorLookUpReply {
   bool success {};
   uint64_t actor_id {};
+  uint64_t actor_type_hash {};
 };
 
 struct ActorDestroyReply {

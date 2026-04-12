@@ -39,16 +39,32 @@ class ActorRef : public BasicActorRef<UserClass> {
         node_id_(node_id),
         broker_actor_ref_(broker_actor_ref) {}
 
+  ActorRef(uint64_t this_node_id, uint64_t node_id, uint64_t actor_id, uint64_t actor_type_hash, TypeErasedActor* actor,
+           const BasicActorRef<MessageBroker>& broker_actor_ref)
+      : BasicActorRef<UserClass>(actor_id, actor, actor_type_hash),
+        this_node_id_(this_node_id),
+        node_id_(node_id),
+        broker_actor_ref_(broker_actor_ref) {}
+
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
     if (lhs.is_empty_ && rhs.is_empty_) {
       return true;
     }
-    return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
+    return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_ &&
+           lhs.actor_type_hash_ == rhs.actor_type_hash_;
   }
 
   void SetLocalRuntimeInfo(uint64_t this_node_id, TypeErasedActor* actor,
                            const BasicActorRef<MessageBroker>& broker_actor_ref) {
     this_node_id_ = this_node_id;
+    this->type_erased_actor_ = actor;
+    broker_actor_ref_ = broker_actor_ref;
+  }
+
+  void SetLocalRuntimeInfo(uint64_t this_node_id, uint64_t actor_type_hash, TypeErasedActor* actor,
+                           const BasicActorRef<MessageBroker>& broker_actor_ref) {
+    this_node_id_ = this_node_id;
+    this->actor_type_hash_ = actor_type_hash;
     this->type_erased_actor_ = actor;
     broker_actor_ref_ = broker_actor_ref;
   }
@@ -131,6 +147,7 @@ class ActorRef : public BasicActorRef<UserClass> {
 
     NetworkRequest request {ActorMethodCallRequest {
         .handler_key = GetUniqueNameForFunction<kMethod>(),
+        .actor_type_hash = this->actor_type_hash_,
         .actor_id = this->actor_id_,
         .serialized_args = Serialize(method_call_args),
     }};
@@ -205,6 +222,7 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
     bool is_empty {};
     uint64_t node_id {};
     uint64_t actor_id {};
+    uint64_t actor_type_hash {};
   };
 
   static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
@@ -213,7 +231,8 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
     }
     // this_node_id(0) and TypeErasedActor*(nullptr) are placeholders;
     // filled later in the Parser::read below.
-    ex_actor::internal::ActorRef<U> actor(/*this_node_id=*/0, rfl_type.node_id, rfl_type.actor_id, /*actor=*/nullptr,
+    ex_actor::internal::ActorRef<U> actor(/*this_node_id=*/0, rfl_type.node_id, rfl_type.actor_id,
+                                          rfl_type.actor_type_hash, /*actor=*/nullptr,
                                           /*broker_actor_ref=*/ {});
     return actor;
   }
@@ -223,6 +242,7 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
         .is_empty = actor_ref.is_empty_,
         .node_id = actor_ref.node_id_,
         .actor_id = actor_ref.actor_id_,
+        .actor_type_hash = actor_ref.actor_type_hash_,
     };
   }
 };
@@ -244,8 +264,8 @@ struct Parser<capnproto::ReaderWithContext<ex_actor::internal::ActorRefSerdeCont
     }
     auto actor_ref = parse_res.value();
     const auto& info = reader.info;
-    actor_ref.SetLocalRuntimeInfo(info.this_node_id, info.actor_look_up_fn(actor_ref.GetActorId()),
-                                  info.broker_actor_ref);
+    actor_ref.SetLocalRuntimeInfo(info.this_node_id, actor_ref.GetActorTypeHash(),
+                                  info.actor_look_up_fn(actor_ref.GetActorId()), info.broker_actor_ref);
     return actor_ref;
   }
 

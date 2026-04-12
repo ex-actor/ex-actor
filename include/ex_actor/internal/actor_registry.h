@@ -89,7 +89,8 @@ class ActorRegistryBackend {
     if (!ret.success) {
       EXA_THROW << "Got actor creation error from remote node:" << ret.error;
     }
-    co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, /*actor=*/nullptr, broker_actor_ref_);
+    co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, ret.actor_type_hash, /*actor=*/nullptr,
+                                  broker_actor_ref_);
   }
 
   template <class UserClass>
@@ -141,7 +142,8 @@ class ActorRegistryBackend {
 
     auto& ret = std::get<ActorLookUpReply>(reply.variant);
     if (ret.success) {
-      co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, /*actor=*/nullptr, broker_actor_ref_);
+      co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, ret.actor_type_hash, /*actor=*/nullptr,
+                                    broker_actor_ref_);
     }
     co_return std::nullopt;
   }

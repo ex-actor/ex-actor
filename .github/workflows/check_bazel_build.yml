@@ -17,5 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve module graph
+        run: bazel mod graph --lockfile_mode=update --check_direct_dependencies=error
+
       - name: Check MODULE.bazel.lock is up-to-date
-        run: bazel mod graph --check_direct_dependencies=error
+        run: git diff --exit-code MODULE.bazel.lock

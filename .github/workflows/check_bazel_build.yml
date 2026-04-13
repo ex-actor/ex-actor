@@ -1,0 +1,21 @@
+name: Check Bazel lockfile
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check_lockfile:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check MODULE.bazel.lock is up-to-date
+        run: bazel mod graph --check_direct_dependencies=error

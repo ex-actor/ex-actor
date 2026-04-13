@@ -702,35 +702,31 @@ TEST(MessageBrokerTest, DeadNodeIsNotBroadcastViaGossip) {
   //
   // To exercise the real BroadcastGossip path, broker0 sends gossip over ZMQ
   // to a recv socket that feeds into broker2's DispatchReceivedMessage.
-  // Declare capture_ctx/capture_socket before the brokers so they are destroyed
-  // after the brokers. broker0's ZMQ I/O thread may still hold references to
-  // message metadata when the context is torn down, causing a data race if the
-  // capture context is destroyed first.
+  //
+  // Bind the capture socket first with a dynamic port so there is no chance of
+  // "Address already in use" from a previous test's lingering ZMQ teardown.
   zmq::context_t capture_ctx {1};
   zmq::socket_t capture_socket {capture_ctx, zmq::socket_type::dealer};
+  capture_socket.bind("tcp://127.0.0.1:*");
+  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
+  capture_socket.set(zmq::sockopt::linger, 0);
+  std::string capture_endpoint = capture_socket.get(zmq::sockopt::last_endpoint);
 
   auto config0 = MakeConfig("tcp://127.0.0.1:7400",
-                            /*contact_address=*/"tcp://127.0.0.1:7402",
+                            /*contact_address=*/capture_endpoint,
                             /*heartbeat_timeout_ms=*/1);
   ex_actor::internal::MessageBroker broker0(/*this_node_id=*/0, config0);
 
-  auto config2 = MakeConfig("tcp://127.0.0.1:7402",
+  auto config2 = MakeConfig(capture_endpoint,
                             /*contact_address=*/"",
                             /*heartbeat_timeout_ms=*/60000);
   ex_actor::internal::MessageBroker broker2(/*this_node_id=*/2, config2);
 
-  // Set up a ZMQ recv socket on broker2's address to capture what broker0 sends
-  capture_socket.bind("tcp://127.0.0.1:7402");
-  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
-  capture_socket.set(zmq::sockopt::linger, 0);
-
   // Both brokers discover node 1
-  DispatchGossip(broker0,
-                 {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7401"},
-                  {.last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7402"}});
-  DispatchGossip(broker2,
-                 {{.last_seen_timestamp_ms = 99999, .node_id = 0, .address = "tcp://127.0.0.1:7400"},
-                  {.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7401"}});
+  DispatchGossip(broker0, {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7401"},
+                           {.last_seen_timestamp_ms = 99999, .node_id = 2, .address = capture_endpoint}});
+  DispatchGossip(broker2, {{.last_seen_timestamp_ms = 99999, .node_id = 0, .address = "tcp://127.0.0.1:7400"},
+                           {.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7401"}});
 
   // Node 1 times out from broker0's perspective
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -772,9 +768,10 @@ TEST(MessageBrokerTest, DeadNodeIsNotBroadcastViaGossip) {
       << "Node 2 should still see node 1 as alive; "
          "only the node-0-to-node-1 connection was bad";
 
-  capture_socket.close();
   stdexec::sync_wait(broker0.Stop());
   stdexec::sync_wait(broker2.Stop());
+  capture_socket.close();
+  capture_ctx.close();
 }
 
 // ============================================================
@@ -803,11 +800,14 @@ TEST(MessageBrokerTest, BroadcastGossipAfterDiscovery) {
 // ============================================================
 
 TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) {
-  // Declare capture_ctx/capture_socket before the broker so they are destroyed
-  // after the broker, avoiding a data race between the broker's ZMQ I/O thread
-  // and the capture context's teardown.
+  // Bind the capture socket first with a dynamic port so there is no chance of
+  // "Address already in use" from a previous test's lingering ZMQ teardown.
   zmq::context_t capture_ctx {1};
   zmq::socket_t capture_socket {capture_ctx, zmq::socket_type::dealer};
+  capture_socket.bind("tcp://127.0.0.1:*");
+  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
+  capture_socket.set(zmq::sockopt::linger, 0);
+  std::string capture_endpoint = capture_socket.get(zmq::sockopt::last_endpoint);
 
   // Broker B (node 1) will receive requests from node 0 and defer replies.
   auto config = MakeConfig("tcp://127.0.0.1:7410",
@@ -819,11 +819,6 @@ TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) 
   ex_actor::internal::MessageBrokerTestHelper::SetRequestHandler(
       broker, [](ByteBuffer data) -> exec::task<ByteBuffer> { co_return std::move(data); });
 
-  // Set up a capture socket on node 0's address to intercept replies sent by broker.
-  capture_socket.bind("tcp://127.0.0.1:7411");
-  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
-  capture_socket.set(zmq::sockopt::linger, 0);
-
   // --- Phase 1: Request arrives while node 0 is unknown → reply deferred ---
   // Node 0 sends a request to broker (node 1). Broker doesn't know node 0 yet,
   // so the reply will be deferred in deferred_replies_.
@@ -832,7 +827,7 @@ TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) 
 
   // --- Phase 2: Node 0 appears via gossip (with stale timestamp) ---
   // OnNodeAlive is triggered → send socket created → deferred reply flushed.
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1, .node_id = 0, .address = "tcp://127.0.0.1:7411"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1, .node_id = 0, .address = capture_endpoint}});
 
   // Capture socket should receive the flushed reply.
   {
@@ -860,7 +855,7 @@ TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) 
   // Because the fix removes node 0 from node_id_to_state_ on death (instead of
   // marking alive=false), this gossip triggers OnNodeAlive again, which flushes
   // the deferred reply accumulated in phase 4.
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 0, .address = "tcp://127.0.0.1:7411"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 0, .address = capture_endpoint}});
 
   // Capture socket should receive the second deferred reply.
   {
@@ -876,6 +871,7 @@ TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) 
     EXPECT_EQ(BytesToString(two_way.payload), "request_2");
   }
 
-  capture_socket.close();
   stdexec::sync_wait(broker.Stop());
+  capture_socket.close();
+  capture_ctx.close();
 }

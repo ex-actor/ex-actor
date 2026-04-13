@@ -22,6 +22,8 @@
 #include <rfl/Tuple.hpp>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/internal/alias.h"  // IWYU pragma: keep
+
 namespace ex_actor::internal {
 
 template <typename T>
@@ -91,17 +93,17 @@ consteval std::optional<size_t> GetIndexInParamPack() {
 template <size_t kIndex, class... Ts>
 using ParamPackElement = std::tuple_element_t<kIndex, std::tuple<Ts...>>;
 
-template <stdexec::sender Sender>
+template <ex::sender Sender>
 using CoAwaitType =
     decltype(std::declval<exec::task<void>::promise_type>().await_transform(std::declval<Sender>()).await_resume());
 
 template <class Sender, class... Ts>
-concept SenderOf = stdexec::sender_of<Sender, stdexec::set_value_t(Ts...)>;
+concept SenderOf = ex::sender_of<Sender, ex::set_value_t(Ts...)>;
 
 template <auto kMethod>
 constexpr auto UnwrapReturnSenderIfNested() {
   using ReturnType = Signature<decltype(kMethod)>::ReturnType;
-  constexpr bool kIsNested = stdexec::sender<ReturnType>;
+  constexpr bool kIsNested = ex::sender<ReturnType>;
   if constexpr (kIsNested) {
     return std::type_identity<CoAwaitType<ReturnType>> {};
   } else {

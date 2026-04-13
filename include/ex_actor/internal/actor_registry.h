@@ -243,12 +243,12 @@ class SpawnBuilder : public ex::sender_t {
   template <ex::receiver Receiver>
     requires(std::copyable<Args> && ...)
   auto connect(Receiver receiver) & {
-    return stdexec::connect(MakeSender(node_id_, config_, args_), std::move(receiver));
+    return ex::connect(MakeSender(node_id_, config_, args_), std::move(receiver));
   }
 
   template <ex::receiver Receiver>
   auto connect(Receiver receiver) && {
-    return stdexec::connect(MakeSender(node_id_, std::move(config_), std::move(args_)), std::move(receiver));
+    return ex::connect(MakeSender(node_id_, std::move(config_), std::move(args_)), std::move(receiver));
   }
 
  private:

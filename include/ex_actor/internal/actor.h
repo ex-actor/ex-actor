@@ -100,7 +100,7 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
     ActorMessageSubmissionOperation(TypeErasedActor* actor, Receiver receiver)
         : actor(actor), receiver(std::move(receiver)) {}
     void Execute() override {
-      auto stoken = stdexec::get_stop_token(stdexec::get_env(receiver));
+      auto stoken = ex::get_stop_token(ex::get_env(receiver));
       if constexpr (ex::unstoppable_token<decltype(stoken)>) {
         receiver.set_value();
       } else {

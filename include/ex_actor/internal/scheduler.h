@@ -52,8 +52,8 @@ class WorkSharingThreadPoolBase {
     R receiver;
     WorkSharingThreadPoolBase* thread_pool;
     void Execute() override {
-      auto env = stdexec::get_env(receiver);
-      auto stoken = stdexec::get_stop_token(env);
+      auto env = ex::get_env(receiver);
+      auto stoken = ex::get_stop_token(env);
       if constexpr (ex::unstoppable_token<decltype(stoken)>) {
         receiver.set_value();
       } else {
@@ -69,7 +69,7 @@ class WorkSharingThreadPoolBase {
       uint32_t priority = UINT32_MAX;
       if constexpr (std::is_same_v<Queue<TypeErasedOperation*>,
                                    internal::UnboundedBlockingPriorityQueue<TypeErasedOperation*>>) {
-        auto env = stdexec::get_env(receiver);
+        auto env = ex::get_env(receiver);
         priority = ex_actor::get_priority(env);
       }
       thread_pool->EnqueueOperation(this, priority);
@@ -176,7 +176,7 @@ class SchedulerUnion {
     auto get_env() const noexcept -> Env { return Env {.scheduler_union = scheduler_union}; }
 
     auto connect(ex::receiver auto receiver) {
-      auto env = stdexec::get_env(receiver);
+      auto env = ex::get_env(receiver);
       auto scheduler_index = ex_actor::get_scheduler_index(env);
       EXA_THROW_CHECK_LT(scheduler_index, scheduler_union->schedulers_.size()) << "Scheduler index out of range";
       return scheduler_union->schedulers_[scheduler_index].schedule().connect(std::move(receiver));

@@ -191,6 +191,17 @@ exec::task<void> MessageBroker::Stop() {
   }
   log::Info("Node {:#x}'s message broker stopped, waiting for in-flight tasks", this_node_id_);
   co_await async_scope_.on_empty();
+
+  // Close all ZMQ sockets, then terminate the context to join its IO thread.
+  // Without this, the member destructor ordering (sockets destroyed before context)
+  // leaves a window where the IO thread is still processing pending message metadata
+  // while the main thread frees those resources, causing a data race.
+  node_id_to_send_socket_.clear();
+  contact_node_send_socket_.close();
+  recv_socket_puller_.reset();
+  // zmq_ctx_term() blocks until all IO threads exit.
+  zmq_context_.close();
+
   log::Info("Node {:#x}'s message broker fully stopped", this_node_id_);
   stopped_ = true;
 }

@@ -296,7 +296,7 @@ inline void SetThreadName(const std::string&) {}
 #endif
 
 inline auto WrapSenderWithInlineScheduler(auto task) {
-  return std::move(task) | stdexec::write_env(ex::prop {stdexec::get_scheduler, stdexec::inline_scheduler {}});
+  return std::move(task) | ex::write_env(ex::prop {ex::get_scheduler, ex::inline_scheduler {}});
 }
 
 template <typename Map, typename Key>

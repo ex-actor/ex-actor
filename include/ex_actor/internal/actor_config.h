@@ -21,6 +21,8 @@
 
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/internal/alias.h"  // IWYU pragma: keep
+
 namespace ex_actor {
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
@@ -62,7 +64,7 @@ struct get_priority_t {
       return UINT32_MAX;
     }
   }
-  constexpr auto query(stdexec::forwarding_query_t) const noexcept -> bool { return true; }
+  constexpr auto query(ex::forwarding_query_t) const noexcept -> bool { return true; }
 };
 
 struct get_scheduler_index_t {
@@ -73,7 +75,7 @@ struct get_scheduler_index_t {
       return 0;
     }
   }
-  constexpr auto query(stdexec::forwarding_query_t) const noexcept -> bool { return true; }
+  constexpr auto query(ex::forwarding_query_t) const noexcept -> bool { return true; }
 };
 
 constexpr inline get_priority_t get_priority {};

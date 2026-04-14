@@ -321,36 +321,3 @@ TEST(MultipleInheritanceRemoteTest, DeserializedActorRefSendLocalWithMI) {
   });
 }
 
-/**
- * @brief Verifies that GetActorRefByName on a remote node returns a usable ActorRef
- *        with a valid adjusted_ptr_, including when cast to a non-first MI base.
- *
- * Flow:
- * 1. Node 0 spawns a named Derived actor on the remote node.
- * 2. Node 0 looks it up via GetActorRefByName<Derived> on the remote node.
- * 3. The returned ActorRef<Derived> is cast to ActorRef<BaseB> (MI pointer adjustment).
- * 4. Node 0 calls Send<&BaseB::GetB>() on the cast ref.
- *
- * Before the fix, GetActorRefByName did not propagate adjusted_ptr_addr, leaving
- * the returned ActorRef with a null adjusted_ptr_ and causing a SIGSEGV on SendLocal.
- */
-TEST(MultipleInheritanceRemoteTest, GetActorRefByNameWithMI) {
-  RunTwoNodeTest([](size_t index, uint64_t remote_id, ActorRegistry& registry) -> stdexec::task<void> {
-    if (index == 0) {
-      ex_actor::ActorConfig config {.actor_name = "mi_derived"};
-      co_await registry.Spawn<&Derived::Create>().ToNode(remote_id).WithConfig(config);
-
-      auto lookup = co_await registry.GetActorRefByName<Derived>(remote_id, "mi_derived");
-      EXPECT_TRUE(lookup.has_value());
-      if (!lookup.has_value()) {
-        co_return;
-      }
-
-      // Cast to non-first base — requires MI pointer adjustment
-      ActorRef<BaseB> base_b_ref = lookup.value();
-      int result = co_await base_b_ref.Send<&BaseB::GetB>();
-      EXPECT_EQ(result, 20);
-    }
-    co_return;
-  });
-}

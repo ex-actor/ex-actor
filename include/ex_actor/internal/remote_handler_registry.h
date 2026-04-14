@@ -52,7 +52,7 @@ class RemoteActorRequestHandlerRegistry {
   };
 
   using RemoteActorMethodCallHandler =
-      std::function<exec::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
+      std::function<ex::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
   using RemoteActorCreationHandler = std::function<ActorCreationResult(RemoteActorCreationHandlerContext context)>;
 
   void RegisterRemoteActorMethodCallHandler(const std::string& key, RemoteActorMethodCallHandler func) {
@@ -143,7 +143,7 @@ class RemoteFuncHandlerRegistrar {
    * @returns A coroutine carrying the serialized result of the actor method call.
    */
   template <class ActualClass, auto kMethod>
-  exec::task<NetworkReply> DeserializeAndInvokeActorMethod(
+  ex::task<NetworkReply> DeserializeAndInvokeActorMethod(
       RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
     EXA_THROW_CHECK(context.actor != nullptr);
     using Sig = Signature<decltype(kMethod)>;

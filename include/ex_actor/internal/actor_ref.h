@@ -29,7 +29,6 @@
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal {
-
 template <class UserClass>
 class ActorRef : public BasicActorRef<UserClass> {
  public:

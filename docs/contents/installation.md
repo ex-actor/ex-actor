@@ -8,9 +8,7 @@ This project requires C++20. The following compilers are tested in CI:
 |----------|-----------------|
 | GCC      | 11 - 14         |
 | Clang    | 16 - 18         |
-| MSVC     | 14.44 (VS 2022 17.14) |
-
-Windows support is experimental.
+| MSVC     | 14.50 / `_MSC_VER` 1950 (VS 2026) |
 
 ## CMake Projects
 

@@ -7,8 +7,7 @@ This framework is based on `std::execution`, but **it's fine if you are not fami
 std::execution is essentially an unified interface for schedulers and async tasks. It standardizes the interfaces so that everyone
 conforming the standard can use others' work seamlessly. Check [P2300 proposal](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html) and [stdexec's doc](https://github.com/NVIDIA/stdexec?tab=readme-ov-file#resources) if you want to learn more.
 
-Note: C++26 is not finalized now. Currently we're based on the early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), so you'll see `stdexec`, `exec` namespaces
-instead of `std::execution` in the following examples.
+Note: C++26 is not finalized now. Currently we're based on the early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), so you'll see namespace `stdexec` instead of `std::execution` in the following examples.
 
 ## Basic case - turn your class into an actor
 
@@ -28,7 +27,7 @@ struct Counter {
   int count = 0;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   /*
   1. First, initialize ex_actor runtime.
   */
@@ -100,7 +99,7 @@ public:
 class Father {
 public:
   // Actor's method can be a sender.
-  exec::task<std::string> SpawnChildAndPing() {
+  stdexec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
       // this line won't block the scheduler thread
       child_ = co_await ex_actor::Spawn<Child>();
@@ -114,7 +113,7 @@ private:
   ex_actor::ActorRef<Child> child_;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   // Here we have only one thread in scheduler, but it still can finish the entire work,
   // because everything is async, there is no blocking wait
   ex_actor::Init(/*thread_pool_size=*/1);
@@ -152,7 +151,7 @@ class Proxy {
   explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
 
   // Actor's method can be a sender.
-  exec::task<std::string> ProxyPing() {
+  stdexec::task<std::string> ProxyPing() {
     // This line won't block the scheduler thread.
     std::string ping_res = co_await actor_ref_.template Send<&PingWorker::Ping>();
     co_return ping_res + " from Proxy";
@@ -163,7 +162,7 @@ class Proxy {
 };
 
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   ex_actor::Init(/*thread_pool_size=*/1);
 
   ex_actor::ActorRef ping_worker = co_await ex_actor::Spawn<PingWorker>();
@@ -185,7 +184,8 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Trigger senders without waiting for the result immediately
 
-You can use [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.html) to trigger a task without waiting for the result immediately.
+You can use `simple_counting_scope` + `spawn`/`spawn_future` to trigger a task without waiting for the result immediately.
+
 
 <!-- doc test start -->
 ```cpp
@@ -194,36 +194,29 @@ You can use [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.h
 
 struct Counter {
   int AddAndGet(int x) { return count += x; }
-  void Add(int x) { count += x; }
   int count = 0;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   ex_actor::Init(/*thread_pool_size=*/1);
   ex_actor::ActorRef actor = co_await ex_actor::Spawn<Counter>();
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
 
-  /*
-  for void senders, use `async_scope.spawn`.
-  */
-  scope.spawn(actor.Send<&Counter::Add>(1));
   
-  /*
-  for non-void senders, if you don't want to get the result, attach an empty `then`
-  to discard the result, then use `async_scope.spawn`.
-  */
-  scope.spawn(actor.Send<&Counter::AddAndGet>(1) | stdexec::then([](auto) {}));
+  // `spawn` requires the sender to be void and exception-free, use `ex_actor::DiscardResult()`
+  // to drop the result and swallow errors.
+  stdexec::spawn(actor.Send<&Counter::AddAndGet>(1) | ex_actor::DiscardResult(), scope.get_token());
 
-  /*
-  if you care about the result, use `spawn_future` instead of `spawn` to get a future-like object.
-  */
-  auto future = scope.spawn_future(actor.Send<&Counter::AddAndGet>(1));
+  // If you care about the result, use `stdexec::spawn_future` to get a future-like object.
+  auto future = stdexec::spawn_future(actor.Send<&Counter::AddAndGet>(1), scope.get_token());
   int res = co_await std::move(future);
-  assert(res == 3);
+
+  // actor executes messages in serial, so the result must be 2.
+  assert(res == 2);
   
-  // you must wait for all senders done before destroying the scope,
-  // or an exception will be thrown.
-  co_await scope.on_empty();
+  // you must wait for all tasks to complete before destroying the scope,
+  // or std::terminate will be called.
+  co_await scope.join();
 
   ex_actor::Shutdown();
 }
@@ -235,7 +228,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Execute multiple senders in parallel
 
-You can execute multiple senders in parallel using [`when_all`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-adaptor-when_all) or [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.html) in std::execution.
+You can execute multiple senders in parallel using [`when_all`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-adaptor-when_all) or `simple_counting_scope` + `spawn`/`spawn_future` in std::execution.
 
 <!-- doc test start -->
 ```cpp
@@ -249,7 +242,7 @@ struct Counter {
   int count = 0;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   ex_actor::Init(/*thread_pool_size=*/3);
 
   // create multiple counters, you want to increase them in parallel
@@ -258,9 +251,7 @@ exec::task<void> MainCoroutine() {
     counters.push_back(co_await ex_actor::Spawn<Counter>());
   }
 
-  /*
-  1. `when_all` example, handy for small number of senders.
-  */
+  // 1. `when_all` example, handy for small number of senders.
   auto [res1, res2, res3] = co_await stdexec::when_all(
     counters[0].Send<&Counter::AddAndGet>(1),
     counters[1].Send<&Counter::AddAndGet>(1),
@@ -270,37 +261,32 @@ exec::task<void> MainCoroutine() {
   assert(res2 == 1);
   assert(res3 == 1);
 
-  /*
-  2. for large number of senders where you need a loop, use `async_scope`.
-  */
-  exec::async_scope scope;
+  // 2. for large number of senders where you need a loop, use `spawn`/`spawn_future` + `simple_counting_scope`.
+  stdexec::simple_counting_scope scope;
 
-  /*
-  2.1 async_scope.spawn example, which only accepts void senders.
-  */
+  // 2.1 `spawn` example. Wrap with ex_actor::DiscardResult() to drop the result and errors.
   for (int i = 0; i < counters.size(); ++i) {
-    scope.spawn(counters[i].Send<&Counter::Add>(1));
+    stdexec::spawn(counters[i].Send<&Counter::Add>(1) | ex_actor::DiscardResult(), scope.get_token());
   }
-  co_await scope.on_empty();
+  co_await scope.join();
   for (int i = 0; i < counters.size(); ++i) {
     int value = co_await counters[i].Send<&Counter::GetValue>();
     assert(value == 2);
   }
 
-  /*
-  2.2 `async_scope.spawn_future` example, which returns a future-like object which you can wait for later.
-  */
-  using FutureType = decltype(scope.spawn_future(counters[0].Send<&Counter::AddAndGet>(1)));
+  // 2.2 `spawn_future` example, which returns a future-like object which you can wait for later.
+  stdexec::simple_counting_scope scope2;
+  using FutureType = decltype(stdexec::spawn_future(counters[0].Send<&Counter::AddAndGet>(1), scope2.get_token()));
   std::vector<FutureType> futures;
   for (int i = 0; i < counters.size(); ++i) {
-    auto future = scope.spawn_future(counters[i].Send<&Counter::AddAndGet>(1));
+    auto future = stdexec::spawn_future(counters[i].Send<&Counter::AddAndGet>(1), scope2.get_token());
     futures.push_back(std::move(future));
   }
-  co_await scope.on_empty();
   for (int i = 0; i < futures.size(); ++i) {
     int value = co_await std::move(futures[i]);
     assert(value == 3);
   }
+  co_await scope2.join();
 
   ex_actor::Shutdown();
 }
@@ -314,7 +300,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 We recommend you to use `std::execution::task` coroutine to wrap the result, which is easier and more readable.
 
 But if you insist on using plain sender adapter for some reason, be cautious that you'll lose the scheduler affinity `std::execution::task` provided,
-the `ex::then` callback will run on the actor's thread, **do not capture local variable's reference, or `this` pointer of an actor instance in the callback**.
+the `then` callback will run on the actor's thread, **do not capture local variable's reference, or `this` pointer of an actor instance in the callback**.
 
 <!-- doc test start -->
 ```cpp
@@ -350,7 +336,7 @@ int main() {
 ```
 <!-- doc test end -->
 
-In the above example, the `ex::then` callback runs on the actor's thread. If you capture local variables in the `ex::then` callback, it will cause a data race.
+In the above example, the `then` callback runs on the actor's thread. If you capture local variables in the `then` callback, it will cause a data race.
 
 A more dangerous example is capturing `this` in actor's method.
 
@@ -387,7 +373,7 @@ class Proxy {
   ex_actor::ActorRef<DummyActor> actor_ref_;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   ex_actor::Init(/*thread_pool_size=*/2);
   ex_actor::ActorRef dummy_actor = co_await ex_actor::Spawn<DummyActor>();
 
@@ -395,10 +381,10 @@ exec::task<void> MainCoroutine() {
   ex_actor::ActorRef proxy = co_await ex_actor::Spawn<Proxy>(dummy_actor);
 
   // 3. call through the proxy actor
-  exec::async_scope scope;
-  scope.spawn(proxy.Send<&Proxy::SomeMethod>());
-  scope.spawn(proxy.Send<&Proxy::AnotherMethod>());
-  co_await scope.on_empty();
+  stdexec::simple_counting_scope scope;
+  stdexec::spawn(proxy.Send<&Proxy::SomeMethod>() | ex_actor::DiscardResult(), scope.get_token());
+  stdexec::spawn(proxy.Send<&Proxy::AnotherMethod>() | ex_actor::DiscardResult(), scope.get_token());
+  co_await scope.join();
 
   ex_actor::Shutdown();
 }
@@ -409,7 +395,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ### Understanding the scheduler affinity of std::execution::task
 
-To understand why the callback of ex::then runs on the target actor's thread, while in coroutine it runs on the caller's thread, you need to know the scheduler switching mechanism in `std::execution`.
+To understand why the callback of then runs on the target actor's thread, while in coroutine it runs on the caller's thread, you need to know the scheduler switching mechanism in `std::execution`.
 
 In `std::execution`, scheduler's switch should be explicit - by calling `continue_on` explicitly.
 

@@ -3,7 +3,6 @@
 #include <tuple>
 #include <vector>
 
-#include <exec/task.hpp>
 #include <gtest/gtest.h>
 #include <stdexec/execution.hpp>
 
@@ -15,37 +14,33 @@ namespace logging = ex_actor::internal::log;
 struct SkynetActor;
 
 struct SkynetActor {
-  exec::task<uint64_t> Process(int level, bool verbose);
+  stdexec::task<uint64_t> Process(int level, bool verbose);
 };
 
-exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
+stdexec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
   if (verbose) logging::Info("DEBUG: Process level {} start", level);
   if (level == 0) {
     if (verbose) logging::Info("DEBUG: Process level 0 returning");
-    co_return 1;
+    co_return 1ULL;
   }
 
   std::vector<ex_actor::ActorRef<SkynetActor>> children;
   children.reserve(10);
 
-  exec::async_scope async_scope;
+  stdexec::simple_counting_scope async_scope;
 
-  using FutureType = decltype(async_scope.spawn_future(ex_actor::Spawn<SkynetActor>()));
+  using FutureType = decltype(stdexec::spawn_future(ex_actor::Spawn<SkynetActor>(), async_scope.get_token()));
   std::vector<FutureType> futures;
   futures.reserve(10);
 
   if (verbose) logging::Info("DEBUG: Creating children for level {}", level);
   for (int i = 0; i < 10; ++i) {
-    futures.push_back(async_scope.spawn_future(ex_actor::Spawn<SkynetActor>()));
+    futures.push_back(stdexec::spawn_future(ex_actor::Spawn<SkynetActor>(), async_scope.get_token()));
   }
-  co_await async_scope.on_empty();
+
   for (auto& future : futures) {
     children.push_back(co_await std::move(future));
   }
-
-  // Use async_scope to spawn all child tasks in parallel and collect results
-  // This avoids the when_all limitation with many senders in newer stdexec versions
-  exec::async_scope child_scope;
 
   auto make_child_sender = [&children, verbose, level](int index) {
     // test ephemeral stacks
@@ -55,15 +50,13 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
            });
   };
 
-  using ResultFutureType = decltype(child_scope.spawn_future(make_child_sender(0)));
+  using ResultFutureType = decltype(stdexec::spawn_future(make_child_sender(0), async_scope.get_token()));
   std::vector<ResultFutureType> result_futures;
   result_futures.reserve(10);
 
   for (int i = 0; i < 10; ++i) {
-    result_futures.push_back(child_scope.spawn_future(make_child_sender(i)));
+    result_futures.push_back(stdexec::spawn_future(make_child_sender(i), async_scope.get_token()));
   }
-
-  co_await child_scope.on_empty();
 
   if (verbose) std::cout << "DEBUG: Awaiting children for level " << level << std::endl;
   uint64_t sum = 0;
@@ -76,6 +69,9 @@ exec::task<uint64_t> SkynetActor::Process(int level, bool verbose) {
   }
 
   if (verbose) std::cout << "DEBUG: Finished level " << level << ", sum=" << sum << std::endl;
+
+  co_await async_scope.join();
+
   co_return sum;
 }
 

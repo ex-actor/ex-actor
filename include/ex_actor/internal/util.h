@@ -15,25 +15,109 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
-#include <cstdint>
-#include <memory>
 #include <mutex>
-#include <queue>
+#include <source_location>
 #include <type_traits>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 #include <stdexec/execution.hpp>
 
-#include "ex_actor/3rd_lib/daking/MPSC_queue.h"
-#include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/reflect.h"
+
+namespace ex_actor::internal {
+
+template <typename Map, typename Key>
+auto& MapAt(Map& map, const Key& key, std::source_location loc = std::source_location::current()) {
+  auto it = map.find(key);
+  if (it == map.end()) {
+    throw std::out_of_range(
+        fmt_lib::format("{}:{} in {}: map key '{}' not found", loc.file_name(), loc.line(), loc.function_name(), key));
+  }
+  return it->second;
+}
+
+// A sender that wraps two alternative senders in a variant, choosing at runtime.
+// Used to type erase different senders without using ex::task, so the scheduler can be preserved.
+template <class SenderA, class SenderB>
+struct SenderVariant : ex::sender_t {
+  std::variant<SenderA, SenderB> sender_variant;
+
+  explicit SenderVariant(std::variant<SenderA, SenderB> sender) : sender_variant(std::move(sender)) {}
+
+  using MergedSignatures = CompletionSignaturesUnion<ex::completion_signatures_of_t<SenderA, ex::env<>>,
+                                                     ex::completion_signatures_of_t<SenderB, ex::env<>>>;
+
+  template <class Self>
+  static consteval auto get_completion_signatures() {
+    return MergedSignatures {};
+  }
+
+  template <class Self, class Env>
+  static consteval auto get_completion_signatures() {
+    return MergedSignatures {};
+  }
+
+  template <ex::receiver Receiver>
+  struct VariantOperation {
+    using OpA = decltype(ex::connect(std::declval<SenderA>(), std::declval<Receiver>()));
+    using OpB = decltype(ex::connect(std::declval<SenderB>(), std::declval<Receiver>()));
+
+    // 0 = A active, 1 = B active
+    unsigned char index;
+
+    // Uses a plain union instead of std::variant to avoid requiring move-constructibility,
+    // since stdexec operation states are immovable.
+    union Storage {
+      OpA op_a;
+      OpB op_b;
+      Storage() noexcept {}
+      ~Storage() {}
+    } storage;
+
+    VariantOperation(std::integral_constant<unsigned char, 0> /*tag*/, SenderA&& sender, Receiver&& receiver)
+        : index(0) {
+      ::new (&storage.op_a) OpA(ex::connect(std::move(sender), std::move(receiver)));
+    }
+    VariantOperation(std::integral_constant<unsigned char, 1> /*tag*/, SenderB&& sender, Receiver&& receiver)
+        : index(1) {
+      ::new (&storage.op_b) OpB(ex::connect(std::move(sender), std::move(receiver)));
+    }
+
+    VariantOperation(VariantOperation&&) = delete;
+    VariantOperation& operator=(VariantOperation&&) = delete;
+
+    ~VariantOperation() {
+      if (index == 0) {
+        storage.op_a.~OpA();
+      } else {
+        storage.op_b.~OpB();
+      }
+    }
+
+    void start() noexcept {
+      if (index == 0) {
+        ex::start(storage.op_a);
+      } else {
+        ex::start(storage.op_b);
+      }
+    }
+  };
+
+  template <ex::receiver Receiver>
+  auto connect(Receiver receiver) && -> VariantOperation<Receiver> {
+    if (sender_variant.index() == 0) {
+      return {std::integral_constant<unsigned char, 0> {}, std::move(std::get<0>(sender_variant)), std::move(receiver)};
+    }
+    return {std::integral_constant<unsigned char, 1> {}, std::move(std::get<1>(sender_variant)), std::move(receiver)};
+  }
+};
+
+}  // namespace ex_actor::internal
 
 namespace ex_actor {
 /**
@@ -111,276 +195,51 @@ class Semaphore {
   std::atomic_int64_t count_;
 };
 
+/// Wraps a sender so that its result is discarded and errors are logged then swallowed.
+/// The returned sender completes with `set_value_t()` (void) and never with `set_error_t`,
+/// making it suitable for `ex::spawn` which requires exception-free senders.
+///
+/// Supports both direct-call and pipe syntax:
+///   DiscardResult(sender)
+///   sender | DiscardResult()
+struct discard_result_closure_t : ex::sender_adaptor_closure<discard_result_closure_t> {
+  template <ex::sender Sender>
+  ex::sender auto operator()(Sender&& sender) const {
+    auto log_and_swallow = [](auto&& error) noexcept {
+      if constexpr (std::is_same_v<std::decay_t<decltype(error)>, std::exception_ptr>) {
+        try {
+          std::rethrow_exception(error);
+        } catch (const std::exception& e) {
+          internal::log::Error("DiscardResult swallowed exception: {}", e);
+        } catch (...) {
+          internal::log::Error("DiscardResult swallowed unknown exception_ptr");
+        }
+      } else if constexpr (std::is_base_of_v<std::exception, std::decay_t<decltype(error)>>) {
+        internal::log::Error("DiscardResult swallowed exception: {}", error);
+      } else {
+        internal::log::Error("DiscardResult swallowed an error ({})", typeid(decltype(error)).name());
+      }
+    };
+    return std::forward<Sender>(sender) | ex::then([](auto&&...) noexcept -> void {}) | ex::upon_error(log_and_swallow);
+  }
+};
+
+struct discard_result_t {
+  template <ex::sender Sender>
+  ex::sender auto operator()(Sender&& sender) const {
+    return discard_result_closure_t {}(std::forward<Sender>(sender));
+  }
+
+  auto operator()() const -> discard_result_closure_t { return {}; }
+};
+
+inline constexpr discard_result_t DiscardResult {};
+
+ex::sender auto StartsInline(ex::sender auto&& sender) {
+  return ex::starts_on(ex::inline_scheduler {}, std::forward<decltype(sender)>(sender));
+}
+
 }  // namespace ex_actor
-
-namespace ex_actor::internal {
-
-template <class T>
-struct LinearizableUnboundedMpscQueue {
- public:
-  void Push(T value) { queue_.enqueue(std::move(value)); }
-
-  std::optional<T> TryPop() {
-    T value;
-    if (queue_.try_dequeue(value)) {
-      return value;
-    }
-    return std::nullopt;
-  }
-
- private:
-  ex_actor::embedded_3rd::daking::MPSC_queue<T> queue_;
-};
-
-template <class T>
-class UnboundedBlockingPriorityQueue {
- public:
-  void Push(T value, uint32_t priority) {
-    std::lock_guard lock(mutex_);
-    queue_.push({std::move(value), priority});
-    cv_.notify_one();
-  }
-
-  std::optional<T> Pop(uint64_t timeout_ms) {
-    std::unique_lock lock(mutex_);
-    bool ok = cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return !queue_.empty(); });
-    if (!ok) {
-      return std::nullopt;
-    }
-    auto value = std::move(const_cast<Element&>(queue_.top()).value);
-    queue_.pop();
-    return value;
-  }
-
- private:
-  struct Element {
-    T value;
-    uint32_t priority;
-    friend bool operator<(const Element& lhs, const Element& rhs) { return lhs.priority > rhs.priority; }
-  };
-  std::priority_queue<Element> queue_;
-  std::mutex mutex_;
-  std::condition_variable cv_;
-};
-
-template <class T>
-class UnboundedBlockingQueue {
- public:
-  void Push(T value) { queue_.enqueue(std::move(value)); }
-  std::optional<T> Pop(uint64_t timeout_ms) {
-    T value;
-    bool ok = queue_.wait_dequeue_timed(value, std::chrono::milliseconds(timeout_ms));
-    if (!ok) {
-      return std::nullopt;
-    }
-    return value;
-  }
-
- private:
-  ex_actor::embedded_3rd::moodycamel::BlockingConcurrentQueue<T> queue_;
-};
-
-template <class K, class V>
-class LockGuardedMap {
- public:
-  bool Insert(const K& key, V value) {
-    std::lock_guard lock(mutex_);
-    auto [iter, inserted] = map_.try_emplace(key, std::move(value));
-    return inserted;
-  }
-
-  V& At(const K& key) {
-    std::lock_guard lock(mutex_);
-    auto iter = map_.find(key);
-    EXA_THROW_CHECK(iter != map_.end()) << "Key not found: " << key;
-    return iter->second;
-  }
-
-  const V& At(const K& key) const {
-    std::lock_guard lock(mutex_);
-    auto iter = map_.find(key);
-    EXA_THROW_CHECK(iter != map_.end()) << "Key not found: " << key;
-    return iter->second;
-  }
-
-  void Erase(const K& key) {
-    std::lock_guard lock(mutex_);
-    map_.erase(key);
-  }
-
-  bool Contains(const K& key) const {
-    std::lock_guard lock(mutex_);
-    return map_.contains(key);
-  }
-
-  void Clear() {
-    std::lock_guard lock(mutex_);
-    map_.clear();
-  }
-
-  std::unordered_map<K, V>& GetMap() { return map_; }
-  std::mutex& GetMutex() const { return mutex_; }
-
- private:
-  std::unordered_map<K, V> map_;
-  mutable std::mutex mutex_;
-};
-
-template <class T>
-class LockGuardedSet {
- public:
-  bool Insert(T value) {
-    std::lock_guard lock(mutex_);
-    auto [iter, inserted] = set_.emplace(std::move(value));
-    return inserted;
-  }
-
-  void Erase(const T& value) {
-    std::lock_guard lock(mutex_);
-    set_.erase(value);
-  }
-
-  bool Empty() {
-    std::lock_guard lock(mutex_);
-    return set_.empty();
-  }
-
-  bool Contains(const T& value) {
-    std::lock_guard lock(mutex_);
-    return set_.contains(value);
-  }
-
-  std::mutex& GetMutex() const { return mutex_; }
-
- private:
-  std::unordered_set<T> set_;
-  mutable std::mutex mutex_;
-};
-
-// Similar to std::any, but allow move-only types
-class MoveOnlyAny {
- public:
-  MoveOnlyAny(const MoveOnlyAny&) = delete;
-  MoveOnlyAny& operator=(const MoveOnlyAny&) = delete;
-  MoveOnlyAny(MoveOnlyAny&&) = default;
-  MoveOnlyAny& operator=(MoveOnlyAny&&) = default;
-
-  MoveOnlyAny() : value_holder_(nullptr) {}
-  template <class T>
-  explicit MoveOnlyAny(T value) : value_holder_(std::make_unique<AnyValueHolderImpl<T>>(std::move(value))) {}
-  template <class T>
-  MoveOnlyAny& operator=(T value) {
-    value_holder_ = std::make_unique<AnyValueHolderImpl<T>>(std::move(value));
-    return *this;
-  }
-
-  template <class T>
-  T&& MoveValueOut() && {
-    return std::move(static_cast<AnyValueHolderImpl<T>*>(value_holder_.get())->value);
-  }
-
- private:
-  struct AnyValueHolder {
-    virtual ~AnyValueHolder() = default;
-  };
-
-  template <class T>
-  struct AnyValueHolderImpl : public AnyValueHolder {
-    T value;
-    explicit AnyValueHolderImpl(T value) : value(std::move(value)) {}
-  };
-  std::unique_ptr<AnyValueHolder> value_holder_;
-};
-
-#if defined(__linux__)
-#include <pthread.h>
-inline void SetThreadName(const std::string& name) { pthread_setname_np(pthread_self(), name.c_str()); }
-#else
-inline void SetThreadName(const std::string&) {}
-#endif
-
-inline auto WrapSenderWithInlineScheduler(auto task) {
-  return std::move(task) | ex::write_env(ex::prop {ex::get_scheduler, ex::inline_scheduler {}});
-}
-
-template <typename Map, typename Key>
-auto& MapAt(Map& map, const Key& key, std::source_location loc = std::source_location::current()) {
-  auto it = map.find(key);
-  if (it == map.end()) {
-    throw std::out_of_range(
-        fmt_lib::format("{}:{} in {}: map key '{}' not found", loc.file_name(), loc.line(), loc.function_name(), key));
-  }
-  return it->second;
-}
-
-// A sender that wraps two alternative senders in a variant, choosing at runtime.
-// Used to type erase different senders without using ex::task, so the scheduler can be preserved.
-template <class SenderA, class SenderB>
-  requires kCompletionSignaturesMatch<ex::completion_signatures_of_t<SenderA, ex::env<>>,
-                                      ex::completion_signatures_of_t<SenderB, ex::env<>>>
-struct SenderVariant : ex::sender_t {
-  std::variant<SenderA, SenderB> sender_variant;
-
-  explicit SenderVariant(std::variant<SenderA, SenderB> sender) : sender_variant(std::move(sender)) {}
-
-  using completion_signatures = ex::completion_signatures_of_t<SenderA, ex::env<>>;
-
-  template <ex::receiver Receiver>
-  struct VariantOperation {
-    using OpA = decltype(ex::connect(std::declval<SenderA>(), std::declval<Receiver>()));
-    using OpB = decltype(ex::connect(std::declval<SenderB>(), std::declval<Receiver>()));
-
-    // 0 = A active, 1 = B active
-    unsigned char index;
-
-    // Uses a plain union instead of std::variant to avoid requiring move-constructibility,
-    // since stdexec operation states are immovable.
-    union Storage {
-      OpA op_a;
-      OpB op_b;
-      Storage() noexcept {}
-      ~Storage() {}
-    } storage;
-
-    VariantOperation(std::integral_constant<unsigned char, 0> /*tag*/, SenderA&& sender, Receiver&& receiver)
-        : index(0) {
-      ::new (&storage.op_a) OpA(ex::connect(std::move(sender), std::move(receiver)));
-    }
-    VariantOperation(std::integral_constant<unsigned char, 1> /*tag*/, SenderB&& sender, Receiver&& receiver)
-        : index(1) {
-      ::new (&storage.op_b) OpB(ex::connect(std::move(sender), std::move(receiver)));
-    }
-
-    VariantOperation(VariantOperation&&) = delete;
-    VariantOperation& operator=(VariantOperation&&) = delete;
-
-    ~VariantOperation() {
-      if (index == 0) {
-        storage.op_a.~OpA();
-      } else {
-        storage.op_b.~OpB();
-      }
-    }
-
-    void start() noexcept {
-      if (index == 0) {
-        ex::start(storage.op_a);
-      } else {
-        ex::start(storage.op_b);
-      }
-    }
-  };
-
-  template <ex::receiver Receiver>
-  auto connect(Receiver receiver) && -> VariantOperation<Receiver> {
-    if (sender_variant.index() == 0) {
-      return {std::integral_constant<unsigned char, 0> {}, std::move(std::get<0>(sender_variant)), std::move(receiver)};
-    }
-    return {std::integral_constant<unsigned char, 1> {}, std::move(std::get<1>(sender_variant)), std::move(receiver)};
-  }
-};
-
-}  // namespace ex_actor::internal
 
 // Backward-compatibility alias — this namespace was removed in favor of ex_actor.
 // Use ex_actor::Semaphore directly.

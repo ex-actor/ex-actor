@@ -16,7 +16,6 @@
 
 #include <csignal>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <vector>
 
@@ -110,19 +109,14 @@ void Init(uint32_t thread_pool_size) {
   internal::SetupGlobalHandlers();
 }
 
-exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config) {
+ex::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config) {
   EXA_THROW_CHECK(internal::IsGlobalDefaultRegistryInitialized()) << "Not initialized. Call Init() first.";
-  co_await internal::GetGlobalDefaultRegistry().StartOrJoinCluster(cluster_config);
+  return internal::GetGlobalDefaultRegistry().StartOrJoinCluster(cluster_config);
 }
 
 void HoldResource(std::shared_ptr<void> resource) { resource_holder.push_back(std::move(resource)); }
 
-exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
-                                                    uint64_t timeout_ms) {
-  co_return co_await global_default_registry->WaitClusterState(std::move(predicate), timeout_ms);
-}
-
-exec::task<void> WaitOsExitSignal() {
+ex::task<void> WaitOsExitSignal() {
   Semaphore sem(1);
   signal_semaphore = &sem;
 

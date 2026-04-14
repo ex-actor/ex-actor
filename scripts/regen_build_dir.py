@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Regenerate the cmake build directory. Works on both Linux/macOS and Windows."""
 
+import argparse
 import os
 import platform
 import re
 import shutil
 import stat
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -15,6 +15,25 @@ def force_remove_readonly(func, path, exc_info):
     """Handle read-only files (e.g. git pack files) on Windows."""
     os.chmod(path, stat.S_IWRITE)
     func(path)
+
+
+def default_generator():
+    if platform.system() == "Windows":
+        if shutil.which("cl") and shutil.which("ninja"):
+            return "Ninja Multi-Config"
+        return "Visual Studio 17 2022"
+    return "Ninja Multi-Config"
+
+
+parser = argparse.ArgumentParser(
+    description="Regenerate the cmake build directory.",
+    allow_abbrev=False,
+)
+parser.add_argument(
+    "-G", dest="generator", default=default_generator(),
+    help="CMake generator (default: %(default)s)",
+)
+args, extra_cmake_args = parser.parse_known_args()
 
 project_root = Path(__file__).resolve().parent.parent
 os.chdir(project_root)
@@ -31,19 +50,16 @@ os.environ["CPM_SOURCE_CACHE"] = str(Path.home() / ".cache" / "CPM")
 cmake_args = [
     "cmake", "-S", ".", "-B", "build",
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=1",
+    "-G", args.generator,
 ]
 
-if platform.system() == "Windows":
-    cmake_args += ["-G", "Visual Studio 17 2022"]
-else:
-    cmake_args += ["-G", "Ninja Multi-Config"]
-    if shutil.which("ccache"):
-        cmake_args += [
-            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
-            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-        ]
+if not args.generator.startswith("Visual Studio") and shutil.which("ccache"):
+    cmake_args += [
+        "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+        "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+    ]
 
-cmake_args += sys.argv[1:]
+cmake_args += extra_cmake_args
 
 print("+", " ".join(cmake_args), flush=True)
 subprocess.run(cmake_args, check=True)

@@ -193,11 +193,11 @@ class ParentActor {
  public:
   explicit ParentActor(ex_actor::ActorRef<ChildActor> child) : child_(child) {}
 
-  exec::task<void> DelegateIncrement() { co_await child_.template Send<&ChildActor::IncrementCounter>(); }
+  stdexec::task<void> DelegateIncrement() { co_await child_.template Send<&ChildActor::IncrementCounter>(); }
 
-  exec::task<int> GetChildCounter() { co_return co_await child_.template Send<&ChildActor::GetCounter>(); }
+  stdexec::task<int> GetChildCounter() { co_return co_await child_.template Send<&ChildActor::GetCounter>(); }
 
-  exec::task<void> AddToChild(int value) { co_await child_.template Send<&ChildActor::AddValue>(value); }
+  stdexec::task<void> AddToChild(int value) { co_await child_.template Send<&ChildActor::AddValue>(value); }
 
  private:
   ex_actor::ActorRef<ChildActor> child_;
@@ -225,14 +225,14 @@ class Distributor {
               ex_actor::ActorRef<Accumulator> acc3)
       : accumulators_ {acc1, acc2, acc3} {}
 
-  exec::task<void> DistributeValue(int value) {
+  stdexec::task<void> DistributeValue(int value) {
     // Distribute to all accumulators
     for (auto& acc : accumulators_) {
       co_await acc.template Send<&Accumulator::Add>(value);
     }
   }
 
-  exec::task<std::vector<int>> CollectSums() {
+  stdexec::task<std::vector<int>> CollectSums() {
     std::vector<int> sums;
     sums.reserve(accumulators_.size());
     for (auto& acc : accumulators_) {
@@ -251,7 +251,7 @@ class Distributor {
 // ===========================
 
 TEST(ComplexApiTest, VariousArgumentTypes) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<VariousArgsActor>();
     // No arguments
     int state = co_await actor.template Send<&VariousArgsActor::GetState>();
@@ -311,7 +311,7 @@ TEST(ComplexApiTest, VariousArgumentTypes) {
 }
 
 TEST(ComplexApiTest, MoveOnlyArguments) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<MoveOnlyArgsActor>();
     // unique_ptr<int>
     auto int_ptr = std::make_unique<int>(42);
@@ -353,7 +353,7 @@ TEST(ComplexApiTest, MoveOnlyArguments) {
 }
 
 TEST(ComplexApiTest, ReferenceReturnTypes) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<ReferenceReturnActor>("Initial");
     std::string data = co_await actor.template Send<&ReferenceReturnActor::GetDataCopy>();
     EXPECT_EQ(data, "Initial");
@@ -375,7 +375,7 @@ TEST(ComplexApiTest, ReferenceReturnTypes) {
 }
 
 TEST(ComplexApiTest, ActorWithActorRefMember) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto child = co_await ex_actor::Spawn<ChildActor>();
     auto parent = co_await ex_actor::Spawn<ParentActor>(child);
     // Direct access to child
@@ -398,7 +398,7 @@ TEST(ComplexApiTest, ActorWithActorRefMember) {
 }
 
 TEST(ComplexApiTest, ActorWithMultipleActorRefMembers) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto acc1 = co_await ex_actor::Spawn<Accumulator>();
     auto acc2 = co_await ex_actor::Spawn<Accumulator>();
     auto acc3 = co_await ex_actor::Spawn<Accumulator>();
@@ -433,7 +433,7 @@ TEST(ComplexApiTest, ActorWithMultipleActorRefMembers) {
 }
 
 TEST(ComplexApiTest, MixedComplexScenario) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     // Test combining multiple complex features
     // Create a complex hierarchy
     auto acc1 = co_await ex_actor::Spawn<Accumulator>();

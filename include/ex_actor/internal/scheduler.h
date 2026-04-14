@@ -19,10 +19,32 @@
 #include <exec/static_thread_pool.hpp>
 
 #include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/container.h"
 #include "ex_actor/internal/logging.h"
-#include "ex_actor/internal/util.h"
+#include "ex_actor/internal/platform.h"
 
 namespace ex_actor {
+
+namespace internal {
+// Mixin that provides environment-adaptive completion signatures for scheduler senders.
+// When the environment has a never_stop_token, advertises only set_value_t(); otherwise
+// also advertises set_stopped_t().
+struct StoppableSchedulerCompletionSignatures {
+  template <class Self>
+  static consteval auto get_completion_signatures() {
+    return ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>();
+  }
+
+  template <class Self, class Env>
+  static consteval auto get_completion_signatures() {
+    if constexpr (ex::unstoppable_token<ex::stop_token_of_t<Env>>) {
+      return ex::completion_signatures<ex::set_value_t()>();
+    } else {
+      return ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>();
+    }
+  }
+};
+}  // namespace internal
 
 template <template <class> class Queue>
 class WorkSharingThreadPoolBase {
@@ -78,9 +100,10 @@ class WorkSharingThreadPoolBase {
 
   struct Scheduler;
 
-  struct Sender : ex::sender_t {
-    using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
+  struct Sender : ex::sender_t, internal::StoppableSchedulerCompletionSignatures {
+    using internal::StoppableSchedulerCompletionSignatures::get_completion_signatures;
     WorkSharingThreadPoolBase* thread_pool;
+
     struct Env {
       WorkSharingThreadPoolBase* thread_pool;
       template <class CPO>
@@ -163,9 +186,10 @@ class SchedulerUnion {
     }
   };
 
-  struct Sender : ex::sender_t {
-    using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
+  struct Sender : ex::sender_t, internal::StoppableSchedulerCompletionSignatures {
+    using internal::StoppableSchedulerCompletionSignatures::get_completion_signatures;
     SchedulerUnion* scheduler_union;
+
     struct Env {
       SchedulerUnion* scheduler_union;
       template <class CPO>
@@ -187,4 +211,5 @@ class SchedulerUnion {
   std::vector<InnerScheduler> schedulers_;
   size_t default_scheduler_index_;
 };
+
 }  // namespace ex_actor

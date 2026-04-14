@@ -60,7 +60,6 @@ cmake(
         "libkj-tls.a",
         "libkj.a",
         "libspdlog.a",
-        "libsystem_context.a",
         "libzmq.a",
     ],
 )

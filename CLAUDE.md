@@ -2,9 +2,12 @@ refer README.md and docs/contents for how to use this framework(ignore files lis
 
 refer "How to build from source" part in CONTRIBUTING.md for how to build&test.
 
-when debugging tests, do not simplify the test code unless you are very confident the test is not correct.
-
 when refactoring, do not remove original comments unless they are stale.
+
+# Debugging
+
+- when debugging tests, do not simplify the test code unless you are very confident the test is not correct.
+- prefer adding logs to gather more information before thinking too much.
 
 # Code Style
 

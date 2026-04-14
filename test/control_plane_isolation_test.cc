@@ -31,7 +31,7 @@ TEST(ControlPlaneIsolationTest, HeartbeatSurvivesWhenAllWorkerThreadsBusy) {
 
   std::barrier bar {2};
 
-  auto node_main = [&](size_t index) -> exec::task<void> {
+  auto node_main = [&](size_t index) -> stdexec::task<void> {
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5401", "tcp://127.0.0.1:5402"};
     ex_actor::ClusterConfig cluster_config {
         .listen_address = addresses.at(index),
@@ -59,10 +59,10 @@ TEST(ControlPlaneIsolationTest, HeartbeatSurvivesWhenAllWorkerThreadsBusy) {
     // Each actor will sleep for kBusyDurationMs, which is longer than the heartbeat timeout.
     // If the broker shared the worker pool, it couldn't send/receive heartbeats and the
     // other node would be considered dead.
-    exec::async_scope scope;
+    stdexec::simple_counting_scope scope;
     for (size_t i = 0; i < kWorkerThreads * 2; ++i) {
       auto actor = co_await registry.Spawn<BusyActor>();
-      scope.spawn(actor.Send<&BusyActor::BusyWork>(kBusyDurationMs));
+      stdexec::spawn(actor.Send<&BusyActor::BusyWork>(kBusyDurationMs) | ex_actor::DiscardResult(), scope.get_token());
     }
 
     // Wait long enough that the heartbeat would have timed out if the broker
@@ -76,7 +76,7 @@ TEST(ControlPlaneIsolationTest, HeartbeatSurvivesWhenAllWorkerThreadsBusy) {
     EXPECT_TRUE(still_connected) << "Cluster lost connectivity — heartbeat was likely starved by busy actors";
     EXPECT_GE(state_after.nodes.size(), 2U);
 
-    co_await scope.on_empty();
+    co_await scope.join();
     bar.arrive_and_wait();
   };
 

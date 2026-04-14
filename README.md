@@ -4,9 +4,10 @@
 <!-- GITHUB README ONLY END -->
 
 [![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-00c600.svg)](https://opensource.org/licenses/apache-2.0)
-[![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
-[![Generic badge](https://img.shields.io/badge/gcc-11+-blue.svg)](https://shields.io/)
-[![Generic badge](https://img.shields.io/badge/clang-16+-blue.svg)](https://shields.io/)
+[![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
+[![Generic badge](https://img.shields.io/badge/gcc-11+-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
+[![Generic badge](https://img.shields.io/badge/clang-16+-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
+[![Generic badge](https://img.shields.io/badge/MSVC-14.50+-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
 [![Build and test](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml/badge.svg)](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ex-actor/ex-actor)
 
@@ -32,7 +33,7 @@ This programming paradigm is called "Actor Model". It's a very easy way to write
 **📘 Full Tutorial : <https://ex-actor.github.io/ex-actor/tutorial/>**
 
 Note: currently we're based on std::execution's early implementation - [stdexec](https://github.com/NVIDIA/stdexec),
-so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` in the following example.
+so you'll see namespace `stdexec` instead of `std::execution` in the following example.
 
 ## Basic Example: Turn Your Class into an Actor
 
@@ -46,7 +47,7 @@ struct Counter {
   int count = 0;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   ex_actor::Init(/*thread_pool_size=*/1);
 
   // 1. Create the actor.
@@ -82,7 +83,7 @@ public:
 class Father {
 public:
   // actor's method can be a sender
-  exec::task<std::string> SpawnChildAndPing() {
+  stdexec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
       child_ = co_await ex_actor::Spawn<Child>();
     }
@@ -93,7 +94,7 @@ private:
   ex_actor::ActorRef<Child> child_;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   // Here we have only one thread in scheduler, but it still can finish the entire work
   // because everything is async, there is no blocking wait
   ex_actor::Init(/*thread_pool_size=*/1);

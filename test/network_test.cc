@@ -105,13 +105,22 @@ TEST(MessageBrokerTest, SendRequestToUnconnectedNodeThrows) {
   stdexec::sync_wait(broker.Stop());
 }
 
-TEST(MessageBrokerTest, SendRequestToSelfThrows) {
+TEST(MessageBrokerTest, SendRequestToSelfRoutesLocally) {
   auto config = MakeConfig("tcp://127.0.0.1:7211");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  EXPECT_THAT([&]() { stdexec::sync_wait(broker.SendRequest(/*to_node_id=*/0, {})); },
-              testing::Throws<std::exception>(
-                  testing::Property(&std::exception::what, testing::HasSubstr("Cannot send message to current node"))));
+  bool handler_called = false;
+  ex_actor::internal::MessageBrokerTestHelper::SetRequestHandler(
+      broker, [&handler_called](ByteBuffer data) -> stdexec::task<ByteBuffer> {
+        handler_called = true;
+        co_return std::move(data);
+      });
+
+  auto result = stdexec::sync_wait(broker.SendRequest(/*to_node_id=*/0, MakeBytes("hello")));
+  ASSERT_TRUE(result.has_value());
+  auto& [response_buf] = *result;
+  EXPECT_EQ(BytesToString(response_buf), "hello");
+  EXPECT_TRUE(handler_called);
 
   stdexec::sync_wait(broker.Stop());
 }

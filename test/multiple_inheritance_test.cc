@@ -128,6 +128,18 @@ struct BaseBProxy {
   }
 };
 
+// Receives an ActorRef<Derived>, casts it to ActorRef<BaseB>, and returns it.
+// This tests that static_cast pointer adjustment on a remote (invalid) pointer
+// produces the correct adjusted_ptr_ when the ref returns to the original node.
+struct Bouncer {
+  static Bouncer Create() { return Bouncer(); }
+
+  stdexec::task<ActorRef<BaseB>> CastToBaseB(ActorRef<Derived> derived_ref) {
+    ActorRef<BaseB> base_ref = derived_ref;
+    co_return base_ref;
+  }
+};
+
 // Register remote handlers
 EXA_REMOTE(&Dog::Create, &Dog::Speak);
 EXA_REMOTE(&Cat::Create, &Cat::Speak);
@@ -136,6 +148,7 @@ EXA_REMOTE(&Duck::Create, &Animal::Speak, &Swimmer::Swim);
 EXA_REMOTE(&SlicedDerived::CreateSlicing, &SlicedBase::GetType);
 EXA_REMOTE(&SlicedDerived::CreateCorrect);
 EXA_REMOTE(&BaseBProxy::Create, &BaseBProxy::CallGetB);
+EXA_REMOTE(&Bouncer::Create, &Bouncer::CastToBaseB);
 
 // IMPORTANT: We only register GetA, NOT GetB for DerivedPartial
 EXA_REMOTE(&DerivedPartial::Create, &BasePartialA::GetA);
@@ -315,6 +328,42 @@ TEST(MultipleInheritanceRemoteTest, DeserializedActorRefSendLocalWithMI) {
       // Since both actors live on the same remote node, this goes through SendLocal.
       auto proxy = co_await registry.Spawn<&BaseBProxy::Create>(base_b_ref).ToNode(remote_id);
       int result = co_await proxy.Send<&BaseBProxy::CallGetB>();
+      EXPECT_EQ(result, 20);
+    }
+    co_return;
+  });
+}
+
+/**
+ * @brief Tests that an ActorRef cast to a base type on a remote node still works
+ *        when sent back to the original node and used locally.
+ *
+ * Flow:
+ * 1. Node 0 spawns Derived locally -> gets ActorRef<Derived> with valid adjusted_ptr_.
+ * 2. Node 0 sends ActorRef<Derived> to Bouncer on remote node.
+ * 3. Bouncer casts ActorRef<Derived> -> ActorRef<BaseB> (static_cast on a remote pointer).
+ * 4. The ActorRef<BaseB> is sent back to node 0.
+ * 5. Node 0 calls SendLocal<&BaseB::GetB>() on the returned ref.
+ *
+ * This verifies that static_cast pointer adjustment on a remote (invalid) pointer produces
+ * a correct adjusted_ptr_ when the ref returns to the node where the actor actually lives.
+ */
+TEST(MultipleInheritanceRemoteTest, ActorRefCastOnRemoteNodeThenUsedLocally) {
+  RunTwoNodeTest([](size_t index, uint64_t remote_id, ActorRegistry& registry) -> stdexec::task<void> {
+    if (index == 0) {
+      // Spawn Derived locally on this node
+      auto derived = co_await registry.Spawn<&Derived::Create>();
+
+      // Spawn Bouncer on the remote node
+      auto bouncer = co_await registry.Spawn<&Bouncer::Create>().ToNode(remote_id);
+
+      // Send ActorRef<Derived> to remote Bouncer, which casts it to ActorRef<BaseB> and returns it.
+      // The cast happens on the remote node where the pointer is invalid, but static_cast
+      // applies a compile-time constant offset that doesn't depend on pointer validity.
+      ActorRef<BaseB> base_b_ref = co_await bouncer.Send<&Bouncer::CastToBaseB>(derived);
+
+      // Now use the returned ActorRef<BaseB> locally — the target actor is on this node.
+      int result = co_await base_b_ref.Send<&BaseB::GetB>();
       EXPECT_EQ(result, 20);
     }
     co_return;

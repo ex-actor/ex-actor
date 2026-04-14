@@ -224,7 +224,9 @@ ex::task<void> MessageBroker::DispatchReceivedMessage(ByteBuffer raw) {
 }
 
 ex::task<ByteBuffer> MessageBroker::SendRequest(uint64_t to_node_id, ByteBuffer data) {
-  EXA_THROW_CHECK_NE(to_node_id, this_node_id_) << "Cannot send message to current node";
+  if (to_node_id == this_node_id_) {
+    co_return co_await request_handler_(std::move(data));
+  }
   uint64_t request_id = SendTwoWayMessage(to_node_id, std::move(data));
   auto [iter, inserted] = outstanding_requests_.try_emplace(request_id);
   EXA_THROW_CHECK(inserted);

@@ -30,6 +30,13 @@
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal {
+
+struct ActorRefSerdeContext {
+  uint64_t this_node_id = 0;
+  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
+  BasicActorRef<MessageBroker> broker_actor_ref;
+};
+
 template <class UserClass>
 class ActorRef : public BasicActorRef<UserClass> {
  public:
@@ -96,8 +103,9 @@ class ActorRef : public BasicActorRef<UserClass> {
     EXA_THROW_CHECK(!this->IsEmpty()) << "Empty ActorRef, cannot call method on it.";
 
     using VariantType = std::variant<LocalSenderType, RemoteSenderType>;
-    VariantType chosen_sender = (node_id_ == this_node_id_) ? VariantType(SendLocal<kMethod>(std::move(args)...))
-                                                            : VariantType(SendRemote<kMethod>(std::move(args)...));
+    bool use_local = (node_id_ == this_node_id_) && (this->type_erased_actor_ != nullptr);
+    VariantType chosen_sender = use_local ? VariantType(SendLocal<kMethod>(std::move(args)...))
+                                          : VariantType(SendRemote<kMethod>(std::move(args)...));
 
     return SenderVariant {std::move(chosen_sender)};
   }
@@ -131,7 +139,8 @@ class ActorRef : public BasicActorRef<UserClass> {
     }};
 
     return broker_actor_ref_.template SendLocal<&MessageBroker::SendRequest>(node_id_, Serialize(request)) |
-           ex::then([node_id = node_id_](ByteBuffer response_buf) -> UnwrappedType {
+           ex::then([node_id = node_id_, this_node_id = this_node_id_,
+                     broker_actor_ref = broker_actor_ref_](ByteBuffer response_buf) -> UnwrappedType {
              auto reply = Deserialize<NetworkReply>(std::move(response_buf));
              auto& ret = std::get<ActorMethodCallReply>(reply.variant);
              if (!ret.success) {
@@ -140,7 +149,11 @@ class ActorRef : public BasicActorRef<UserClass> {
              if constexpr (std::is_void_v<UnwrappedType>) {
                return;
              } else {
-               auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(ret.serialized_result);
+               ActorRefSerdeContext serde_ctx {
+                   .this_node_id = this_node_id,
+                   .actor_look_up_fn = [](uint64_t /*actor_id*/) -> TypeErasedActor* { return nullptr; },
+                   .broker_actor_ref = broker_actor_ref};
+               auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(ret.serialized_result, serde_ctx);
                return std::move(res.return_value);
              }
            });
@@ -187,14 +200,6 @@ struct hash<ex_actor::ActorRef<UserClass>> {
 // ==============================
 // rfl serialization support
 // ==============================
-
-namespace ex_actor::internal {
-struct ActorRefSerdeContext {
-  uint64_t this_node_id = 0;
-  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
-  BasicActorRef<MessageBroker> broker_actor_ref;
-};
-}  // namespace ex_actor::internal
 
 namespace rfl {
 template <typename U>

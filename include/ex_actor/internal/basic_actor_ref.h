@@ -87,8 +87,6 @@ class BasicActorRef {
 
   bool IsEmpty() const { return is_empty_; }
   uint64_t GetActorId() const { return actor_id_; }
-  UserClass* GetAdjustedPtr() const { return adjusted_ptr_; }
-  void SetAdjustedPtr(UserClass* ptr) { adjusted_ptr_ = ptr; }
 
  protected:
   bool is_empty_ = true;

@@ -51,6 +51,7 @@ ex::task<void> ActorRegistryBackend::DestroyLocalActor(uint64_t actor_id) {
   EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
   auto actor = std::move(actor_id_to_actor_.at(actor_id));
   actor_id_to_actor_.erase(actor_id);
+  actor_id_to_serialized_ref_.erase(actor_id);
 
   auto actor_name = actor->GetActorConfig().actor_name;
   if (actor_name.has_value()) {
@@ -74,8 +75,9 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer reque
 
   if (auto* msg = std::get_if<ActorLookUpRequest>(&request.variant)) {
     if (actor_name_to_id_.contains(msg->actor_name)) {
-      co_return SerializeReply(
-          NetworkReply {ActorLookUpReply {.success = true, .actor_id = actor_name_to_id_.at(msg->actor_name)}});
+      auto actor_id = actor_name_to_id_.at(msg->actor_name);
+      co_return SerializeReply(NetworkReply {
+          ActorLookUpReply {.success = true, .serialized_actor_ref = MapAt(actor_id_to_serialized_ref_, actor_id)}});
     } else {
       co_return SerializeReply(NetworkReply {ActorLookUpReply {.success = false}});
     }
@@ -127,8 +129,9 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
       actor_name_to_id_[result.actor_name.value()] = actor_id;
     }
     actor_id_to_actor_[actor_id] = std::move(result.actor);
-    reply_out = SerializeReply(NetworkReply {ActorCreationReply {
-        .success = true, .actor_id = actor_id, .adjusted_ptr_addr = result.adjusted_ptr_addr}});
+    actor_id_to_serialized_ref_[actor_id] = result.serialized_actor_ref;
+    reply_out = SerializeReply(NetworkReply {
+        ActorCreationReply {.success = true, .serialized_actor_ref = std::move(result.serialized_actor_ref)}});
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
     reply_out = SerializeReply(NetworkReply {ActorCreationReply {.success = false, .error = std::move(error_msg)}});

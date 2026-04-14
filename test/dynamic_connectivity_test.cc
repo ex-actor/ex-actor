@@ -17,14 +17,14 @@ class Echoer {
 
   std::string Echo(const std::string& message) { return message; }
 
-  exec::task<std::string> Proxy(const std::string& message, const ex_actor::ActorRef<Echoer>& other) {
+  stdexec::task<std::string> Proxy(const std::string& message, const ex_actor::ActorRef<Echoer>& other) {
     auto sender = other.Send<&Echoer::Echo>(message);
     auto result = co_await std::move(sender);
     co_return result;
   }
 
-  exec::task<std::vector<std::string>> ProxyTwoActor(const std::string& message,
-                                                     const std::vector<ex_actor::ActorRef<Echoer>>& echoers) {
+  stdexec::task<std::vector<std::string>> ProxyTwoActor(const std::string& message,
+                                                        const std::vector<ex_actor::ActorRef<Echoer>>& echoers) {
     std::vector<std::string> strs;
     for (const auto& echoer : echoers) {
       auto sender = echoer.Send<&Echoer::Echo>(message);
@@ -51,7 +51,7 @@ class DynamicConnectivityTest {
     ex_actor::Init(/*thread_pool_size=*/1);
     stdexec::sync_wait(ex_actor::StartOrJoinCluster(config));
 
-    auto coroutine = [this]() -> exec::task<void> {
+    auto coroutine = [this]() -> stdexec::task<void> {
       // Wait for all other nodes to be discovered
       auto [cluster_state, condition_met] =
           co_await ex_actor::WaitClusterState([this](const auto& state) { return state.nodes.size() >= cluster_size_; },

@@ -18,7 +18,6 @@
 #include <thread>
 #include <vector>
 
-#include <exec/task.hpp>
 #include <gtest/gtest.h>
 #include <stdexec/execution.hpp>
 
@@ -128,7 +127,7 @@ EXA_REMOTE(&DerivedPartial::Create, &BasePartialA::GetA);
 
 void RunTwoNodeTest(auto test_logic) {
   std::barrier bar {2};
-  auto node_main = [&](size_t index) -> exec::task<void> {
+  auto node_main = [&](size_t index) -> stdexec::task<void> {
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5503", "tcp://127.0.0.1:5504"};
     ClusterConfig config {
         .listen_address = addresses.at(index),
@@ -170,7 +169,7 @@ class MultipleInheritanceTest : public ::testing::Test {
 };
 
 TEST_F(MultipleInheritanceTest, LocalPolymorphismAndOffsetAdjustment) {
-  auto test_coro = []() -> exec::task<void> {
+  auto test_coro = []() -> stdexec::task<void> {
     auto dog_ref = co_await Spawn<Dog>();
     ActorRef<Animal> animal_ref = dog_ref;
     EXPECT_EQ(co_await animal_ref.SendLocal<&Animal::Speak>(), "woof");
@@ -191,7 +190,7 @@ TEST_F(MultipleInheritanceTest, LocalPolymorphismAndOffsetAdjustment) {
  * @brief Verifies that local calls work even for methods not registered in EXA_REMOTE.
  */
 TEST_F(MultipleInheritanceTest, LocalUnregisteredMethodSucceeds) {
-  auto test_coro = []() -> exec::task<void> {
+  auto test_coro = []() -> stdexec::task<void> {
     auto ref = co_await Spawn<DerivedPartial>();
     // GetB is NOT registered in EXA_REMOTE, but SendLocal (and Send in local mode)
     // works because it uses direct memory access rather than handler lookup.
@@ -205,7 +204,7 @@ TEST_F(MultipleInheritanceTest, LocalUnregisteredMethodSucceeds) {
  * @brief the framework prevents and detects object slicing.
  */
 TEST_F(MultipleInheritanceTest, SlicingDetectionAndPrevention) {
-  auto test_coro = []() -> exec::task<void> {
+  auto test_coro = []() -> stdexec::task<void> {
     // 1. If a factory returns SlicedBase by value, slicing happens immediately.
     // The framework correctly creates an Actor<SlicedBase>.
     auto base_ref = co_await Spawn<&SlicedDerived::CreateSlicing>();
@@ -236,7 +235,7 @@ TEST_F(MultipleInheritanceTest, SlicingDetectionAndPrevention) {
 // ==================== Distributed Mode Tests ====================
 
 TEST(MultipleInheritanceRemoteTest, DistributedPolymorphismAndOffsetAdjustment) {
-  RunTwoNodeTest([](size_t index, uint64_t remote_id, ActorRegistry& registry) -> exec::task<void> {
+  RunTwoNodeTest([](size_t index, uint64_t remote_id, ActorRegistry& registry) -> stdexec::task<void> {
     if (index == 0) {
       auto actor = co_await registry.Spawn<&Derived::Create>().ToNode(remote_id);
       EXPECT_EQ(co_await actor.Send<&BaseA::GetA>(), 10);
@@ -254,7 +253,7 @@ TEST(MultipleInheritanceRemoteTest, DistributedPolymorphismAndOffsetAdjustment) 
  * @brief Verifies that remote calls fail if the method is not registered in EXA_REMOTE.
  */
 TEST(MultipleInheritanceRemoteTest, RemoteUnregisteredMethodFails) {
-  RunTwoNodeTest([](size_t index, uint64_t remote_id, ActorRegistry& registry) -> exec::task<void> {
+  RunTwoNodeTest([](size_t index, uint64_t remote_id, ActorRegistry& registry) -> stdexec::task<void> {
     if (index == 0) {
       auto actor = co_await registry.Spawn<&DerivedPartial::Create>().ToNode(remote_id);
 

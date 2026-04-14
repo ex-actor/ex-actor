@@ -101,7 +101,7 @@ struct TestActor {
   void Foo() {}
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   ex_actor::PriorityThreadPool thread_pool(1);
   ex_actor::Init(thread_pool.GetScheduler());
   auto actor = co_await ex_actor::Spawn<TestActor>().WithConfig({
@@ -134,7 +134,7 @@ struct TestActor {
   uint64_t GetThreadId() { return std::hash<std::thread::id>{}(std::this_thread::get_id()); }
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   // 1. create two thread pools
   ex_actor::WorkSharingThreadPool thread_pool1(1);
   ex_actor::WorkSharingThreadPool thread_pool2(1);

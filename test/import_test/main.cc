@@ -11,7 +11,7 @@ class Counter {
   int count_ = 0;
 };
 
-exec::task<void> TestBasicUseCase() {
+stdexec::task<void> TestBasicUseCase() {
   ex_actor::WorkSharingThreadPool thread_pool(10);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
   ex_actor::ActorRef counter = co_await registry.Spawn<Counter>();

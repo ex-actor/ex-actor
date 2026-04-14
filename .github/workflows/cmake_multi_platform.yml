@@ -31,7 +31,7 @@ jobs:
       matrix:
         build_type: [RelWithDebInfo]
         toolchain:
-          - { os: windows-latest, compiler: { cc: cl, cpp: cl } }
+          - { os: windows-2025-vs2026, compiler: { cc: cl, cpp: cl } }
           # GCC versions
           - { os: ubuntu-24.04, compiler: { cc: gcc-11, cpp: g++-11 } }
           - { os: ubuntu-24.04, compiler: { cc: gcc-12, cpp: g++-12 } }

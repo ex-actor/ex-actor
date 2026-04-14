@@ -13,12 +13,12 @@ TEST(SchedulerTest, TaskInWorkSharingThreadPoolShouldBeStoppable) {
   ex_actor::WorkSharingThreadPool thread_pool(1);
   auto scheduler = thread_pool.GetScheduler();
   auto task = ex::schedule(scheduler) | ex::then([]() { std::this_thread::sleep_for(std::chrono::milliseconds(100)); });
-  exec::async_scope scope;
+  stdexec::counting_scope scope;
   for (int i = 0; i < 100000; ++i) {
-    scope.spawn(task);
+    stdexec::spawn(task | ex_actor::DiscardResult(), scope.get_token());
   }
   scope.request_stop();
-  ex::sync_wait(scope.on_empty());
+  ex::sync_wait(scope.join());
 }
 
 struct TestActor {
@@ -32,12 +32,12 @@ TEST(SchedulerTest, ActorTaskShouldBeStoppable) {
   ex_actor::WorkSharingThreadPool thread_pool(1);
   ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
   auto [actor] = stdexec::sync_wait(registry.Spawn<TestActor>()).value();
-  exec::async_scope scope;
+  stdexec::counting_scope scope;
   for (int i = 0; i < 100000; ++i) {
-    scope.spawn(actor.Send<&TestActor::Foo>());
+    stdexec::spawn(actor.Send<&TestActor::Foo>() | ex_actor::DiscardResult(), scope.get_token());
   }
   scope.request_stop();
-  ex::sync_wait(scope.on_empty());
+  ex::sync_wait(scope.join());
 }
 
 TEST(SchedulerTest, PrioritySchedulerTest) {
@@ -59,12 +59,12 @@ TEST(SchedulerTest, PrioritySchedulerTest) {
                    count++;
                  }) |
                  ex::write_env(ex::prop {ex_actor::get_priority, 2});
-  exec::async_scope scope;
-  scope.spawn(sender1);
-  scope.spawn(sender2);
-  scope.spawn(sender3);
+  stdexec::simple_counting_scope scope;
+  stdexec::spawn(sender1 | ex_actor::DiscardResult(), scope.get_token());
+  stdexec::spawn(sender2 | ex_actor::DiscardResult(), scope.get_token());
+  stdexec::spawn(sender3 | ex_actor::DiscardResult(), scope.get_token());
   thread_pool.StartWorkers();
-  ex::sync_wait(scope.on_empty());
+  ex::sync_wait(scope.join());
   ASSERT_EQ(count, 3);
 }
 
@@ -86,7 +86,7 @@ TEST(SchedulerTest, SchedulerUnionTest) {
   auto [thread_id2] = ex::sync_wait(sender2).value();
   ASSERT_NE(thread_id1, thread_id2);
 
-  auto coroutine = [&]() -> exec::task<void> {
+  auto coroutine = [&]() -> stdexec::task<void> {
     // create two actors, specify the scheduler index in ActorConfig.
     auto actor1 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 0});
     auto actor2 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 1});
@@ -111,7 +111,7 @@ TEST(SchedulerTest, TestResourceHolder) {
   ex_actor::HoldResource(std::move(shared_pool1));
   ex_actor::HoldResource(std::move(shared_pool2));
   ex_actor::HoldResource(std::move(union_pool));
-  auto coroutine = [&]() -> exec::task<void> {
+  auto coroutine = [&]() -> stdexec::task<void> {
     // create two actors, specify the scheduler index in ActorConfig.
     auto actor1 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 0});
     auto actor2 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 1});

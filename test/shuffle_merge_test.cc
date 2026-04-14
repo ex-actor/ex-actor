@@ -39,7 +39,7 @@ class Worker {
   explicit Worker(ex_actor::ActorRef<Reducer> reducer) : reducer_(reducer) {}
 
   // Process a chunk of data (sum of squares) and send to reducer
-  exec::task<void> ProcessData(std::vector<int> data) {
+  stdexec::task<void> ProcessData(std::vector<int> data) {
     int64_t result = 0;
     for (int val : data) {
       result += static_cast<int64_t>(val) * val;  // compute sum of squares
@@ -50,7 +50,7 @@ class Worker {
   }
 
   // Process single value
-  exec::task<int64_t> ProcessValue(int value) {
+  stdexec::task<int64_t> ProcessValue(int value) {
     int64_t result = static_cast<int64_t>(value) * value;
     co_await reducer_.template Send<&Reducer::AddResult>(result);
     co_return result;
@@ -69,7 +69,7 @@ class DataSource {
 
   // Generate deterministic data and shuffle to workers
   // Generates sequential numbers starting from start_value
-  exec::task<void> GenerateAndShuffleDeterministic(int data_size, int start_value) {
+  stdexec::task<void> GenerateAndShuffleDeterministic(int data_size, int start_value) {
     // Generate deterministic data chunks (sequential numbers)
     std::vector<int> data;
     data.reserve(data_size);
@@ -91,7 +91,7 @@ class DataSource {
   }
 
   // Send individual values round-robin to workers
-  exec::task<void> DistributeValues(std::vector<int> values) {
+  stdexec::task<void> DistributeValues(std::vector<int> values) {
     for (size_t i = 0; i < values.size(); ++i) {
       size_t worker_idx = i % workers_.size();
       co_await workers_[worker_idx].template Send<&Worker::ProcessValue>(values[i]);
@@ -111,23 +111,25 @@ class Coordinator {
       : sources_(std::move(sources)), reducers_(std::move(reducers)) {}
 
   // Execute the entire shuffle-merge workflow with deterministic data
-  exec::task<void> ExecuteWorkflow(int data_size_per_source) {
-    exec::async_scope scope;
+  stdexec::task<void> ExecuteWorkflow(int data_size_per_source) {
+    stdexec::simple_counting_scope scope;
 
     // Launch all data sources in parallel with deterministic sequential data
     // Each source gets an unique range of sequential numbers
     for (size_t i = 0; i < sources_.size(); ++i) {
       int start_value = static_cast<int>((i * data_size_per_source) + 1);
-      scope.spawn(
-          sources_[i].template Send<&DataSource::GenerateAndShuffleDeterministic>(data_size_per_source, start_value));
+      stdexec::spawn(
+          sources_[i].template Send<&DataSource::GenerateAndShuffleDeterministic>(data_size_per_source, start_value) |
+              ex_actor::DiscardResult(),
+          scope.get_token());
     }
 
     // Wait for all work to complete
-    co_await scope.on_empty();
+    co_await scope.join();
   }
 
   // Collect results from all reducers
-  exec::task<std::vector<int64_t>> CollectResults() {
+  stdexec::task<std::vector<int64_t>> CollectResults() {
     std::vector<int64_t> results;
     results.reserve(reducers_.size());
     for (auto& reducer : reducers_) {
@@ -147,7 +149,7 @@ class Coordinator {
 // ===========================
 
 TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     constexpr int kNumReducers = 4;
     constexpr int kNumWorkers = 16;
     constexpr int kNumSources = 8;
@@ -203,7 +205,7 @@ TEST(ShuffleMergeTest, BasicShuffleMergeWorkflow) {
 }
 
 TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     constexpr int kNumReducers = 8;
     constexpr int kNumWorkers = 64;
     constexpr int kNumSources = 32;
@@ -271,7 +273,7 @@ TEST(ShuffleMergeTest, LargeScaleShuffleMerge) {
 }
 
 TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     // Test with multiple stages of shuffle-merge (like multi-level MapReduce)
     constexpr int kNumStage1Reducers = 16;
     constexpr int kNumStage2Reducers = 4;
@@ -301,16 +303,18 @@ TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
     }
 
     // Execute stage 1
-    exec::async_scope scope;
+    stdexec::simple_counting_scope scope;
 
     // Launch all sources with deterministic sequential data
     for (size_t i = 0; i < sources.size(); ++i) {
       int start_value = static_cast<int>((i * kDataSizePerSource) + 1);
-      scope.spawn(
-          sources[i].template Send<&DataSource::GenerateAndShuffleDeterministic>(kDataSizePerSource, start_value));
+      stdexec::spawn(
+          sources[i].template Send<&DataSource::GenerateAndShuffleDeterministic>(kDataSizePerSource, start_value) |
+              ex_actor::DiscardResult(),
+          scope.get_token());
     }
 
-    co_await scope.on_empty();
+    co_await scope.join();
 
     // Collect stage 1 results
     std::vector<int64_t> stage1_results;
@@ -376,7 +380,7 @@ TEST(ShuffleMergeTest, MultiStageShuffleMerge) {
 }
 
 TEST(ShuffleMergeTest, ComplexDependencyGraph) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     // Test with complex dependency graph where workers communicate with multiple reducers
     constexpr int kNumReducers = 8;
     constexpr int kNumValues = 10000;

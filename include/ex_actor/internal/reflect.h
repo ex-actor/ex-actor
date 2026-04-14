@@ -18,7 +18,6 @@
 #include <tuple>
 #include <type_traits>
 
-#include <exec/task.hpp>
 #include <rfl/Tuple.hpp>
 #include <stdexec/execution.hpp>
 
@@ -72,7 +71,7 @@ template <class T>
 struct ExTaskTraits;
 
 template <class T>
-struct ExTaskTraits<exec::task<T>> {
+struct ExTaskTraits<ex::task<T>> {
   using InnerType = T;
 };
 
@@ -95,7 +94,7 @@ using ParamPackElement = std::tuple_element_t<kIndex, std::tuple<Ts...>>;
 
 template <ex::sender Sender>
 using CoAwaitType =
-    decltype(std::declval<exec::task<void>::promise_type>().await_transform(std::declval<Sender>()).await_resume());
+    decltype(std::declval<ex::task<void>::promise_type>().await_transform(std::declval<Sender>()).await_resume());
 
 template <class Sender, class... Ts>
 concept SenderOf = ex::sender_of<Sender, ex::set_value_t(Ts...)>;
@@ -126,19 +125,26 @@ std::string GetUniqueNameForFunction() {
 template <auto kFn>
 using FnReturnType = std::decay_t<typename Signature<decltype(kFn)>::ReturnType>;
 
-// Order-independent set equality of two completion_signatures types.
 template <class T, class... Ts>
 constexpr bool kContainedIn = (std::is_same_v<T, Ts> || ...);
 
-template <class SigsA, class SigsB>
-struct CompletionSignaturesMatchImpl;
+// Compute the set-union of two completion_signatures types.
+template <class Merged, class Remaining>
+struct CompletionSignaturesUnionImpl;
 
-template <class... SigsA, class... SigsB>
-struct CompletionSignaturesMatchImpl<ex::completion_signatures<SigsA...>, ex::completion_signatures<SigsB...>>
-    : std::bool_constant<sizeof...(SigsA) == sizeof...(SigsB) && (kContainedIn<SigsA, SigsB...> && ...) &&
-                         (kContainedIn<SigsB, SigsA...> && ...)> {};
+template <class... Merged>
+struct CompletionSignaturesUnionImpl<ex::completion_signatures<Merged...>, ex::completion_signatures<>> {
+  using Type = ex::completion_signatures<Merged...>;
+};
+
+template <class... Merged, class Head, class... Tail>
+struct CompletionSignaturesUnionImpl<ex::completion_signatures<Merged...>, ex::completion_signatures<Head, Tail...>>
+    : CompletionSignaturesUnionImpl<
+          std::conditional_t<kContainedIn<Head, Merged...>, ex::completion_signatures<Merged...>,
+                             ex::completion_signatures<Merged..., Head>>,
+          ex::completion_signatures<Tail...>> {};
 
 template <class SigsA, class SigsB>
-constexpr bool kCompletionSignaturesMatch = CompletionSignaturesMatchImpl<SigsA, SigsB>::value;
+using CompletionSignaturesUnion = typename CompletionSignaturesUnionImpl<SigsA, SigsB>::Type;
 
 }  // namespace ex_actor::internal

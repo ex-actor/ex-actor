@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
   std::string remote_address = argv[2];
   std::string contact_address = (argc > 3) ? argv[3] : "";
   auto coroutine = [](std::string listen_address, std::string remote_address,
-                      std::string contact_address) -> exec::task<void> {
+                      std::string contact_address) -> stdexec::task<void> {
     ex_actor::ClusterConfig cluster_config {
         .listen_address = listen_address,
         .contact_node_address = contact_address,

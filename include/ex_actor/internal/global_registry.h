@@ -58,7 +58,7 @@ void Init(Scheduler scheduler);
  * @brief [Experimental] Switch to distributed mode by starting or joining a cluster.
  * @note Not thread-safe. Should be called after Init() and before Shutdown(). Can't be called twice.
  */
-exec::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config);
+ex::task<void> StartOrJoinCluster(const ClusterConfig& cluster_config);
 
 /**
  * @brief Shutdown the global default registry. Must be called explicitly before `main` exits.
@@ -73,14 +73,16 @@ void Shutdown();
  * finishes, we'll restore your original signal handler.
  * @warning Don't set signal handlers during the middle of this function, we don't promise safety in such case.
  */
-exec::task<void> WaitOsExitSignal();
+ex::task<void> WaitOsExitSignal();
 
 /**
  * @brief Wait until a predicate on the set of alive nodes is satisfied, or timeout.
  * @return The list of alive nodes and whether the condition was met before the timeout.
  */
-exec::task<WaitClusterStateResult> WaitClusterState(std::function<bool(const ClusterState&)> predicate,
-                                                    uint64_t timeout_ms);
+inline SenderOf<WaitClusterStateResult> auto WaitClusterState(std::function<bool(const ClusterState&)> predicate,
+                                                              uint64_t timeout_ms) {
+  return internal::GetGlobalDefaultRegistry().WaitClusterState(std::move(predicate), timeout_ms);
+}
 
 /**
  * @brief Ask ex_actor to hold a resource, the resource won't be released until runtime is shut down.

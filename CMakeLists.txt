@@ -17,7 +17,13 @@ set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "")
 if(MSVC)
   add_compile_options(/EHsc)
   add_compile_options(/bigobj)
+  # Match the Linux default of 8 MB stack per thread.
+  # stdexec operation-state objects can be large; the Windows default (1 MB)
+  # is too small for deeply composed sender chains and causes stack overflows
+  # that manifest as SEGFAULT on tests such as skynet_test and distributed_test.
+  add_link_options(/STACK:8388608)
 endif()
+
 # ------------------- dependencies -------------------
 
 # When C++26 is ready, I'll add a build option to switch to the real std::execution in C++26,
@@ -25,9 +31,10 @@ endif()
 CPMAddPackage(
   NAME stdexec
   GITHUB_REPOSITORY NVIDIA/stdexec
-  GIT_TAG 770f7959142c2446319f642c82aed8b07aea3f86
+  GIT_TAG 73559e8963dab7a4ece32ede22f6472c9a815032
   OPTIONS "BUILD_TESTING OFF"
   OPTIONS "STDEXEC_BUILD_EXAMPLES OFF"
+  OPTIONS "STDEXEC_INSTALL ON"
 )
 
 # reflect-cpp with Cap'n Proto for actor message serialization

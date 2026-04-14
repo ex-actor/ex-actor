@@ -31,7 +31,7 @@ class Proxy {
  public:
   explicit Proxy(ex_actor::ActorRef<Counter> actor_ref) : actor_ref_(actor_ref) {}
 
-  exec::task<int> GetValue() {
+  stdexec::task<int> GetValue() {
     int res = co_await actor_ref_.template Send<&Counter::GetValue>();
     std::cout << "This line runs on the current actor(Proxy), because coroutine has scheduler affinity\n";
     co_return res;
@@ -50,7 +50,7 @@ class Proxy {
 };
 
 TEST(BasicApiTest, ActorRegistryCreationWithDefaultScheduler) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto counter = co_await ex_actor::Spawn<Counter>();
     auto getvalue_sender = counter.Send<&Counter::GetValue>();
     auto getvalue_reply = co_await std::move(getvalue_sender);
@@ -63,15 +63,14 @@ TEST(BasicApiTest, ActorRegistryCreationWithDefaultScheduler) {
 }
 
 TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto counter = co_await ex_actor::Spawn<Counter>();
-    exec::async_scope scope;
-    scope.spawn(counter.SendLocal<&Counter::Add>(1));
-    auto future = scope.spawn_future(counter.SendLocal<&Counter::GetValue>());
+    stdexec::simple_counting_scope scope;
+    stdexec::spawn(counter.SendLocal<&Counter::Add>(1) | ex_actor::DiscardResult(), scope.get_token());
+    auto future = stdexec::spawn_future(counter.SendLocal<&Counter::GetValue>(), scope.get_token());
     auto res = co_await std::move(future);
     EXPECT_EQ(res, 1);
-    // Wait for all spawned work to complete before destroying the scope
-    co_await scope.on_empty();
+    co_await scope.join();
     co_return;
   };
   ex_actor::Init(/*thread_pool_size=*/10);
@@ -80,7 +79,7 @@ TEST(BasicApiTest, ShouldWorkWithAsyncSpawn) {
 }
 
 TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto counter = co_await ex_actor::Spawn<Counter>();
     co_await counter.Send<&Counter::Error>();
   };
@@ -91,11 +90,11 @@ TEST(BasicApiTest, ExceptionInActorMethodShouldBePropagatedToCaller) {
 }
 
 TEST(BasicApiTest, NestActorRefCase) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     ex_actor::ActorRef counter = co_await ex_actor::Spawn<Counter>();
-    exec::async_scope scope;
+    stdexec::simple_counting_scope scope;
     for (int i = 0; i < 100; ++i) {
-      scope.spawn(counter.Send<&Counter::Add>(1));
+      stdexec::spawn(counter.Send<&Counter::Add>(1) | ex_actor::DiscardResult(), scope.get_token());
     }
     auto res = co_await counter.Send<&Counter::GetValue>();
     EXPECT_EQ(res, 100);
@@ -105,6 +104,7 @@ TEST(BasicApiTest, NestActorRefCase) {
     auto res3 = co_await proxy.Send<&Proxy::GetValue2>();
     EXPECT_EQ(res2, 100);
     EXPECT_EQ(res3, 100);
+    co_await scope.join();
     co_return;
   };
   ex_actor::Init(/*thread_pool_size=*/10);
@@ -113,7 +113,7 @@ TEST(BasicApiTest, NestActorRefCase) {
 }
 
 TEST(BasicApiTest, SpawnWithFullConfig) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     /*
     before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
     here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
@@ -149,13 +149,13 @@ TEST(BasicApiTest, SpawnWithFullConfig) {
 
 class TestActorWithNamedLookup {
  public:
-  exec::task<ex_actor::ActorRef<Counter>> LookUpActor() {
+  stdexec::task<ex_actor::ActorRef<Counter>> LookUpActor() {
     co_return (co_await ex_actor::GetActorRefByName<Counter>("counter")).value();
   }
 };
 
 TEST(BasicApiTest, LookUpNamedActor) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     ex_actor::ActorConfig config {.actor_name = "counter"};
     co_await ex_actor::Spawn<Counter>().WithConfig(config);
     auto test_retriever_actor = co_await ex_actor::Spawn<TestActorWithNamedLookup>();
@@ -193,7 +193,7 @@ struct Derived : Base {
 };
 
 TEST(BasicApiTest, ActorCanBePolymorphic) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     ex_actor::Init(/*thread_pool_size=*/10);
     ex_actor::ActorRef<Base> base = co_await ex_actor::Spawn<Derived>();
     std::string foo_reply = co_await base.Send<&Base::Foo>();

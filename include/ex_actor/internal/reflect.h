@@ -126,4 +126,19 @@ std::string GetUniqueNameForFunction() {
 template <auto kFn>
 using FnReturnType = std::decay_t<typename Signature<decltype(kFn)>::ReturnType>;
 
+// Order-independent set equality of two completion_signatures types.
+template <class T, class... Ts>
+constexpr bool kContainedIn = (std::is_same_v<T, Ts> || ...);
+
+template <class SigsA, class SigsB>
+struct CompletionSignaturesMatchImpl;
+
+template <class... SigsA, class... SigsB>
+struct CompletionSignaturesMatchImpl<ex::completion_signatures<SigsA...>, ex::completion_signatures<SigsB...>>
+    : std::bool_constant<sizeof...(SigsA) == sizeof...(SigsB) && (kContainedIn<SigsA, SigsB...> && ...) &&
+                         (kContainedIn<SigsB, SigsA...> && ...)> {};
+
+template <class SigsA, class SigsB>
+constexpr bool kCompletionSignaturesMatch = CompletionSignaturesMatchImpl<SigsA, SigsB>::value;
+
 }  // namespace ex_actor::internal

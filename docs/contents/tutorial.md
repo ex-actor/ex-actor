@@ -42,21 +42,21 @@ exec::task<void> MainCoroutine() {
   
   /*
   3. Everything is setup, you can call the actor's method now using `actor_ref.Send`.
-  This method returns a standard `std::execution::task`, compatible with everything
+  This method returns a standard std::execution sender, compatible with everything
   in the `std::execution` ecosystem. If you met "unsupported type" compile error: (1)
   */
-  auto task = actor.Send<&Counter::Add>(1);
+  auto sender = actor.Send<&Counter::Add>(1);
 
   /*
   3.1 For local actors, you can try `SendLocal`, which doesn't require the args to be serializable.
   */
-  auto task2 = actor.SendLocal<&Counter::Add>(1);
+  auto sender2 = actor.SendLocal<&Counter::Add>(1);
 
   /*
-  4. The task is lazy executed. To execute the task and wait for the result non-blockingly,
-  use `co_await`. Note that the task is not copyable, so you need to use `std::move`.
+  4. The sender is lazy executed. To execute the sender and wait for the result non-blockingly,
+  use `co_await`. Note that the sender is not copyable, so you need to use `std::move`.
   */
-  auto res = co_await std::move(task);
+  auto res = co_await std::move(sender);
   assert(res == 1);
 
   // A shorter way
@@ -99,7 +99,7 @@ public:
 
 class Father {
 public:
-  // Actor's method can be a coroutine.
+  // Actor's method can be a sender.
   exec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
       // this line won't block the scheduler thread
@@ -116,7 +116,7 @@ private:
 
 exec::task<void> MainCoroutine() {
   // Here we have only one thread in scheduler, but it still can finish the entire work,
-  // because we use coroutine, there is no blocking wait in actor's method.
+  // because everything is async, there is no blocking wait
   ex_actor::Init(/*thread_pool_size=*/1);
 
   ex_actor::ActorRef<Father> father = co_await ex_actor::Spawn<Father>();
@@ -151,7 +151,7 @@ class Proxy {
  public:
   explicit Proxy(ex_actor::ActorRef<PingWorker> actor_ref) : actor_ref_(actor_ref) {}
 
-  // Actor's method can be a coroutine.
+  // Actor's method can be a sender.
   exec::task<std::string> ProxyPing() {
     // This line won't block the scheduler thread.
     std::string ping_res = co_await actor_ref_.template Send<&PingWorker::Ping>();
@@ -183,7 +183,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 <!-- doc test end -->
 
 
-## Trigger task without waiting for the result immediately
+## Trigger senders without waiting for the result immediately
 
 You can use [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.html) to trigger a task without waiting for the result immediately.
 
@@ -204,12 +204,12 @@ exec::task<void> MainCoroutine() {
   exec::async_scope scope;
 
   /*
-  for void tasks, use `async_scope.spawn`.
+  for void senders, use `async_scope.spawn`.
   */
   scope.spawn(actor.Send<&Counter::Add>(1));
   
   /*
-  for non-void tasks, if you don't want to get the result, attach an empty `then`
+  for non-void senders, if you don't want to get the result, attach an empty `then`
   to discard the result, then use `async_scope.spawn`.
   */
   scope.spawn(actor.Send<&Counter::AddAndGet>(1) | stdexec::then([](auto) {}));
@@ -221,7 +221,7 @@ exec::task<void> MainCoroutine() {
   int res = co_await std::move(future);
   assert(res == 3);
   
-  // you must wait for all task done before destroying the scope,
+  // you must wait for all senders done before destroying the scope,
   // or an exception will be thrown.
   co_await scope.on_empty();
 
@@ -233,9 +233,9 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 <!-- doc test end -->
 
 
-## Execute multiple tasks in parallel
+## Execute multiple senders in parallel
 
-You can execute multiple tasks in parallel using [`when_all`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-adaptor-when_all) or [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.html) in std::execution.
+You can execute multiple senders in parallel using [`when_all`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-adaptor-when_all) or [`async_scope`](https://kirkshoop.github.io/async_scope/asyncscope.html) in std::execution.
 
 <!-- doc test start -->
 ```cpp
@@ -259,7 +259,7 @@ exec::task<void> MainCoroutine() {
   }
 
   /*
-  1. `when_all` example, handy for small number of tasks.
+  1. `when_all` example, handy for small number of senders.
   */
   auto [res1, res2, res3] = co_await stdexec::when_all(
     counters[0].Send<&Counter::AddAndGet>(1),
@@ -271,12 +271,12 @@ exec::task<void> MainCoroutine() {
   assert(res3 == 1);
 
   /*
-  2. for large number of tasks where you need a loop, use `async_scope`.
+  2. for large number of senders where you need a loop, use `async_scope`.
   */
   exec::async_scope scope;
 
   /*
-  2.1 async_scope.spawn example, which only accepts void tasks.
+  2.1 async_scope.spawn example, which only accepts void senders.
   */
   for (int i = 0; i < counters.size(); ++i) {
     scope.spawn(counters[i].Send<&Counter::Add>(1));
@@ -309,11 +309,11 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 ```
 <!-- doc test end -->
 
-## [Optional Read] Wrap the result using sender adapter
+## [Optional Read] Wrap the result using plain sender adapter
 
-We recommend you to use coroutine to wrap the result, which is easier and more readable.
+We recommend you to use `std::execution::task` coroutine to wrap the result, which is easier and more readable.
 
-But if you insist on using sender adapter for some reason, be cautious that you'll lose the scheduler affinity `std::execution::task` provided,
+But if you insist on using plain sender adapter for some reason, be cautious that you'll lose the scheduler affinity `std::execution::task` provided,
 the `ex::then` callback will run on the actor's thread, **do not capture local variable's reference, or `this` pointer of an actor instance in the callback**.
 
 <!-- doc test start -->

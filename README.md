@@ -23,7 +23,7 @@ This programming paradigm is called "Actor Model". It's a very easy way to write
 # Key Features
 
 1. **Easy to Use** - Clean & intuitive API, turn your existing class into an actor.
-2. **Standard-Compliant** - Composible with everything in std::execution ecosystem.
+2. **Standard-Compliant** - Composable with everything in std::execution ecosystem.
 3. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also [provide many out-of-box](https://ex-actor.github.io/ex-actor/schedulers/): work-sharing, work-stealing, custom priority and so on.
 
 
@@ -52,7 +52,7 @@ exec::task<void> MainCoroutine() {
   // 1. Create the actor.
   ex_actor::ActorRef actor = co_await ex_actor::Spawn<Counter>();
 
-  // 2. Call it! It returns a `std::execution::task`.
+  // 2. Call it! It returns a std::execution sender.
   int res = co_await actor.Send<&Counter::Add>(1);
   assert(res == 1);
 
@@ -65,7 +65,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Actor Chaining Example
 
-Actor's method can be a coroutine. The following example shows how to create an actor inside an actor and call it without blocking the scheduler thread.
+Actor's method can be a sender. The following example shows how to create an actor inside an actor and call it without blocking the scheduler thread.
 
 <!-- doc test start -->
 ```cpp
@@ -81,7 +81,7 @@ public:
 
 class Father {
 public:
-  // actor's method can be a coroutine
+  // actor's method can be a sender
   exec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
       child_ = co_await ex_actor::Spawn<Child>();
@@ -95,7 +95,7 @@ private:
 
 exec::task<void> MainCoroutine() {
   // Here we have only one thread in scheduler, but it still can finish the entire work
-  // because we use coroutine, there is no blocking wait in actor's method.
+  // because everything is async, there is no blocking wait
   ex_actor::Init(/*thread_pool_size=*/1);
 
   ex_actor::ActorRef<Father> father = co_await ex_actor::Spawn<Father>();

@@ -20,8 +20,11 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <variant>
 
 #include <spdlog/spdlog.h>
 #include <stdexec/execution.hpp>
@@ -30,6 +33,7 @@
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/logging.h"
+#include "ex_actor/internal/reflect.h"
 
 namespace ex_actor {
 /**
@@ -308,6 +312,74 @@ auto& MapAt(Map& map, const Key& key, std::source_location loc = std::source_loc
   }
   return it->second;
 }
+
+// A sender that wraps two alternative senders in a variant, choosing at runtime.
+// Used to type erase different senders without using ex::task, so the scheduler can be preserved.
+template <class SenderA, class SenderB>
+  requires kCompletionSignaturesMatch<ex::completion_signatures_of_t<SenderA, ex::env<>>,
+                                      ex::completion_signatures_of_t<SenderB, ex::env<>>>
+struct SenderVariant : ex::sender_t {
+  std::variant<SenderA, SenderB> sender_variant;
+
+  explicit SenderVariant(std::variant<SenderA, SenderB> sender) : sender_variant(std::move(sender)) {}
+
+  using completion_signatures = ex::completion_signatures_of_t<SenderA, ex::env<>>;
+
+  template <ex::receiver Receiver>
+  struct VariantOperation {
+    using OpA = decltype(ex::connect(std::declval<SenderA>(), std::declval<Receiver>()));
+    using OpB = decltype(ex::connect(std::declval<SenderB>(), std::declval<Receiver>()));
+
+    // 0 = A active, 1 = B active
+    unsigned char index;
+
+    // Uses a plain union instead of std::variant to avoid requiring move-constructibility,
+    // since stdexec operation states are immovable.
+    union Storage {
+      OpA op_a;
+      OpB op_b;
+      Storage() noexcept {}
+      ~Storage() {}
+    } storage;
+
+    VariantOperation(std::integral_constant<unsigned char, 0> /*tag*/, SenderA&& sender, Receiver&& receiver)
+        : index(0) {
+      ::new (&storage.op_a) OpA(ex::connect(std::move(sender), std::move(receiver)));
+    }
+    VariantOperation(std::integral_constant<unsigned char, 1> /*tag*/, SenderB&& sender, Receiver&& receiver)
+        : index(1) {
+      ::new (&storage.op_b) OpB(ex::connect(std::move(sender), std::move(receiver)));
+    }
+
+    VariantOperation(VariantOperation&&) = delete;
+    VariantOperation& operator=(VariantOperation&&) = delete;
+
+    ~VariantOperation() {
+      if (index == 0) {
+        storage.op_a.~OpA();
+      } else {
+        storage.op_b.~OpB();
+      }
+    }
+
+    void start() noexcept {
+      if (index == 0) {
+        ex::start(storage.op_a);
+      } else {
+        ex::start(storage.op_b);
+      }
+    }
+  };
+
+  template <ex::receiver Receiver>
+  auto connect(Receiver receiver) && -> VariantOperation<Receiver> {
+    if (sender_variant.index() == 0) {
+      return {std::integral_constant<unsigned char, 0> {}, std::move(std::get<0>(sender_variant)), std::move(receiver)};
+    }
+    return {std::integral_constant<unsigned char, 1> {}, std::move(std::get<1>(sender_variant)), std::move(receiver)};
+  }
+};
+
 }  // namespace ex_actor::internal
 
 // Backward-compatibility alias — this namespace was removed in favor of ex_actor.

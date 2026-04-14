@@ -49,6 +49,7 @@ class RemoteActorRequestHandlerRegistry {
   struct ActorCreationResult {
     std::unique_ptr<TypeErasedActor> actor;
     std::optional<std::string> actor_name;
+    ByteBuffer serialized_actor_ref;
   };
 
   using RemoteActorMethodCallHandler =
@@ -136,6 +137,8 @@ class RemoteFuncHandlerRegistrar {
     return {
         .actor = std::move(actor),
         .actor_name = std::move(actor_name),
+        // Workaround: see ActorRegistryBackend::DeserializeActorRef comment.
+        .serialized_actor_ref = Serialize(rfl::Reflector<ActorRef<ActorClass>>::from(actor_ref)),
     };
   }
 

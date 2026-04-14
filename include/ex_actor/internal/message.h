@@ -82,7 +82,7 @@ struct NetworkRequest {
 
 struct ActorCreationReply {
   bool success {};
-  uint64_t actor_id {};
+  ByteBuffer serialized_actor_ref;
   std::string error;
 };
 
@@ -94,7 +94,7 @@ struct ActorMethodCallReply {
 
 struct ActorLookUpReply {
   bool success {};
-  uint64_t actor_id {};
+  ByteBuffer serialized_actor_ref;
 };
 
 struct ActorDestroyReply {

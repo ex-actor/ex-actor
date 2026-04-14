@@ -88,7 +88,7 @@ class ActorRegistryBackend {
     if (!ret.success) {
       EXA_THROW << "Got actor creation error from remote node:" << ret.error;
     }
-    co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, /*actor=*/nullptr, broker_actor_ref_);
+    co_return DeserializeActorRef<UserClass>(ret.serialized_actor_ref);
   }
 
   template <class UserClass>
@@ -140,7 +140,7 @@ class ActorRegistryBackend {
 
     auto& ret = std::get<ActorLookUpReply>(reply.variant);
     if (ret.success) {
-      co_return ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, /*actor=*/nullptr, broker_actor_ref_);
+      co_return DeserializeActorRef<UserClass>(ret.serialized_actor_ref);
     }
     co_return std::nullopt;
   }
@@ -158,6 +158,21 @@ class ActorRegistryBackend {
   ex::task<void> DestroyLocalActor(uint64_t actor_id);
 
  private:
+  // Workaround: reflect-cpp's capnp get_root_name() doesn't account for
+  // rfl::Reflector<T> types, so Serialize/Deserialize<ActorRef<U>> fails with
+  // "no such nested declaration". We go through the ReflType manually instead.
+  template <class UserClass>
+  ActorRef<UserClass> DeserializeActorRef(const ByteBuffer& serialized_actor_ref) const {
+    auto refl = Deserialize<typename rfl::Reflector<ActorRef<UserClass>>::ReflType>(serialized_actor_ref);
+    auto actor_ref = rfl::Reflector<ActorRef<UserClass>>::to(refl);
+    if (!actor_ref.IsEmpty()) {
+      auto it = actor_id_to_actor_.find(actor_ref.GetActorId());
+      auto* actor = it != actor_id_to_actor_.end() ? it->second.get() : nullptr;
+      actor_ref.SetLocalRuntimeInfo(this_node_id_, actor, broker_actor_ref_);
+    }
+    return actor_ref;
+  }
+
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
   ActorRef<UserClass> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
     auto actor_id = GenerateRandomActorId();
@@ -170,6 +185,8 @@ class ActorRegistryBackend {
       actor_name_to_id_[name] = actor_id;
     }
     actor_id_to_actor_[actor_id] = std::move(actor);
+    // Workaround: see DeserializeActorRef comment.
+    actor_id_to_serialized_ref_[actor_id] = Serialize(rfl::Reflector<ActorRef<UserClass>>::from(handle));
     return handle;
   }
 
@@ -178,6 +195,9 @@ class ActorRegistryBackend {
   uint64_t this_node_id_ = 0;
   BasicActorRef<MessageBroker> broker_actor_ref_;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
+  // Serialized ActorRef bytes for each actor, captured at creation time with the concrete type known.
+  // Used to return correctly-typed ActorRef from remote GetActorRefByName without knowing UserClass.
+  std::unordered_map</*actor_id*/ uint64_t, ByteBuffer> actor_id_to_serialized_ref_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
 
   void InitRandomNumGenerator();

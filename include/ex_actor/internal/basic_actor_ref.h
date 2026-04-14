@@ -55,6 +55,8 @@ class BasicActorRef {
       : is_empty_(other.is_empty_),
         actor_id_(other.actor_id_),
         type_erased_actor_(other.type_erased_actor_),
+        // static_cast between typed pointers applies a compile-time constant offset,
+        // so this is correct even if the pointer is invalid (e.g. a remote address).
         adjusted_ptr_(static_cast<UserClass*>(other.adjusted_ptr_)) {}
 
   // Converting assignment operator - delegates to converting constructor
@@ -64,6 +66,8 @@ class BasicActorRef {
     is_empty_ = other.is_empty_;
     actor_id_ = other.actor_id_;
     type_erased_actor_ = other.type_erased_actor_;
+    // static_cast between typed pointers applies a compile-time constant offset,
+    // so this is correct even if the pointer is invalid (e.g. a remote address).
     adjusted_ptr_ = static_cast<UserClass*>(other.adjusted_ptr_);
     return *this;
   }

@@ -83,6 +83,7 @@ struct NetworkRequest {
 struct ActorCreationReply {
   bool success {};
   uint64_t actor_id {};
+  uint64_t adjusted_ptr_addr {};
   std::string error;
 };
 

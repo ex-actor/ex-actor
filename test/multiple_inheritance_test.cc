@@ -112,6 +112,22 @@ struct SlicedDerived : public SlicedBase {
   std::string GetType() override { return "Derived"; }
 };
 
+// ==================== Proxy / Bounce Actors for ActorRef Serialization Tests ====================
+
+// Holds an ActorRef<BaseB> (a non-first base in MI hierarchy) received via constructor.
+// Calls Send on it, which routes to SendLocal when the target is co-located.
+// This reproduces the bug in issue #243: after deserialization, adjusted_ptr_ was null.
+struct BaseBProxy {
+  ActorRef<BaseB> target;
+
+  static BaseBProxy Create(ActorRef<BaseB> target) { return BaseBProxy {std::move(target)}; }
+
+  stdexec::task<int> CallGetB() {
+    int result = co_await target.Send<&BaseB::GetB>();
+    co_return result;
+  }
+};
+
 // Register remote handlers
 EXA_REMOTE(&Dog::Create, &Dog::Speak);
 EXA_REMOTE(&Cat::Create, &Cat::Speak);
@@ -119,6 +135,7 @@ EXA_REMOTE(&Derived::Create, &BaseA::GetA, &BaseB::GetB);
 EXA_REMOTE(&Duck::Create, &Animal::Speak, &Swimmer::Swim);
 EXA_REMOTE(&SlicedDerived::CreateSlicing, &SlicedBase::GetType);
 EXA_REMOTE(&SlicedDerived::CreateCorrect);
+EXA_REMOTE(&BaseBProxy::Create, &BaseBProxy::CallGetB);
 
 // IMPORTANT: We only register GetA, NOT GetB for DerivedPartial
 EXA_REMOTE(&DerivedPartial::Create, &BasePartialA::GetA);
@@ -274,3 +291,33 @@ TEST(MultipleInheritanceRemoteTest, RemoteUnregisteredMethodFails) {
     co_return;
   });
 }
+
+/**
+ * @brief Reproduces issue #243: ActorRef<BaseB> deserialized as a constructor arg on a remote node
+ *        must have a valid adjusted_ptr_ so that SendLocal works for co-located actors.
+ *
+ * Setup: node 0 spawns Derived on the remote node, then spawns BaseBProxy on the same remote node
+ * with ActorRef<BaseB> pointing to that Derived actor. The proxy calls Send<&BaseB::GetB>() which
+ * routes to SendLocal (both actors are on the same remote node). Before the fix, adjusted_ptr_ was
+ * null after deserialization, causing SIGSEGV.
+ */
+TEST(MultipleInheritanceRemoteTest, DeserializedActorRefSendLocalWithMI) {
+  RunTwoNodeTest([](size_t index, uint64_t remote_id, ActorRegistry& registry) -> stdexec::task<void> {
+    if (index == 0) {
+      // Spawn Derived on remote node
+      auto derived = co_await registry.Spawn<&Derived::Create>().ToNode(remote_id);
+
+      // Cast to ActorRef<BaseB> (non-first base — requires pointer adjustment)
+      ActorRef<BaseB> base_b_ref = derived;
+
+      // Spawn BaseBProxy on the SAME remote node, passing base_b_ref as constructor arg.
+      // The proxy will call Send<&BaseB::GetB>() on the deserialized ref.
+      // Since both actors live on the same remote node, this goes through SendLocal.
+      auto proxy = co_await registry.Spawn<&BaseBProxy::Create>(base_b_ref).ToNode(remote_id);
+      int result = co_await proxy.Send<&BaseBProxy::CallGetB>();
+      EXPECT_EQ(result, 20);
+    }
+    co_return;
+  });
+}
+

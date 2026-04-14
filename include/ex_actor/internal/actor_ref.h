@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -202,6 +203,7 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
     bool is_empty {};
     uint64_t node_id {};
     uint64_t actor_id {};
+    uint64_t adjusted_ptr_addr {};
   };
 
   static ex_actor::internal::ActorRef<U> to(const ReflType& rfl_type) noexcept {
@@ -212,6 +214,10 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
     // filled later in the Parser::read below.
     ex_actor::internal::ActorRef<U> actor(/*this_node_id=*/0, rfl_type.node_id, rfl_type.actor_id, /*actor=*/nullptr,
                                           /*broker_actor_ref=*/ {});
+    // Restore the already-adjusted pointer from the sender side.
+    // This is only valid for local actors; remote actors never use adjusted_ptr_.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    actor.adjusted_ptr_ = reinterpret_cast<U*>(rfl_type.adjusted_ptr_addr);
     return actor;
   }
 
@@ -220,6 +226,7 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
         .is_empty = actor_ref.is_empty_,
         .node_id = actor_ref.node_id_,
         .actor_id = actor_ref.actor_id_,
+        .adjusted_ptr_addr = reinterpret_cast<uint64_t>(actor_ref.adjusted_ptr_),
     };
   }
 };

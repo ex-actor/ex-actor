@@ -49,6 +49,7 @@ class RemoteActorRequestHandlerRegistry {
   struct ActorCreationResult {
     std::unique_ptr<TypeErasedActor> actor;
     std::optional<std::string> actor_name;
+    uint64_t adjusted_ptr_addr {};
   };
 
   using RemoteActorMethodCallHandler =
@@ -133,9 +134,13 @@ class RemoteFuncHandlerRegistrar {
                                           context.actor_ref_serde_ctx.broker_actor_ref);
     NotifyOnSpawned<ActorClass>(actor.get(), actor_ref);
     auto actor_name = actor->GetActorConfig().actor_name;
+    // Capture the adjusted_ptr_ while we still have the concrete type, so the
+    // concrete-to-UserClass pointer adjustment (important for MI) is correct.
+    auto adjusted_ptr_addr = reinterpret_cast<uint64_t>(actor_ref.GetAdjustedPtr());
     return {
         .actor = std::move(actor),
         .actor_name = std::move(actor_name),
+        .adjusted_ptr_addr = adjusted_ptr_addr,
     };
   }
 

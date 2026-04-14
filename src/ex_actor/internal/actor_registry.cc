@@ -127,7 +127,8 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
       actor_name_to_id_[result.actor_name.value()] = actor_id;
     }
     actor_id_to_actor_[actor_id] = std::move(result.actor);
-    reply_out = SerializeReply(NetworkReply {ActorCreationReply {.success = true, .actor_id = actor_id}});
+    reply_out = SerializeReply(NetworkReply {ActorCreationReply {
+        .success = true, .actor_id = actor_id, .adjusted_ptr_addr = result.adjusted_ptr_addr}});
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
     reply_out = SerializeReply(NetworkReply {ActorCreationReply {.success = false, .error = std::move(error_msg)}});

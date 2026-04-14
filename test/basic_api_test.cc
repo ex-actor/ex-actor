@@ -114,19 +114,8 @@ TEST(BasicApiTest, NestActorRefCase) {
 
 TEST(BasicApiTest, SpawnWithFullConfig) {
   auto coroutine = []() -> stdexec::task<void> {
-    /*
-    before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
-    here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
-
-    i.e. you can't `co_await Spawn<X>().WithConfig({.actor_name = "A"})` with a temporary config containing
-    heap-allocated fields, instead, you should define a separate named variable for the config:
-    ```cpp
-    ex_actor::ActorConfig a_config {.actor_name = "A"};
-    auto remote_a = co_await registry.Spawn<&A::Create>().WithConfig(a_config);
-    ```
-
-    see https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
-    */
+    // GCC < 13 workaround: assign configs with heap-allocated fields to named variables before co_await.
+    // See docs/contents/installation.md "Known Issues: GCC before 13".
     ex_actor::ActorConfig config1 {.max_message_executed_per_activation = 10, .actor_name = "counter1"};
     auto counter = co_await ex_actor::Spawn<Counter>().WithConfig(config1);
 

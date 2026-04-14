@@ -2,37 +2,13 @@
 """Build or serve project documentation with mkdocs. Works on both Linux/macOS and Windows."""
 
 import argparse
-import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 docs_dir = Path(__file__).resolve().parent
 project_root = docs_dir.parent
 contents_dir = docs_dir / "contents"
-
-# Copy assets
-assets_dst = contents_dir / "assets"
-if assets_dst.exists():
-    shutil.rmtree(assets_dst)
-shutil.copytree(project_root / "assets", assets_dst)
-
-# Copy README.md -> contents/index.md
-index_md = contents_dir / "index.md"
-text = (project_root / "README.md").read_text(encoding="utf-8")
-text = "# Introduction\n" + text
-text = re.sub(
-    r"<!-- GITHUB README ONLY START -->.*?<!-- GITHUB README ONLY END -->",
-    "",
-    text,
-    flags=re.DOTALL,
-)
-index_md.write_text(text, encoding="utf-8")
-
-# Copy CONTRIBUTING.md -> contents/contributing.md
-contributing_md = contents_dir / "contributing.md"
-shutil.copy2(project_root / "CONTRIBUTING.md", contributing_md)
 
 parser = argparse.ArgumentParser(description="Build or serve project documentation.")
 parser.add_argument("command", choices=["serve", "build"])
@@ -45,18 +21,26 @@ DEPS = (
     "mkdocs-add-number-plugin,"
     "mkdocs-enumerate-headings-plugin,"
     "mkdocs-git-revision-date-localized-plugin,"
-    "mkdocs-git-committers-plugin-2"
+    "mkdocs-git-committers-plugin-2,"
+    "click<8.3"
 )
 
 if args.command == "serve":
     subprocess.run(
-        ["uvx", "--with", DEPS, "mkdocs", "serve", "-a", f"0.0.0.0:{args.port}"],
+        [
+            "uvx", "--python", "3.10", "--with", DEPS, "mkdocs", "serve",
+            "-a", f"0.0.0.0:{args.port}",
+            "--livereload",
+            "--watch", str(project_root / "README.md"),
+            "--watch", str(project_root / "CONTRIBUTING.md"),
+            "--watch", str(project_root / "assets"),
+        ],
         cwd=docs_dir,
         check=True,
     )
 elif args.command == "build":
     subprocess.run(
-        ["uvx", "--with", DEPS, "mkdocs", "build"],
+        ["uvx", "--python", "3.10", "--with", DEPS, "mkdocs", "build"],
         cwd=docs_dir,
         check=True,
     )

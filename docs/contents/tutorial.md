@@ -2,19 +2,18 @@
 
 The best way to learn a new library is to learn from examples, let's go through some examples and you'll learn all you want :)
 
-This framework is based on `std::execution`, but **it's fine if you are not familiar with it, the example is easy enough to understand**.
+This framework is based on [`std::execution`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html),
+but **it's fine if you are not familiar with it, the example is easy enough to understand**.
 
-std::execution is essentially an unified interface for schedulers and async tasks. It standardizes the interfaces so that everyone
-conforming the standard can use others' work seamlessly. Check [P2300 proposal](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html) and [stdexec's doc](https://github.com/NVIDIA/stdexec?tab=readme-ov-file#resources) if you want to learn more.
-
-Note: C++26 is not finalized now. Currently we're based on the early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec), so you'll see namespace `stdexec` instead of `std::execution` in the following examples.
+Note: C++26 is not finalized now. Currently we're based on the early implementation of `std::execution` - [nvidia/stdexec](https://github.com/NVIDIA/stdexec),
+so you'll see namespace `stdexec` instead of `std::execution` in the following examples.
 
 ## Basic case - turn your class into an actor
 
 First let's go through a basic example - create your first actor and call it.
 
 Nearly all of our APIs are async, so let's put everything in a coroutine, then we can easily use `co_await` to wait for the result non-blockingly.
-Here we use [`std::execution::task`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3552r3.html), which is the standard coroutine type in `std::execution`.
+Here we use `std::execution::task`, which is the standard coroutine type in `std::execution`.
 
 <!-- doc test start -->
 ```cpp
@@ -228,7 +227,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Execute multiple senders in parallel
 
-You can execute multiple senders in parallel using [`when_all`](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html#design-sender-adaptor-when_all) or `simple_counting_scope` + `spawn`/`spawn_future` in std::execution.
+You can execute multiple senders in parallel using `when_all` or `simple_counting_scope` + `spawn`/`spawn_future` in std::execution.
 
 <!-- doc test start -->
 ```cpp

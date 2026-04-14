@@ -154,9 +154,8 @@ While this framework has some successful applications internally, we believe the
 ## Standing on the Shoulders of Giants
 
 * [stdexec](https://github.com/NVIDIA/stdexec) - Early implementation of std::execution in C++20.
-* [daking::MPSC_queue](https://github.com/dakingffo/MPSC_queue) - A high-performance lock-free MPSC queue.
-* [moodycamel::ConcurrentQueue](https://github.com/cameron314/concurrentqueue) - An industrial-strength MPMC queue.
 * [ZeroMQ](https://zeromq.org/) - An open-source universal messaging library.
 * [reflect-cpp](https://github.com/getml/reflect-cpp) - A reflection-based C++20 serialization library.
+* [daking::MPSC_queue](https://github.com/dakingffo/MPSC_queue) - A high-performance lock-free MPSC queue.
+* [moodycamel::ConcurrentQueue](https://github.com/cameron314/concurrentqueue) - An industrial-strength MPMC queue.
 * [Cap'n Proto](https://capnproto.org/) - An insanely fast data interchange format.
-* [spdlog](https://github.com/gabime/spdlog) - A sophisticated C++ logging library.

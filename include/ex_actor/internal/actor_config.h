@@ -30,19 +30,9 @@ struct ActorConfig {
   /**
    * @brief Actor's name, should be unique within one node.
    *
-   * @note Before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free
-   * error. here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it
-   * explicitly.
-   *
-   * i.e. you can't `co_await Spawn<X>().WithConfig({.actor_name = "xxx"})` directly with a temporary config
-   * containing heap-allocated fields, instead, you should define a separate named variable for the config:
-   *
-   * @code
-   * ex_actor::ActorConfig config {.actor_name = "xxx"};
-   * auto actor = co_await Spawn<X>().WithConfig(config);
-   * @endcode
-   *
-   * see gcc's bug report: https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
+   * @note GCC < 13 has a coroutine bug that double-frees temporaries containing heap-allocated fields
+   * (like this std::optional<std::string>) in co_await expressions. Assign to a named variable first.
+   * See docs/contents/installation.md "Known Issues: GCC before 13" for details and workarounds.
    */
   std::optional<std::string> actor_name;
 

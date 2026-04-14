@@ -8,6 +8,7 @@
     "CAPNPROTO",
     "concurrentqueue",
     "constexpr",
+    "constructibility",
     "cout",
     "cppzmq",
     "ctest",

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "ex_actor/internal/basic_actor_ref.h"
 #include "ex_actor/internal/logging.h"
@@ -25,8 +26,10 @@
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/serialization.h"
+#include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal {
+
 template <class UserClass>
 class ActorRef : public BasicActorRef<UserClass> {
  public:
@@ -77,20 +80,26 @@ class ActorRef : public BasicActorRef<UserClass> {
   }
 
   /**
-   * @brief Send message to an actor. Returns a coroutine carrying the result.
+   * @brief Send message to an actor. Returns a sender carrying the result.
    * @note This method requires your args and return value can be serialized by reflect-cpp, if you met compile errors
    * like "Unsupported type", refer https://rfl.getml.com/concepts/custom_classes/ to add a serializer for it. Or if you
    * can confirm it's a local actor, use SendLocal() instead, which doesn't require your args to be serializable.
-   * @note Dynamic memory allocation will happen due to the use of coroutine. If you can confirm it's a local actor,
-   * consider using SendLocal() instead, which has better performance.
-   * @note The returned coroutine is not copyable. please use `co_await std::move(coroutine)`.
    */
   template <auto kMethod, class... Args>
-  [[nodiscard]] auto Send(Args... args) const
+  [[nodiscard]] ex::sender auto Send(Args... args) const
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
-    // Add a fallback inline_scheduler for it.
-    return WrapSenderWithInlineScheduler(SendInternal<kMethod>(std::move(args)...));
+    using LocalSenderType =
+        decltype(std::declval<const ActorRef*>()->template SendLocal<kMethod>(std::declval<Args>()...));
+    using RemoteSenderType = decltype(SendRemote<kMethod>(std::declval<Args>()...));
+
+    EXA_THROW_CHECK(!this->IsEmpty()) << "Empty ActorRef, cannot call method on it.";
+
+    using VariantType = std::variant<LocalSenderType, RemoteSenderType>;
+    VariantType chosen_sender = (node_id_ == this_node_id_) ? VariantType(SendLocal<kMethod>(std::move(args)...))
+                                                            : VariantType(SendRemote<kMethod>(std::move(args)...));
+
+    return SenderVariant {std::move(chosen_sender)};
   }
 
   /**
@@ -107,25 +116,11 @@ class ActorRef : public BasicActorRef<UserClass> {
   uint64_t GetNodeId() const { return node_id_; }
 
  private:
-  uint64_t this_node_id_ = 0;
-  uint64_t node_id_ = 0;
-  BasicActorRef<MessageBroker> broker_actor_ref_;
-
   template <auto kMethod, class... Args>
-  [[nodiscard]] auto SendInternal(Args... args) const
-      -> exec::task<typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type>
-    requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
-  {
-    if (this->IsEmpty()) [[unlikely]] {
-      throw std::runtime_error("Empty ActorRef, cannot call method on it.");
-    }
-    if (node_id_ == this_node_id_) {
-      co_return co_await SendLocal<kMethod>(std::move(args)...);
-    }
-
-    // remote call
-    EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
+  [[nodiscard]] ex::sender auto SendRemote(Args... args) const {
+    using UnwrappedType = typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type;
     using Sig = Signature<decltype(kMethod)>;
+    EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
     ActorMethodCallArgs<typename Sig::DecayedArgsTupleType> method_call_args {
         .args_tuple = typename Sig::DecayedArgsTupleType(std::move(args)...)};
 
@@ -135,22 +130,25 @@ class ActorRef : public BasicActorRef<UserClass> {
         .serialized_args = Serialize(method_call_args),
     }};
 
-    using UnwrappedType = decltype(UnwrapReturnSenderIfNested<kMethod>())::type;
-    ByteBuffer response_buf =
-        co_await broker_actor_ref_.SendLocal<&MessageBroker::SendRequest>(node_id_, Serialize(request));
-    auto reply = Deserialize<NetworkReply>(response_buf);
-
-    auto& ret = std::get<ActorMethodCallReply>(reply.variant);
-    if (!ret.success) {
-      EXA_THROW << "Got error from remote actor on node " << node_id_ << ": " << ret.error;
-    }
-    if constexpr (std::is_void_v<UnwrappedType>) {
-      co_return;
-    } else {
-      auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(ret.serialized_result);
-      co_return res.return_value;
-    }
+    return broker_actor_ref_.template SendLocal<&MessageBroker::SendRequest>(node_id_, Serialize(request)) |
+           ex::then([node_id = node_id_](ByteBuffer response_buf) -> UnwrappedType {
+             auto reply = Deserialize<NetworkReply>(std::move(response_buf));
+             auto& ret = std::get<ActorMethodCallReply>(reply.variant);
+             if (!ret.success) {
+               EXA_THROW << "Got error from remote actor on node " << node_id << ": " << ret.error;
+             }
+             if constexpr (std::is_void_v<UnwrappedType>) {
+               return;
+             } else {
+               auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(ret.serialized_result);
+               return std::move(res.return_value);
+             }
+           });
   }
+
+  uint64_t this_node_id_ = 0;
+  uint64_t node_id_ = 0;
+  BasicActorRef<MessageBroker> broker_actor_ref_;
 };
 
 template <class UserClass>

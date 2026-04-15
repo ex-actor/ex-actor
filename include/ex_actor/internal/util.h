@@ -195,29 +195,39 @@ class Semaphore {
   std::atomic_int64_t count_;
 };
 
-/// Wraps a sender so that its result is discarded and errors are logged then swallowed.
+/// Wraps a sender so that its result is discarded and errors are logged.
+/// By default, errors are fatal (calls std::terminate after logging).
+/// Pass fatal_on_error=false to swallow errors instead.
 /// The returned sender completes with `set_value_t()` (void) and never with `set_error_t`,
 /// making it suitable for `ex::spawn` which requires exception-free senders.
 ///
 /// Supports both direct-call and pipe syntax:
 ///   DiscardResult(sender)
 ///   sender | DiscardResult()
+///   DiscardResult(sender, /*fatal_on_error=*/false)
+///   sender | DiscardResult(/*fatal_on_error=*/false)
 struct discard_result_closure_t : ex::sender_adaptor_closure<discard_result_closure_t> {
+  bool fatal_on_error = true;
+
   template <ex::sender Sender>
   ex::sender auto operator()(Sender&& sender) const {
-    auto log_and_swallow = [](auto&& error) noexcept {
+    auto log_and_swallow = [fatal = fatal_on_error](auto&& error) noexcept {
+      const char* action = fatal ? "fatal" : "swallowed";
       if constexpr (std::is_same_v<std::decay_t<decltype(error)>, std::exception_ptr>) {
         try {
           std::rethrow_exception(error);
         } catch (const std::exception& e) {
-          internal::log::Error("DiscardResult swallowed exception: {}", e);
+          internal::log::Error("DiscardResult {} exception: {}", action, e);
         } catch (...) {
-          internal::log::Error("DiscardResult swallowed unknown exception_ptr");
+          internal::log::Error("DiscardResult {} unknown exception_ptr", action);
         }
       } else if constexpr (std::is_base_of_v<std::exception, std::decay_t<decltype(error)>>) {
-        internal::log::Error("DiscardResult swallowed exception: {}", error);
+        internal::log::Error("DiscardResult {} exception: {}", action, error);
       } else {
-        internal::log::Error("DiscardResult swallowed an error ({})", typeid(decltype(error)).name());
+        internal::log::Error("DiscardResult {} error ({})", action, typeid(decltype(error)).name());
+      }
+      if (fatal) {
+        std::terminate();
       }
     };
     return std::forward<Sender>(sender) | ex::then([](auto&&...) noexcept -> void {}) | ex::upon_error(log_and_swallow);
@@ -226,9 +236,16 @@ struct discard_result_closure_t : ex::sender_adaptor_closure<discard_result_clos
 
 struct discard_result_t {
   template <ex::sender Sender>
+  ex::sender auto operator()(Sender&& sender, bool fatal_on_error) const {
+    return discard_result_closure_t {.fatal_on_error = fatal_on_error}(std::forward<Sender>(sender));
+  }
+
+  template <ex::sender Sender>
   ex::sender auto operator()(Sender&& sender) const {
     return discard_result_closure_t {}(std::forward<Sender>(sender));
   }
+
+  auto operator()(bool fatal_on_error) const -> discard_result_closure_t { return {.fatal_on_error = fatal_on_error}; }
 
   auto operator()() const -> discard_result_closure_t { return {}; }
 };

@@ -7,8 +7,12 @@ race:zmq::
 # rethrow_exception/current_exception/__cxa_end_catch are compiled into libstdc++.so
 # WITHOUT -fsanitize=thread, so TSAN cannot see their acquire/release atomic refcount
 # operations. This causes false data-race reports when an exception_ptr crosses threads
-# (e.g. via stdexec's affine_on/finally sender chain).
+# via stdexec's affine_on/finally sender chain.
 # See https://stackoverflow.com/q/37587096
-# Matches only functions whose demangled name contains __exception_ptr (i.e. the
-# stdexec template instantiations that carry std::__exception_ptr::exception_ptr).
-race:__exception_ptr
+# Note: we cannot suppress the actual uninstrumented symbols (_M_release, _M_addref,
+# std::rethrow_exception, etc.) because they don't appear as named frames in the TSAN
+# stack -- they resolve to <null> library offsets. Instead we target stdexec::__final::,
+# which is the specific sender adaptor handling cross-thread completion forwarding in
+# affine_on. This is narrower than matching __exception_ptr (which would hit every
+# template instantiation carrying exception_ptr as a type parameter).
+race:stdexec::__final::

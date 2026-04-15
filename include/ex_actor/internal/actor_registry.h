@@ -88,7 +88,12 @@ class ActorRegistryBackend {
     if (!ret.success) {
       EXA_THROW << "Got actor creation error from remote node:" << ret.error;
     }
-    co_return DeserializeActorRef<UserClass>(ret.serialized_actor_ref);
+    auto actor_ref = ActorRef<UserClass>(this_node_id_, node_id, ret.actor_id, /*actor=*/nullptr, broker_actor_ref_);
+    // Restore the adjusted_ptr_ that was computed on the remote node where the actor
+    // lives, preserving the correct MI pointer adjustment from the concrete type.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    actor_ref.SetAdjustedPtr(reinterpret_cast<UserClass*>(ret.adjusted_ptr_addr));
+    co_return actor_ref;
   }
 
   template <class UserClass>

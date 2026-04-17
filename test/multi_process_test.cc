@@ -21,7 +21,7 @@ class PingWorker {
 EXA_REMOTE(&PingWorker::CreateFn, &PingWorker::Ping);
 
 // Usage: <binary> <listen_address> [contact_address]
-exec::task<void> MainCoroutine(int argc, char** argv) {
+stdexec::task<void> MainCoroutine(int argc, char** argv) {
   auto shared_pool = std::make_shared<ex_actor::WorkSharingThreadPool>(4);
   std::string listen_address = argv[1];
   std::string contact_address = (argc > 2) ? argv[2] : "";

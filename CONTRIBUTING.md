@@ -37,7 +37,7 @@ This project requires C++20. The following compilers are tested in CI:
 |----------|-----------------|
 | GCC      | 11 - 14         |
 | Clang    | 16 - 18         |
-| MSVC     | 14.44 (VS 2022 17.14) |
+| MSVC     | 14.50 / `_MSC_VER` 1950 (VS 2026) |
 
 ```bash
 cd ex-actor
@@ -59,6 +59,32 @@ ctest -C Release --output-on-failure -R basic_api_test
 # Format code (Linux/macOS only, requires clang-format and buildifier)
 python3 scripts/format.py
 ```
+
+## Locate the dependency source code
+
+This project uses [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) to manage C++ dependencies, you can locate the source code of a dependency the following methods:
+
+* **From `compile_commands.json`:** grep the package name to find its include path, e.g. `grep -o '[^ ]*stdexec[^ ]*' compile_commands.json | head -1`.
+* **With `regen_build_dir.py`:** sources are cached under `~/.cache/CPM/<package>/<hash>/`.
+* **With plain CMake (no `CPM_SOURCE_CACHE`):** sources fall back to `build/_deps/<package>-src/`. Setting `CPM_SOURCE_CACHE` is recommended to avoid re-downloads.
+
+### Using Ninja on Windows
+
+By default, the build script uses the Visual Studio generator on Windows. If you prefer Ninja (faster incremental builds, `compile_commands.json` support), you need to run from a **Developer Command Prompt** or **Developer PowerShell** so that `cl.exe` is on PATH:
+
+1. Open **"Developer PowerShell for VS"** (search in Start menu), or run the following in a regular terminal:
+   ```powershell
+   # Example for VS2026(18) Community
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   & "${env:ProgramFiles}\Microsoft Visual Studio\18\Community\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64
+   ```
+
+2. Then generate the build directory with Ninja:
+   ```bash
+   python scripts/regen_build_dir.py -G Ninja
+   ```
+
+Without the developer environment, CMake will fail with `No CMAKE_C_COMPILER could be found` because the Ninja generator cannot locate MSVC on its own.
 
 ## Clangd related
 

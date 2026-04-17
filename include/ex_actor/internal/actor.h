@@ -19,14 +19,14 @@
 #include <memory>
 #include <utility>
 
-#include <exec/async_scope.hpp>
-#include <exec/task.hpp>
 #include <rfl/Tuple.hpp>
 #include <rfl/apply.hpp>
 #include <stdexec/execution.hpp>
 
 #include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/container.h"
 #include "ex_actor/internal/reflect.h"
+#include "ex_actor/internal/scheduler.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal {
@@ -40,7 +40,7 @@ class TypeErasedActor {
   explicit TypeErasedActor(ActorConfig actor_config) : actor_config_(std::move(actor_config)) {}
   virtual ~TypeErasedActor() = default;
   virtual void PushMessage(ActorMessage* task) = 0;
-  virtual exec::task<void> AsyncDestroy() = 0;
+  virtual ex::task<void> AsyncDestroy() = 0;
   virtual uint64_t GetActorTypeHash() const = 0;
 
   const ActorConfig& GetActorConfig() const { return actor_config_; }
@@ -56,7 +56,7 @@ class TypeErasedActor {
 class TypeErasedActorScheduler {
  public:
   virtual ~TypeErasedActorScheduler() = default;
-  virtual void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope) = 0;
+  virtual void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) = 0;
   virtual std::unique_ptr<TypeErasedActorScheduler> Clone() const = 0;
 
   virtual const void* GetUnderlyingSchedulerPtr() const = 0;
@@ -66,12 +66,12 @@ template <ex::scheduler Scheduler>
 class AnyStdExecScheduler : public TypeErasedActorScheduler {
  public:
   explicit AnyStdExecScheduler(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
-  void Schedule(TypeErasedActor* actor, exec::async_scope& async_scope) override {
+  void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) override {
     const auto& actor_config = actor->GetActorConfig();
     auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, actor_config.priority}) |
                   ex::write_env(ex::prop {ex_actor::get_scheduler_index, actor_config.scheduler_index}) |
                   ex::then([actor] { actor->PullMailboxAndRun(); });
-    async_scope.spawn(std::move(sender));
+    ex::spawn(std::move(sender) | DiscardResult(), scope_token);
   }
 
   std::unique_ptr<TypeErasedActorScheduler> Clone() const override {
@@ -101,7 +101,7 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
     ActorMessageSubmissionOperation(TypeErasedActor* actor, Receiver receiver)
         : actor(actor), receiver(std::move(receiver)) {}
     void Execute() override {
-      auto stoken = stdexec::get_stop_token(stdexec::get_env(receiver));
+      auto stoken = ex::get_stop_token(ex::get_env(receiver));
       if constexpr (ex::unstoppable_token<decltype(stoken)>) {
         receiver.set_value();
       } else {
@@ -119,9 +119,10 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
     }
   };
 
-  struct ActorMessageSubmissionSender : ex::sender_t {
+  struct ActorMessageSubmissionSender : ex::sender_t, StoppableSchedulerCompletionSignatures {
+    using StoppableSchedulerCompletionSignatures::get_completion_signatures;
     TypeErasedActor* actor;
-    using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
+
     struct Env {
       TypeErasedActor* actor;
       template <class CPO>
@@ -186,7 +187,7 @@ class Actor : public TypeErasedActor {
   uint64_t GetActorTypeHash() const override { return GetHashValue<UserClass>(); }
 
   /// Async destroy the actor, if there are still messages in the mailbox, they might not be processed.
-  exec::task<void> AsyncDestroy() override {
+  ex::task<void> AsyncDestroy() override {
     bool expected = false;
     bool changed = pending_to_be_destroyed_.compare_exchange_strong(expected, /*desired=*/true,
                                                                     /*success=*/std::memory_order_release,
@@ -196,7 +197,7 @@ class Actor : public TypeErasedActor {
     }
     pending_message_count_.fetch_add(1, std::memory_order_release);
     TryActivate();
-    co_await async_scope_.on_empty();
+    co_await async_scope_.join();
   }
 
   void PushMessage(ActorMessage* task) override {
@@ -210,7 +211,7 @@ class Actor : public TypeErasedActor {
   LinearizableUnboundedMpscQueue<ActorMessage*> mailbox_;
   std::atomic_size_t pending_message_count_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
-  exec::async_scope async_scope_;
+  ex::simple_counting_scope async_scope_;
   std::atomic_bool activated_ = false;
   std::atomic_bool pending_to_be_destroyed_ = false;
 
@@ -223,7 +224,7 @@ class Actor : public TypeErasedActor {
     if (!changed) {
       return;
     }
-    scheduler_->Schedule(this, async_scope_);
+    scheduler_->Schedule(this, async_scope_.get_token());
   }
 
   void PullMailboxAndRun() override {

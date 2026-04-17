@@ -4,9 +4,10 @@
 <!-- GITHUB README ONLY END -->
 
 [![License: Apache2.0](https://img.shields.io/badge/License-Apache2.0-00c600.svg)](https://opensource.org/licenses/apache-2.0)
-[![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://shields.io/)
-[![Generic badge](https://img.shields.io/badge/gcc-11+-blue.svg)](https://shields.io/)
-[![Generic badge](https://img.shields.io/badge/clang-16+-blue.svg)](https://shields.io/)
+[![Generic badge](https://img.shields.io/badge/C++-20-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
+[![Generic badge](https://img.shields.io/badge/gcc-11+-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
+[![Generic badge](https://img.shields.io/badge/clang-16+-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
+[![Generic badge](https://img.shields.io/badge/MSVC-14.50+-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
 [![Build and test](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml/badge.svg)](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ex-actor/ex-actor)
 
@@ -23,7 +24,7 @@ This programming paradigm is called "Actor Model". It's a very easy way to write
 # Key Features
 
 1. **Easy to Use** - Clean & intuitive API, turn your existing class into an actor.
-2. **Standard-Compliant** - Composible with everything in std::execution ecosystem.
+2. **Standard-Compliant** - Composable with everything in std::execution ecosystem.
 3. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also [provide many out-of-box](https://ex-actor.github.io/ex-actor/schedulers/): work-sharing, work-stealing, custom priority and so on.
 
 
@@ -32,7 +33,7 @@ This programming paradigm is called "Actor Model". It's a very easy way to write
 **📘 Full Tutorial : <https://ex-actor.github.io/ex-actor/tutorial/>**
 
 Note: currently we're based on std::execution's early implementation - [stdexec](https://github.com/NVIDIA/stdexec),
-so you'll see namespaces like `stdexec` and `exec` instead of `std::execution` in the following example.
+so you'll see namespace `stdexec` instead of `std::execution` in the following example.
 
 ## Basic Example: Turn Your Class into an Actor
 
@@ -46,13 +47,13 @@ struct Counter {
   int count = 0;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   ex_actor::Init(/*thread_pool_size=*/1);
 
   // 1. Create the actor.
   ex_actor::ActorRef actor = co_await ex_actor::Spawn<Counter>();
 
-  // 2. Call it! It returns a `std::execution::task`.
+  // 2. Call it! It returns a std::execution sender.
   int res = co_await actor.Send<&Counter::Add>(1);
   assert(res == 1);
 
@@ -65,7 +66,7 @@ int main() { stdexec::sync_wait(MainCoroutine()); }
 
 ## Actor Chaining Example
 
-Actor's method can be a coroutine. The following example shows how to create an actor inside an actor and call it without blocking the scheduler thread.
+Actor's method can be a sender. The following example shows how to create an actor inside an actor and call it without blocking the scheduler thread.
 
 <!-- doc test start -->
 ```cpp
@@ -81,8 +82,8 @@ public:
 
 class Father {
 public:
-  // actor's method can be a coroutine
-  exec::task<std::string> SpawnChildAndPing() {
+  // actor's method can be a sender
+  stdexec::task<std::string> SpawnChildAndPing() {
     if (child_.IsEmpty()) {
       child_ = co_await ex_actor::Spawn<Child>();
     }
@@ -93,9 +94,9 @@ private:
   ex_actor::ActorRef<Child> child_;
 };
 
-exec::task<void> MainCoroutine() {
+stdexec::task<void> MainCoroutine() {
   // Here we have only one thread in scheduler, but it still can finish the entire work
-  // because we use coroutine, there is no blocking wait in actor's method.
+  // because everything is async, there is no blocking wait
   ex_actor::Init(/*thread_pool_size=*/1);
 
   ex_actor::ActorRef<Father> father = co_await ex_actor::Spawn<Father>();
@@ -153,9 +154,8 @@ While this framework has some successful applications internally, we believe the
 ## Standing on the Shoulders of Giants
 
 * [stdexec](https://github.com/NVIDIA/stdexec) - Early implementation of std::execution in C++20.
-* [daking::MPSC_queue](https://github.com/dakingffo/MPSC_queue) - A high-performance lock-free MPSC queue.
-* [moodycamel::ConcurrentQueue](https://github.com/cameron314/concurrentqueue) - An industrial-strength MPMC queue.
 * [ZeroMQ](https://zeromq.org/) - An open-source universal messaging library.
 * [reflect-cpp](https://github.com/getml/reflect-cpp) - A reflection-based C++20 serialization library.
+* [daking::MPSC_queue](https://github.com/dakingffo/MPSC_queue) - A high-performance lock-free MPSC queue.
+* [moodycamel::ConcurrentQueue](https://github.com/cameron314/concurrentqueue) - An industrial-strength MPMC queue.
 * [Cap'n Proto](https://capnproto.org/) - An insanely fast data interchange format.
-* [spdlog](https://github.com/gabime/spdlog) - A sophisticated C++ logging library.

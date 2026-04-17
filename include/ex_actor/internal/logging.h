@@ -14,13 +14,25 @@
 
 #pragma once
 
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <source_location>
 #include <sstream>
+#include <typeinfo>
 
 #include <rfl/to_view.hpp>
 #include <spdlog/spdlog.h>
+
+/// Formats any std::exception-derived type as "TypeName: what()".
+template <>
+struct spdlog::fmt_lib::formatter<std::exception> : spdlog::fmt_lib::formatter<std::string_view> {
+  template <typename FormatContext>
+  auto format(const std::exception& e, FormatContext& ctx) const {
+    auto str = spdlog::fmt_lib::format("{}({})", typeid(e).name(), e.what());
+    return spdlog::fmt_lib::formatter<std::string_view>::format(str, ctx);
+  }
+};
 
 namespace ex_actor {
 enum class LogLevel : uint8_t {

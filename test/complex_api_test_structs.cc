@@ -243,7 +243,7 @@ class NestedStructActor {
 // ===========================
 
 TEST(ComplexApiTest, StructArguments) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<StructActor>();
     // Test Point struct
     Point pt {.x = 3.0, .y = 4.0};
@@ -292,7 +292,7 @@ TEST(ComplexApiTest, StructArguments) {
 }
 
 TEST(ComplexApiTest, StructInConstructor) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     Configuration config;
     config.app_name = "TestApp";
     config.version = 2;
@@ -344,7 +344,7 @@ TEST(ComplexApiTest, StructInConstructor) {
 }
 
 TEST(ComplexApiTest, MultipleStructArguments) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<MultiStructActor>();
     // Test with Point and Person
     Point pt {.x = 10.0, .y = 20.0};
@@ -384,7 +384,7 @@ TEST(ComplexApiTest, MultipleStructArguments) {
 }
 
 TEST(ComplexApiTest, MoveOnlyStructArgument) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<MoveOnlyStructActor>();
     // Create move-only data
     auto content = std::make_unique<std::string>("Test Content");
@@ -415,7 +415,7 @@ TEST(ComplexApiTest, MoveOnlyStructArgument) {
 }
 
 TEST(ComplexApiTest, NestedStructArgument) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<NestedStructActor>();
     // Create nested struct
     Employee emp;

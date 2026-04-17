@@ -1,13 +1,4 @@
-# ThreadSanitizer suppressions file for project X.
+# ThreadSanitizer suppressions file for project
 
+# zmq false positive
 race:zmq::
-
-# fix later
-race:exec::__task::basic_task
-race:exec::__scope::__spawn_op
-race:~ActorRegistry
-
-# stdexec async_scope internal mutex issue - false positive
-# The __complete function unlocks a mutex right before the scope can be destroyed by waiters
-# TSAN incorrectly flags this as "unlock of an unlocked mutex"
-mutex:exec::__scope::__nest_rcvr

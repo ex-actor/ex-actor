@@ -71,14 +71,14 @@ class Echoer {
 
   std::string Echo(const std::string& message) { return message; }
 
-  exec::task<std::string> Proxy(const std::string& message, const ex_actor::ActorRef<Echoer>& other) {
+  stdexec::task<std::string> Proxy(const std::string& message, const ex_actor::ActorRef<Echoer>& other) {
     auto sender = other.Send<&Echoer::Echo>(message);
     auto result = co_await std::move(sender);
     co_return result;
   }
 
-  exec::task<std::vector<std::string>> ProxyTwoActor(const std::string& message,
-                                                     const std::vector<ex_actor::ActorRef<Echoer>>& echoers) {
+  stdexec::task<std::vector<std::string>> ProxyTwoActor(const std::string& message,
+                                                        const std::vector<ex_actor::ActorRef<Echoer>>& echoers) {
     std::vector<std::string> strs;
     for (const auto& echoer : echoers) {
       auto sender = echoer.Send<&Echoer::Echo>(message);
@@ -93,7 +93,7 @@ EXA_REMOTE(&Echoer::Create, &Echoer::Echo, &Echoer::Proxy, &Echoer::ProxyTwoActo
 struct ProxyEchoer {
   ex_actor::ActorRef<Echoer> echoer;
 
-  exec::task<std::string> Echo(const std::string& str) const {
+  stdexec::task<std::string> Echo(const std::string& str) const {
     auto sender = echoer.Send<&Echoer::Echo>(str);
     auto reply = co_await std::move(sender);
     co_return reply;
@@ -106,7 +106,7 @@ EXA_REMOTE(&ProxyEchoer::Create, &ProxyEchoer::Echo);
 struct RetVoid {
   static RetVoid Create() { return {}; }
   void ReturnVoid() {}
-  exec::task<void> CoroutineReturnVoid() { co_return; }
+  stdexec::task<void> CoroutineReturnVoid() { co_return; }
 };
 EXA_REMOTE(&RetVoid::Create, &RetVoid::ReturnVoid, &RetVoid::CoroutineReturnVoid);
 
@@ -129,7 +129,7 @@ EXA_REMOTE(&NonMovableActor::Create, &NonMovableActor::GetName);
 
 TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
   std::barrier bar {2};
-  auto node_main = [&bar](size_t index) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
         .listen_address = addresses.at(index),
@@ -170,7 +170,7 @@ TEST(DistributedTest, ConstructionInDistributedModeWithDefaultScheduler) {
 
 TEST(DistributedTest, ConstructionInDistributedMode) {
   std::barrier bar {2};
-  auto node_main = [&bar](size_t index) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
@@ -219,19 +219,8 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
     EXPECT_EQ(self_reply, "ack from Self, msg got: hi");
 
     logging::Info("node {} creating remote actor A", index);
-    /*
-    before gcc 13, we can't use heap-allocated temp variable after co_await, or there will be a double free error.
-    here actor_name is heap allocated. so when using ActorConfig with actor_name, we should define it explicitly.
-
-    i.e. you can't `co_await Spawn<X>().WithConfig({.actor_name = "A"})` with a temporary config containing
-    heap-allocated fields, instead, you should define a separate named variable for the config:
-    ```cpp
-    ex_actor::ActorConfig a_config {.actor_name = "A"};
-    auto remote_a = co_await registry.Spawn<&A::Create>().ToNode(remote_node_id).WithConfig(a_config);
-    ```
-
-    see https://gcc.gnu.org/pipermail/gcc-bugs/2022-October/800402.html
-    */
+    // GCC < 13 workaround: assign configs with heap-allocated fields to named variables before co_await.
+    // See docs/contents/installation.md "Known Issues: GCC before 13".
     ex_actor::ActorConfig a_config {.actor_name = "A"};
     auto remote_a = co_await registry.Spawn<&A::Create>().ToNode(remote_node_id).WithConfig(a_config);
 
@@ -291,7 +280,7 @@ TEST(DistributedTest, ConstructionInDistributedMode) {
 
 TEST(DistributedTest, ActorLookUpInDistributeMode) {
   std::barrier bar {2};
-  auto node_main = [&bar](size_t index) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
@@ -346,7 +335,7 @@ TEST(DistributedTest, ActorLookUpInDistributeMode) {
 
 TEST(DistributedTest, ActorRefSerializationTest) {
   std::barrier bar {2};
-  auto node_main = [&bar](size_t index) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
@@ -418,7 +407,7 @@ TEST(DistributedTest, ActorRefSerializationTest) {
 
 TEST(DistributedTest, DestroyRemoteActor) {
   std::barrier bar {2};
-  auto node_main = [&bar](size_t index) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
     ex_actor::WorkSharingThreadPool thread_pool(4);
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
@@ -493,7 +482,7 @@ EXA_REMOTE(&DistributedDerived::Create, &DistributedDerived::Foo, &DistributedBa
 
 TEST(DistributedTest, ActorCanBePolymorphic) {
   std::barrier bar {2};
-  auto node_main = [&bar](size_t index) -> exec::task<void> {
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
     std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
     ex_actor::ClusterConfig cluster_config {
         .listen_address = addresses.at(index),

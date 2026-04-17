@@ -181,7 +181,7 @@ void MessageBroker::Start(RequestHandler request_handler) {
   StartPeriodicalTaskScheduler();
 }
 
-exec::task<void> MessageBroker::Stop() {
+ex::task<void> MessageBroker::Stop() {
   log::Info("Node {:#x} stopping message broker", this_node_id_);
   if (periodical_task_scheduler_ != nullptr) {
     periodical_task_scheduler_->Stop();
@@ -190,12 +190,23 @@ exec::task<void> MessageBroker::Stop() {
     recv_socket_puller_->Stop();
   }
   log::Info("Node {:#x}'s message broker stopped, waiting for in-flight tasks", this_node_id_);
-  co_await async_scope_.on_empty();
+  co_await async_scope_.join();
+
+  // Close all ZMQ sockets, then terminate the context to join its IO thread.
+  // Without this, the member destructor ordering (sockets destroyed before context)
+  // leaves a window where the IO thread is still processing pending message metadata
+  // while the main thread frees those resources, causing a data race.
+  node_id_to_send_socket_.clear();
+  contact_node_send_socket_.close();
+  recv_socket_puller_.reset();
+  // zmq_ctx_term() blocks until all IO threads exit.
+  zmq_context_.close();
+
   log::Info("Node {:#x}'s message broker fully stopped", this_node_id_);
   stopped_ = true;
 }
 
-exec::task<void> MessageBroker::DispatchReceivedMessage(ByteBuffer raw) {
+ex::task<void> MessageBroker::DispatchReceivedMessage(ByteBuffer raw) {
   auto broker_msg = Deserialize<BrokerMessage>(raw);
 
   if (auto* gossip = std::get_if<BrokerGossipMessage>(&broker_msg.variant)) {
@@ -212,7 +223,7 @@ exec::task<void> MessageBroker::DispatchReceivedMessage(ByteBuffer raw) {
   }
 }
 
-exec::task<ByteBuffer> MessageBroker::SendRequest(uint64_t to_node_id, ByteBuffer data) {
+ex::task<ByteBuffer> MessageBroker::SendRequest(uint64_t to_node_id, ByteBuffer data) {
   EXA_THROW_CHECK_NE(to_node_id, this_node_id_) << "Cannot send message to current node";
   uint64_t request_id = SendTwoWayMessage(to_node_id, std::move(data));
   auto [iter, inserted] = outstanding_requests_.try_emplace(request_id);
@@ -232,8 +243,8 @@ exec::task<ByteBuffer> MessageBroker::SendRequest(uint64_t to_node_id, ByteBuffe
   co_return std::move(response_bytes);
 }
 
-exec::task<WaitClusterStateResult> MessageBroker::WaitClusterState(std::function<bool(const ClusterState&)> predicate,
-                                                                   uint64_t timeout_ms) {
+ex::task<WaitClusterStateResult> MessageBroker::WaitClusterState(std::function<bool(const ClusterState&)> predicate,
+                                                                 uint64_t timeout_ms) {
   ClusterState state {.nodes = BuildAliveNodeInfoList()};
   if (predicate(state)) {
     co_return WaitClusterStateResult {.cluster_state = std::move(state), .condition_met = true};
@@ -334,20 +345,30 @@ void MessageBroker::StartRecvSocketPuller() {
   log::Info("Node {:#x}'s recv socket bound to {}", this_node_id_, cluster_config_.listen_address);
 
   recv_socket_puller_ = std::make_unique<RecvSocketPuller>(std::move(recv_socket), [this](ByteBuffer raw) {
-    async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::DispatchReceivedMessage>(std::move(raw)));
+    ex::spawn(self_actor_ref_.SendLocal<&MessageBroker::DispatchReceivedMessage>(std::move(raw)) | DiscardResult(),
+              async_scope_.get_token());
   });
 }
 
 void MessageBroker::StartPeriodicalTaskScheduler() {
   periodical_task_scheduler_ = std::make_unique<PeriodicalTaskScheduler>();
   periodical_task_scheduler_->Register(
-      [this]() { async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::BroadcastGossip>()); },
+      [this]() {
+        ex::spawn(self_actor_ref_.SendLocal<&MessageBroker::BroadcastGossip>() | DiscardResult(),
+                  async_scope_.get_token());
+      },
       cluster_config_.network_config.gossip_interval_ms);
   periodical_task_scheduler_->Register(
-      [this]() { async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::CheckHeartbeatTimeout>()); },
+      [this]() {
+        ex::spawn(self_actor_ref_.SendLocal<&MessageBroker::CheckHeartbeatTimeout>() | DiscardResult(),
+                  async_scope_.get_token());
+      },
       kDefaultHeartbeatCheckIntervalMs);
   periodical_task_scheduler_->Register(
-      [this]() { async_scope_.spawn(self_actor_ref_.SendLocal<&MessageBroker::CheckClusterStateWaiterTimeout>()); },
+      [this]() {
+        ex::spawn(self_actor_ref_.SendLocal<&MessageBroker::CheckClusterStateWaiterTimeout>() | DiscardResult(),
+                  async_scope_.get_token());
+      },
       kDefaultWaiterExpirationCheckIntervalMs);
 }
 
@@ -380,7 +401,7 @@ void MessageBroker::HandleRepliedResponse(BrokerTwoWayMessage response_msg) {
   pending.sem.Acquire(1);
 }
 
-exec::task<void> MessageBroker::HandleIncomingRequest(BrokerTwoWayMessage request_msg) {
+ex::task<void> MessageBroker::HandleIncomingRequest(BrokerTwoWayMessage request_msg) {
   EXA_THROW_CHECK(request_handler_ != nullptr) << "Request handler not set";
   ByteBuffer reply_data = co_await request_handler_(std::move(request_msg.payload));
   SendReply(request_msg.request_node_id, request_msg.request_id, std::move(reply_data));

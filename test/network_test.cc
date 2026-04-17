@@ -49,7 +49,7 @@ ex_actor::ClusterConfig MakeConfig(const std::string& address, const std::string
 }
 
 void DispatchIncomingRequest(ex_actor::internal::MessageBroker& broker, uint64_t request_node_id,
-                            uint64_t response_node_id, uint64_t request_id, ByteBuffer payload) {
+                             uint64_t response_node_id, uint64_t request_id, ByteBuffer payload) {
   ex_actor::internal::BrokerMessage broker_msg {.variant = ex_actor::internal::BrokerTwoWayMessage {
                                                     .request_node_id = request_node_id,
                                                     .response_node_id = response_node_id,
@@ -124,8 +124,7 @@ TEST(MessageBrokerTest, WaitClusterStateReturnsTrueForGossipDiscoveredNode) {
   auto config = MakeConfig("tcp://127.0.0.1:7220");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7221"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7221"}});
 
   auto [result] = stdexec::sync_wait(broker.WaitClusterState(
                                          [](const ex_actor::ClusterState& state) {
@@ -161,23 +160,25 @@ TEST(MessageBrokerTest, WaitClusterStateTimesOutForUnknownNode) {
   auto config = MakeConfig("tcp://127.0.0.1:7230");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<bool> condition_met = true;
 
-  scope.spawn(broker.WaitClusterState(
-                  [](const ex_actor::ClusterState& state) {
-                    return std::ranges::any_of(state.nodes,
-                                               [](const ex_actor::NodeInfo& n) { return n.node_id == 99; });
-                  },
-                  /*timeout_ms=*/0) |
-              stdexec::then([&condition_met](const ex_actor::WaitClusterStateResult& res) {
-                condition_met.store(res.condition_met, std::memory_order_relaxed);
-              }));
+  stdexec::spawn(ex_actor::StartsInline(broker.WaitClusterState(
+                     [](const ex_actor::ClusterState& state) {
+                       return std::ranges::any_of(state.nodes,
+                                                  [](const ex_actor::NodeInfo& n) { return n.node_id == 99; });
+                     },
+                     /*timeout_ms=*/0)) |
+                     stdexec::then([&condition_met](const ex_actor::WaitClusterStateResult& res) {
+                       condition_met.store(res.condition_met, std::memory_order_relaxed);
+                     }) |
+                     ex_actor::DiscardResult(),
+                 scope.get_token());
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   broker.CheckClusterStateWaiterTimeout();
 
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
   EXPECT_FALSE(condition_met.load(std::memory_order_relaxed));
 
   stdexec::sync_wait(broker.Stop());
@@ -191,22 +192,24 @@ TEST(MessageBrokerTest, WaitClusterStateResolvesOnGossipDiscovery) {
   auto config = MakeConfig("tcp://127.0.0.1:7240");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<bool> condition_met = false;
 
-  scope.spawn(broker.WaitClusterState(
-                  [](const ex_actor::ClusterState& state) {
-                    return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
-                  },
-                  /*timeout_ms=*/5000) |
-              stdexec::then([&condition_met](const ex_actor::WaitClusterStateResult& res) {
-                condition_met.store(res.condition_met, std::memory_order_relaxed);
-              }));
+  stdexec::spawn(ex_actor::StartsInline(broker.WaitClusterState(
+                     [](const ex_actor::ClusterState& state) {
+                       return std::ranges::any_of(state.nodes,
+                                                  [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                     },
+                     /*timeout_ms=*/5000)) |
+                     stdexec::then([&condition_met](const ex_actor::WaitClusterStateResult& res) {
+                       condition_met.store(res.condition_met, std::memory_order_relaxed);
+                     }) |
+                     ex_actor::DiscardResult(),
+                 scope.get_token());
 
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7241"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7241"}});
 
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
   EXPECT_TRUE(condition_met.load(std::memory_order_relaxed));
 
   stdexec::sync_wait(broker.Stop());
@@ -220,10 +223,8 @@ TEST(MessageBrokerTest, DuplicateGossipForSameNodeDoesNotThrow) {
   auto config = MakeConfig("tcp://127.0.0.1:7250");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 200, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 200, .node_id = 1, .address = "tcp://127.0.0.1:7251"}});
 
   stdexec::sync_wait(broker.Stop());
 }
@@ -236,13 +237,11 @@ TEST(MessageBrokerTest, GossipWithConflictingAddressThrows) {
   auto config = MakeConfig("tcp://127.0.0.1:7260");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7261"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7261"}});
 
   EXPECT_THAT(
       [&]() {
-        DispatchGossip(
-            broker, {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7262"}});
+        DispatchGossip(broker, {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7262"}});
       },
       testing::Throws<std::exception>(
           testing::Property(&std::exception::what, testing::HasSubstr("Node 0x1 has conflicting address"))));
@@ -261,28 +260,29 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutDeactivatesTimedOutNodes) {
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover node 1 via gossip so it gets added to node_id_to_state_
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7271"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7271"}});
 
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
   // now node 1 should be dead
   broker.CheckHeartbeatTimeout();
 
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<bool> condition_met = true;
-  scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
-      broker.WaitClusterState(
+  stdexec::spawn(
+      ex_actor::StartsInline(broker.WaitClusterState(
           [](const ex_actor::ClusterState& state) {
             return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
           },
-          /*timeout_ms=*/0) |
-      stdexec::then(
-          [&condition_met](const ex_actor::WaitClusterStateResult& res) { condition_met = res.condition_met; })));
+          /*timeout_ms=*/0)) |
+          stdexec::then(
+              [&condition_met](const ex_actor::WaitClusterStateResult& res) { condition_met = res.condition_met; }) |
+          ex_actor::DiscardResult(),
+      scope.get_token());
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   broker.CheckClusterStateWaiterTimeout();
 
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
   EXPECT_FALSE(condition_met);
 
   stdexec::sync_wait(broker.Stop());
@@ -299,19 +299,22 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutErrorsOutstandingRequests) {
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover node 1 via gossip so it gets added to node_id_to_state_ and a send socket is created
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7281"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7281"}});
 
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<bool> got_error = false;
 
-  scope.spawn(broker.SendRequest(/*to_node_id=*/1, MakeBytes("hello")) | stdexec::then([](const ByteBuffer&) {}) |
-              stdexec::upon_error([&got_error](const auto&) { got_error.store(true, std::memory_order_relaxed); }));
+  stdexec::spawn(ex_actor::StartsInline(broker.SendRequest(/*to_node_id=*/1, MakeBytes("hello"))) |
+                     stdexec::then([](const ByteBuffer&) {}) | stdexec::upon_error([&got_error](const auto&) noexcept {
+                       got_error.store(true, std::memory_order_relaxed);
+                     }) |
+                     ex_actor::DiscardResult(),
+                 scope.get_token());
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   broker.CheckHeartbeatTimeout();
 
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
   EXPECT_TRUE(got_error.load(std::memory_order_relaxed));
 
   stdexec::sync_wait(broker.Stop());
@@ -327,18 +330,19 @@ TEST(MessageBrokerTest, HandleRepliedResponseResolvesOutstandingRequest) {
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover node 1 via gossip so we can send requests to it
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7291"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7291"}});
 
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<bool> got_response = false;
   std::string response_data;
 
-  scope.spawn(broker.SendRequest(/*to_node_id=*/1, MakeBytes("ping")) |
-              stdexec::then([&got_response, &response_data](const ByteBuffer& data) {
-                response_data = BytesToString(data);
-                got_response.store(true, std::memory_order_relaxed);
-              }));
+  stdexec::spawn(ex_actor::StartsInline(broker.SendRequest(/*to_node_id=*/1, MakeBytes("ping"))) |
+                     stdexec::then([&got_response, &response_data](const ByteBuffer& data) {
+                       response_data = BytesToString(data);
+                       got_response.store(true, std::memory_order_relaxed);
+                     }) |
+                     ex_actor::DiscardResult(),
+                 scope.get_token());
 
   ex_actor::internal::BrokerMessage reply_msg {.variant = ex_actor::internal::BrokerTwoWayMessage {
                                                    .request_node_id = 0,
@@ -349,7 +353,7 @@ TEST(MessageBrokerTest, HandleRepliedResponseResolvesOutstandingRequest) {
   auto raw = ex_actor::internal::Serialize(reply_msg);
   stdexec::sync_wait(broker.DispatchReceivedMessage(std::move(raw)));
 
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
   EXPECT_TRUE(got_response.load(std::memory_order_relaxed));
   EXPECT_EQ(response_data, "pong");
 
@@ -398,27 +402,28 @@ TEST(MessageBrokerTest, MultipleWaitersNotifiedOnGossipDiscovery) {
   auto config = MakeConfig("tcp://127.0.0.1:7320");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<int> success_count = 0;
 
   for (int i = 0; i < 3; ++i) {
-    scope.spawn(broker.WaitClusterState(
-                    [](const ex_actor::ClusterState& state) {
-                      return std::ranges::any_of(state.nodes,
-                                                 [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
-                    },
-                    /*timeout_ms=*/5000) |
-                stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
-                  if (res.condition_met) {
-                    success_count.fetch_add(1, std::memory_order_relaxed);
-                  }
-                }));
+    stdexec::spawn(ex_actor::StartsInline(broker.WaitClusterState(
+                       [](const ex_actor::ClusterState& state) {
+                         return std::ranges::any_of(state.nodes,
+                                                    [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
+                       },
+                       /*timeout_ms=*/5000)) |
+                       stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
+                         if (res.condition_met) {
+                           success_count.fetch_add(1, std::memory_order_relaxed);
+                         }
+                       }) |
+                       ex_actor::DiscardResult(),
+                   scope.get_token());
   }
 
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7321"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7321"}});
 
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
   EXPECT_EQ(success_count.load(std::memory_order_relaxed), 3);
 
   stdexec::sync_wait(broker.Stop());
@@ -432,36 +437,41 @@ TEST(MessageBrokerTest, GossipIntroducesMultipleNodesAtOnce) {
   auto config = MakeConfig("tcp://127.0.0.1:7330");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<int> success_count = 0;
 
-  scope.spawn(broker.WaitClusterState(
-                  [](const ex_actor::ClusterState& state) {
-                    return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
-                  },
-                  /*timeout_ms=*/5000) |
-              stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
-                if (res.condition_met) {
-                  success_count.fetch_add(1, std::memory_order_relaxed);
-                }
-              }));
+  stdexec::spawn(ex_actor::StartsInline(broker.WaitClusterState(
+                     [](const ex_actor::ClusterState& state) {
+                       return std::ranges::any_of(state.nodes,
+                                                  [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                     },
+                     /*timeout_ms=*/5000)) |
+                     stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
+                       if (res.condition_met) {
+                         success_count.fetch_add(1, std::memory_order_relaxed);
+                       }
+                     }) |
+                     ex_actor::DiscardResult(),
+                 scope.get_token());
 
-  scope.spawn(broker.WaitClusterState(
-                  [](const ex_actor::ClusterState& state) {
-                    return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
-                  },
-                  /*timeout_ms=*/5000) |
-              stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
-                if (res.condition_met) {
-                  success_count.fetch_add(1, std::memory_order_relaxed);
-                }
-              }));
+  stdexec::spawn(ex_actor::StartsInline(broker.WaitClusterState(
+                     [](const ex_actor::ClusterState& state) {
+                       return std::ranges::any_of(state.nodes,
+                                                  [](const ex_actor::NodeInfo& n) { return n.node_id == 2; });
+                     },
+                     /*timeout_ms=*/5000)) |
+                     stdexec::then([&success_count](const ex_actor::WaitClusterStateResult& res) {
+                       if (res.condition_met) {
+                         success_count.fetch_add(1, std::memory_order_relaxed);
+                       }
+                     }) |
+                     ex_actor::DiscardResult(),
+                 scope.get_token());
 
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7331"},
-                  {.last_seen_timestamp_ms = 200, .node_id = 2, .address = "tcp://127.0.0.1:7332"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7331"},
+                          {.last_seen_timestamp_ms = 200, .node_id = 2, .address = "tcp://127.0.0.1:7332"}});
 
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
   EXPECT_EQ(success_count.load(std::memory_order_relaxed), 2);
 
   // Verify newly discovered nodes are reachable via BroadcastGossip (the real gossip path)
@@ -504,8 +514,7 @@ TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover node 1 via gossip first
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7361"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7361"}});
 
   // Sleep so the initial last_seen becomes stale
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -514,8 +523,7 @@ TEST(MessageBrokerTest, GossipUpdatesLastSeenToMax) {
   uint64_t now_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
           .count();
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = now_ms, .node_id = 1, .address = "tcp://127.0.0.1:7361"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = now_ms, .node_id = 1, .address = "tcp://127.0.0.1:7361"}});
 
   // The node should NOT be timed out since we just refreshed it
   broker.CheckHeartbeatTimeout();
@@ -552,9 +560,8 @@ TEST(MessageBrokerTest, HeartbeatTimeoutUsesWallClockEpoch) {
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
           .count();
 
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = wall_clock_now_ms,
-                           .node_id = 1,
-                           .address = "tcp://127.0.0.1:7366"}});
+  DispatchGossip(broker,
+                 {{.last_seen_timestamp_ms = wall_clock_now_ms, .node_id = 1, .address = "tcp://127.0.0.1:7366"}});
 
   // If the broker internally uses steady_clock, GetTimeMs() returns a small
   // uptime-based value.  The check `GetTimeMs() - last_seen_timestamp_ms`
@@ -563,21 +570,23 @@ TEST(MessageBrokerTest, HeartbeatTimeoutUsesWallClockEpoch) {
   // the node stays alive.
   broker.CheckHeartbeatTimeout();
 
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<bool> condition_met = false;
-  scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
-      broker.WaitClusterState(
+  stdexec::spawn(
+      ex_actor::StartsInline(broker.WaitClusterState(
           [](const ex_actor::ClusterState& state) {
             return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
           },
-          /*timeout_ms=*/0) |
-      stdexec::then(
-          [&condition_met](const ex_actor::WaitClusterStateResult& res) { condition_met = res.condition_met; })));
+          /*timeout_ms=*/0)) |
+          stdexec::then(
+              [&condition_met](const ex_actor::WaitClusterStateResult& res) { condition_met = res.condition_met; }) |
+          ex_actor::DiscardResult(),
+      scope.get_token());
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   broker.CheckClusterStateWaiterTimeout();
 
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
   EXPECT_TRUE(condition_met) << "Node 1 should still be alive; wall-clock timestamp was just set";
 
   stdexec::sync_wait(broker.Stop());
@@ -603,9 +612,7 @@ TEST(MessageBrokerTest, CheckHeartbeatTimeoutToleratesClockSkew) {
           .count() +
       5000;
 
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = future_ms,
-                           .node_id = 1,
-                           .address = "tcp://127.0.0.1:7368"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = future_ms, .node_id = 1, .address = "tcp://127.0.0.1:7368"}});
 
   // Even after sleeping past the heartbeat timeout, the future timestamp must
   // not cause an unsigned-underflow false positive.
@@ -659,9 +666,7 @@ TEST(MessageBrokerTest, ContactNodeRestartWithSameAddressDifferentNodeId) {
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
   // Discover the contact node (node 1) via gossip
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1,
-                           .node_id = 1,
-                           .address = "tcp://127.0.0.1:7391"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7391"}});
 
   // Wait for the heartbeat to expire, then declare node 1 dead
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -670,9 +675,8 @@ TEST(MessageBrokerTest, ContactNodeRestartWithSameAddressDifferentNodeId) {
   // The contact node restarts with the same address but a new node ID (node 2).
   // Before the fix, OnNodeAlive would crash here because the contact_node_send_socket_
   // had already been moved into node_id_to_send_socket_ for node 1.
-  EXPECT_NO_THROW(DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999,
-                                           .node_id = 2,
-                                           .address = "tcp://127.0.0.1:7391"}}));
+  EXPECT_NO_THROW(
+      DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7391"}}));
 
   // The restarted node should be visible in the cluster state
   auto [result] = stdexec::sync_wait(broker.WaitClusterState(
@@ -702,35 +706,31 @@ TEST(MessageBrokerTest, DeadNodeIsNotBroadcastViaGossip) {
   //
   // To exercise the real BroadcastGossip path, broker0 sends gossip over ZMQ
   // to a recv socket that feeds into broker2's DispatchReceivedMessage.
-  // Declare capture_ctx/capture_socket before the brokers so they are destroyed
-  // after the brokers. broker0's ZMQ I/O thread may still hold references to
-  // message metadata when the context is torn down, causing a data race if the
-  // capture context is destroyed first.
+  //
+  // Bind the capture socket first with a dynamic port so there is no chance of
+  // "Address already in use" from a previous test's lingering ZMQ teardown.
   zmq::context_t capture_ctx {1};
   zmq::socket_t capture_socket {capture_ctx, zmq::socket_type::dealer};
+  capture_socket.bind("tcp://127.0.0.1:*");
+  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
+  capture_socket.set(zmq::sockopt::linger, 0);
+  std::string capture_endpoint = capture_socket.get(zmq::sockopt::last_endpoint);
 
   auto config0 = MakeConfig("tcp://127.0.0.1:7400",
-                            /*contact_address=*/"tcp://127.0.0.1:7402",
+                            /*contact_address=*/capture_endpoint,
                             /*heartbeat_timeout_ms=*/1);
   ex_actor::internal::MessageBroker broker0(/*this_node_id=*/0, config0);
 
-  auto config2 = MakeConfig("tcp://127.0.0.1:7402",
+  auto config2 = MakeConfig(capture_endpoint,
                             /*contact_address=*/"",
                             /*heartbeat_timeout_ms=*/60000);
   ex_actor::internal::MessageBroker broker2(/*this_node_id=*/2, config2);
 
-  // Set up a ZMQ recv socket on broker2's address to capture what broker0 sends
-  capture_socket.bind("tcp://127.0.0.1:7402");
-  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
-  capture_socket.set(zmq::sockopt::linger, 0);
-
   // Both brokers discover node 1
-  DispatchGossip(broker0,
-                 {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7401"},
-                  {.last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7402"}});
-  DispatchGossip(broker2,
-                 {{.last_seen_timestamp_ms = 99999, .node_id = 0, .address = "tcp://127.0.0.1:7400"},
-                  {.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7401"}});
+  DispatchGossip(broker0, {{.last_seen_timestamp_ms = 1, .node_id = 1, .address = "tcp://127.0.0.1:7401"},
+                           {.last_seen_timestamp_ms = 99999, .node_id = 2, .address = capture_endpoint}});
+  DispatchGossip(broker2, {{.last_seen_timestamp_ms = 99999, .node_id = 0, .address = "tcp://127.0.0.1:7400"},
+                           {.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7401"}});
 
   // Node 1 times out from broker0's perspective
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -752,29 +752,31 @@ TEST(MessageBrokerTest, DeadNodeIsNotBroadcastViaGossip) {
   // broker2 should still see node 1 as alive — the death was not propagated.
   // Use async_scope + manual timeout check to avoid blocking forever if the
   // bug is present (node 1 would be dead and the predicate never satisfied).
-  exec::async_scope scope;
+  stdexec::simple_counting_scope scope;
   std::atomic<bool> node1_alive = false;
-  scope.spawn(ex_actor::internal::WrapSenderWithInlineScheduler(
-      broker2.WaitClusterState(
-          [](const ex_actor::ClusterState& state) {
-            return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
-          },
-          /*timeout_ms=*/0) |
-      stdexec::then([&node1_alive](const ex_actor::WaitClusterStateResult& res) {
-        node1_alive.store(res.condition_met, std::memory_order_relaxed);
-      })));
+  stdexec::spawn(ex_actor::StartsInline(broker2.WaitClusterState(
+                     [](const ex_actor::ClusterState& state) {
+                       return std::ranges::any_of(state.nodes,
+                                                  [](const ex_actor::NodeInfo& n) { return n.node_id == 1; });
+                     },
+                     /*timeout_ms=*/0)) |
+                     stdexec::then([&node1_alive](const ex_actor::WaitClusterStateResult& res) {
+                       node1_alive.store(res.condition_met, std::memory_order_relaxed);
+                     }) |
+                     ex_actor::DiscardResult(),
+                 scope.get_token());
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   broker2.CheckClusterStateWaiterTimeout();
-  stdexec::sync_wait(scope.on_empty());
+  stdexec::sync_wait(scope.join());
 
-  EXPECT_TRUE(node1_alive.load(std::memory_order_relaxed))
-      << "Node 2 should still see node 1 as alive; "
-         "only the node-0-to-node-1 connection was bad";
+  EXPECT_TRUE(node1_alive.load(std::memory_order_relaxed)) << "Node 2 should still see node 1 as alive; "
+                                                              "only the node-0-to-node-1 connection was bad";
 
-  capture_socket.close();
   stdexec::sync_wait(broker0.Stop());
   stdexec::sync_wait(broker2.Stop());
+  capture_socket.close();
+  capture_ctx.close();
 }
 
 // ============================================================
@@ -785,9 +787,8 @@ TEST(MessageBrokerTest, BroadcastGossipAfterDiscovery) {
   auto config = MakeConfig("tcp://127.0.0.1:7380");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  DispatchGossip(broker,
-                 {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7381"},
-                  {.last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7382"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7381"},
+                          {.last_seen_timestamp_ms = 99999, .node_id = 2, .address = "tcp://127.0.0.1:7382"}});
 
   // BroadcastGossip picks random peers from the discovered set and sends to them
   EXPECT_NO_THROW(broker.BroadcastGossip());
@@ -803,11 +804,14 @@ TEST(MessageBrokerTest, BroadcastGossipAfterDiscovery) {
 // ============================================================
 
 TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) {
-  // Declare capture_ctx/capture_socket before the broker so they are destroyed
-  // after the broker, avoiding a data race between the broker's ZMQ I/O thread
-  // and the capture context's teardown.
+  // Bind the capture socket first with a dynamic port so there is no chance of
+  // "Address already in use" from a previous test's lingering ZMQ teardown.
   zmq::context_t capture_ctx {1};
   zmq::socket_t capture_socket {capture_ctx, zmq::socket_type::dealer};
+  capture_socket.bind("tcp://127.0.0.1:*");
+  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
+  capture_socket.set(zmq::sockopt::linger, 0);
+  std::string capture_endpoint = capture_socket.get(zmq::sockopt::last_endpoint);
 
   // Broker B (node 1) will receive requests from node 0 and defer replies.
   auto config = MakeConfig("tcp://127.0.0.1:7410",
@@ -817,12 +821,7 @@ TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) 
 
   // Set up an echo request handler so HandleIncomingRequest can process requests.
   ex_actor::internal::MessageBrokerTestHelper::SetRequestHandler(
-      broker, [](ByteBuffer data) -> exec::task<ByteBuffer> { co_return std::move(data); });
-
-  // Set up a capture socket on node 0's address to intercept replies sent by broker.
-  capture_socket.bind("tcp://127.0.0.1:7411");
-  capture_socket.set(zmq::sockopt::rcvtimeo, 2000);
-  capture_socket.set(zmq::sockopt::linger, 0);
+      broker, [](ByteBuffer data) -> stdexec::task<ByteBuffer> { co_return std::move(data); });
 
   // --- Phase 1: Request arrives while node 0 is unknown → reply deferred ---
   // Node 0 sends a request to broker (node 1). Broker doesn't know node 0 yet,
@@ -832,7 +831,7 @@ TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) 
 
   // --- Phase 2: Node 0 appears via gossip (with stale timestamp) ---
   // OnNodeAlive is triggered → send socket created → deferred reply flushed.
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1, .node_id = 0, .address = "tcp://127.0.0.1:7411"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 1, .node_id = 0, .address = capture_endpoint}});
 
   // Capture socket should receive the flushed reply.
   {
@@ -860,7 +859,7 @@ TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) 
   // Because the fix removes node 0 from node_id_to_state_ on death (instead of
   // marking alive=false), this gossip triggers OnNodeAlive again, which flushes
   // the deferred reply accumulated in phase 4.
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 0, .address = "tcp://127.0.0.1:7411"}});
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999, .node_id = 0, .address = capture_endpoint}});
 
   // Capture socket should receive the second deferred reply.
   {
@@ -876,6 +875,7 @@ TEST(MessageBrokerTest, DeferredReplySurvivesNodeConnectionLossAndReconnection) 
     EXPECT_EQ(BytesToString(two_way.payload), "request_2");
   }
 
-  capture_socket.close();
   stdexec::sync_wait(broker.Stop());
+  capture_socket.close();
+  capture_ctx.close();
 }

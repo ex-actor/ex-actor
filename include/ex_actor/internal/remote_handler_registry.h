@@ -49,10 +49,11 @@ class RemoteActorRequestHandlerRegistry {
   struct ActorCreationResult {
     std::unique_ptr<TypeErasedActor> actor;
     std::optional<std::string> actor_name;
+    ByteBuffer serialized_actor_ref;
   };
 
   using RemoteActorMethodCallHandler =
-      std::function<exec::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
+      std::function<ex::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
   using RemoteActorCreationHandler = std::function<ActorCreationResult(RemoteActorCreationHandlerContext context)>;
 
   void RegisterRemoteActorMethodCallHandler(const std::string& handler_key, uint64_t actor_type_hash,
@@ -153,6 +154,8 @@ class RemoteFuncHandlerRegistrar {
     return {
         .actor = std::move(actor),
         .actor_name = std::move(actor_name),
+        // Workaround: see ActorRegistryBackend::DeserializeActorRef comment.
+        .serialized_actor_ref = Serialize(rfl::Reflector<ActorRef<ActorClass>>::from(actor_ref)),
     };
   }
 
@@ -160,7 +163,7 @@ class RemoteFuncHandlerRegistrar {
    * @returns A coroutine carrying the serialized result of the actor method call.
    */
   template <class ActualClass, auto kMethod>
-  exec::task<NetworkReply> DeserializeAndInvokeActorMethod(
+  ex::task<NetworkReply> DeserializeAndInvokeActorMethod(
       RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
     EXA_THROW_CHECK(context.actor != nullptr);
     using Sig = Signature<decltype(kMethod)>;

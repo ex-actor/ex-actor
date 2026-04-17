@@ -19,10 +19,32 @@
 #include <exec/static_thread_pool.hpp>
 
 #include "ex_actor/internal/actor_config.h"
+#include "ex_actor/internal/container.h"
 #include "ex_actor/internal/logging.h"
-#include "ex_actor/internal/util.h"
+#include "ex_actor/internal/platform.h"
 
 namespace ex_actor {
+
+namespace internal {
+// Mixin that provides environment-adaptive completion signatures for scheduler senders.
+// When the environment has a never_stop_token, advertises only set_value_t(); otherwise
+// also advertises set_stopped_t().
+struct StoppableSchedulerCompletionSignatures {
+  template <class Self>
+  static consteval auto get_completion_signatures() {
+    return ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>();
+  }
+
+  template <class Self, class Env>
+  static consteval auto get_completion_signatures() {
+    if constexpr (ex::unstoppable_token<ex::stop_token_of_t<Env>>) {
+      return ex::completion_signatures<ex::set_value_t()>();
+    } else {
+      return ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>();
+    }
+  }
+};
+}  // namespace internal
 
 template <template <class> class Queue>
 class WorkSharingThreadPoolBase {
@@ -52,8 +74,8 @@ class WorkSharingThreadPoolBase {
     R receiver;
     WorkSharingThreadPoolBase* thread_pool;
     void Execute() override {
-      auto env = stdexec::get_env(receiver);
-      auto stoken = stdexec::get_stop_token(env);
+      auto env = ex::get_env(receiver);
+      auto stoken = ex::get_stop_token(env);
       if constexpr (ex::unstoppable_token<decltype(stoken)>) {
         receiver.set_value();
       } else {
@@ -69,7 +91,7 @@ class WorkSharingThreadPoolBase {
       uint32_t priority = UINT32_MAX;
       if constexpr (std::is_same_v<Queue<TypeErasedOperation*>,
                                    internal::UnboundedBlockingPriorityQueue<TypeErasedOperation*>>) {
-        auto env = stdexec::get_env(receiver);
+        auto env = ex::get_env(receiver);
         priority = ex_actor::get_priority(env);
       }
       thread_pool->EnqueueOperation(this, priority);
@@ -78,9 +100,10 @@ class WorkSharingThreadPoolBase {
 
   struct Scheduler;
 
-  struct Sender : ex::sender_t {
-    using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
+  struct Sender : ex::sender_t, internal::StoppableSchedulerCompletionSignatures {
+    using internal::StoppableSchedulerCompletionSignatures::get_completion_signatures;
     WorkSharingThreadPoolBase* thread_pool;
+
     struct Env {
       WorkSharingThreadPoolBase* thread_pool;
       template <class CPO>
@@ -163,9 +186,10 @@ class SchedulerUnion {
     }
   };
 
-  struct Sender : ex::sender_t {
-    using completion_signatures = ex::completion_signatures<ex::set_value_t(), ex::set_stopped_t()>;
+  struct Sender : ex::sender_t, internal::StoppableSchedulerCompletionSignatures {
+    using internal::StoppableSchedulerCompletionSignatures::get_completion_signatures;
     SchedulerUnion* scheduler_union;
+
     struct Env {
       SchedulerUnion* scheduler_union;
       template <class CPO>
@@ -176,7 +200,7 @@ class SchedulerUnion {
     auto get_env() const noexcept -> Env { return Env {.scheduler_union = scheduler_union}; }
 
     auto connect(ex::receiver auto receiver) {
-      auto env = stdexec::get_env(receiver);
+      auto env = ex::get_env(receiver);
       auto scheduler_index = ex_actor::get_scheduler_index(env);
       EXA_THROW_CHECK_LT(scheduler_index, scheduler_union->schedulers_.size()) << "Scheduler index out of range";
       return scheduler_union->schedulers_[scheduler_index].schedule().connect(std::move(receiver));
@@ -187,4 +211,5 @@ class SchedulerUnion {
   std::vector<InnerScheduler> schedulers_;
   size_t default_scheduler_index_;
 };
+
 }  // namespace ex_actor

@@ -36,21 +36,22 @@ void ActorRegistryBackend::SetBrokerActorRef(BasicActorRef<MessageBroker> broker
   broker_actor_ref_ = broker_actor_ref;
 }
 
-exec::task<void> ActorRegistryBackend::AsyncDestroyAllActors() {
-  exec::async_scope async_scope;
+ex::task<void> ActorRegistryBackend::AsyncDestroyAllActors() {
+  ex::simple_counting_scope async_scope;
   log::Info("Sending destroy messages to actors");
   for (auto& [actor_id, actor] : actor_id_to_actor_) {
-    async_scope.spawn(actor->AsyncDestroy());
+    ex::spawn(StartsInline(actor->AsyncDestroy()) | DiscardResult(), async_scope.get_token());
   }
   log::Info("Waiting for actors to be destroyed");
-  co_await async_scope.on_empty();
+  co_await async_scope.join();
   log::Info("All actors destroyed");
 }
 
-exec::task<void> ActorRegistryBackend::DestroyLocalActor(uint64_t actor_id) {
+ex::task<void> ActorRegistryBackend::DestroyLocalActor(uint64_t actor_id) {
   EXA_THROW_CHECK(actor_id_to_actor_.contains(actor_id)) << "Actor with id " << actor_id << " not found";
   auto actor = std::move(actor_id_to_actor_.at(actor_id));
   actor_id_to_actor_.erase(actor_id);
+  actor_id_to_serialized_ref_.erase(actor_id);
 
   auto actor_name = actor->GetActorConfig().actor_name;
   if (actor_name.has_value()) {
@@ -59,7 +60,7 @@ exec::task<void> ActorRegistryBackend::DestroyLocalActor(uint64_t actor_id) {
   co_await actor->AsyncDestroy();
 }
 
-exec::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer request_buffer) {
+ex::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer request_buffer) {
   auto request = Deserialize<NetworkRequest>(request_buffer);
 
   if (auto* msg = std::get_if<ActorCreationRequest>(&request.variant)) {
@@ -75,9 +76,8 @@ exec::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer req
   if (auto* msg = std::get_if<ActorLookUpRequest>(&request.variant)) {
     if (actor_name_to_id_.contains(msg->actor_name)) {
       auto actor_id = actor_name_to_id_.at(msg->actor_name);
-      auto type_hash = actor_id_to_actor_.at(actor_id)->GetActorTypeHash();
-      co_return SerializeReply(
-          NetworkReply {ActorLookUpReply {.success = true, .actor_id = actor_id, .actor_type_hash = type_hash}});
+      co_return SerializeReply(NetworkReply {
+          ActorLookUpReply {.success = true, .serialized_actor_ref = MapAt(actor_id_to_serialized_ref_, actor_id)}});
     } else {
       co_return SerializeReply(NetworkReply {ActorLookUpReply {.success = false}});
     }
@@ -128,17 +128,17 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
           << "An actor with the same name already exists, name=" << result.actor_name.value();
       actor_name_to_id_[result.actor_name.value()] = actor_id;
     }
-    auto type_hash = result.actor->GetActorTypeHash();
     actor_id_to_actor_[actor_id] = std::move(result.actor);
-    reply_out = SerializeReply(
-        NetworkReply {ActorCreationReply {.success = true, .actor_id = actor_id, .actor_type_hash = type_hash}});
+    actor_id_to_serialized_ref_[actor_id] = result.serialized_actor_ref;
+    reply_out = SerializeReply(NetworkReply {
+        ActorCreationReply {.success = true, .serialized_actor_ref = std::move(result.serialized_actor_ref)}});
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
     reply_out = SerializeReply(NetworkReply {ActorCreationReply {.success = false, .error = std::move(error_msg)}});
   }
 }
 
-exec::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorMethodCallRequest msg) {
+ex::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorMethodCallRequest msg) {
   if (!actor_id_to_actor_.contains(msg.actor_id)) {
     auto error_msg =
         fmt_lib::format("Can't find actor at remote node, actor_id={}, node_id={}, maybe it's already destroyed.",
@@ -177,7 +177,7 @@ exec::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorM
   }
 }
 
-exec::task<ByteBuffer> ActorRegistryBackend::HandleActorDestroyRequest(ActorDestroyRequest msg) {
+ex::task<ByteBuffer> ActorRegistryBackend::HandleActorDestroyRequest(ActorDestroyRequest msg) {
   try {
     co_await DestroyLocalActor(msg.actor_id);
     co_return SerializeReply(NetworkReply {ActorDestroyReply {.success = true}});
@@ -219,7 +219,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
   log::Info("ActorRegistry created, node_id={:#x}", this_node_id_);
 }
 
-exec::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_config) {
+ex::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_config) {
   log::Info("Starting distributed mode...");
   EXA_THROW_CHECK(broker_actor_ref_.IsEmpty()) << "Already in distributed mode.";
   EXA_THROW_CHECK(!cluster_config.listen_address.empty()) << "listen_address must not be empty";
@@ -235,7 +235,7 @@ exec::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_
   // Update the backend actor's broker ref so it can forward network requests
   co_await backend_actor_ref_.SendLocal<&ActorRegistryBackend::SetBrokerActorRef>(broker_actor_ref_);
 
-  auto request_handler = [ref = backend_actor_ref_](ByteBuffer data) -> exec::task<ByteBuffer> {
+  auto request_handler = [ref = backend_actor_ref_](ByteBuffer data) -> ex::task<ByteBuffer> {
     co_return co_await ref.SendLocal<&ActorRegistryBackend::HandleNetworkRequest>(std::move(data));
   };
   co_await broker_actor_ref_.SendLocal<&MessageBroker::Start>(std::move(request_handler));
@@ -246,13 +246,6 @@ exec::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_
     log::Info("Successfully started distributed mode, listen_address={}, contact_node_address={}",
               cluster_config.listen_address, cluster_config.contact_node_address);
   }
-}
-
-exec::task<WaitClusterStateResult> ActorRegistry::WaitClusterState(std::function<bool(const ClusterState&)> predicate,
-                                                                   uint64_t timeout_ms) {
-  EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty())
-      << "WaitClusterState requires distributed mode, call StartOrJoinCluster() after Init() to enable it.";
-  co_return co_await broker_actor_ref_.SendLocal<&MessageBroker::WaitClusterState>(std::move(predicate), timeout_ms);
 }
 
 }  // namespace ex_actor::internal

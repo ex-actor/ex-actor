@@ -139,7 +139,7 @@ class ComplexContainerActor {
 // ===========================
 
 TEST(ComplexApiTest, EmptyConstructorActor) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<EmptyActor>();
 
     int initial = co_await actor.template Send<&EmptyActor::GetCounter>();
@@ -162,7 +162,7 @@ TEST(ComplexApiTest, EmptyConstructorActor) {
 }
 
 TEST(ComplexApiTest, SingleParameterConstructor) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<SingleParamActor>("TestActor");
 
     std::string name = co_await actor.template Send<&SingleParamActor::GetName>();
@@ -182,7 +182,7 @@ TEST(ComplexApiTest, SingleParameterConstructor) {
 }
 
 TEST(ComplexApiTest, MultipleParametersConstructor) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<MultiParamActor>(123, "MultiActor", 2.5, true);
 
     int id = co_await actor.template Send<&MultiParamActor::GetId>();
@@ -214,7 +214,7 @@ TEST(ComplexApiTest, MultipleParametersConstructor) {
 }
 
 TEST(ComplexApiTest, MoveOnlyConstructorParameters) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     auto initial_data = std::make_unique<std::string>("Initial");
     auto actor = co_await ex_actor::Spawn<MoveOnlyConstructorActor>(std::move(initial_data));
 
@@ -234,7 +234,7 @@ TEST(ComplexApiTest, MoveOnlyConstructorParameters) {
 }
 
 TEST(ComplexApiTest, ComplexContainerConstructor) {
-  auto coroutine = []() -> exec::task<void> {
+  auto coroutine = []() -> stdexec::task<void> {
     std::vector<int> ids = {1, 2, 3, 4, 5};
     std::map<std::string, int> lookup = {{"a", 10}, {"b", 20}, {"c", 30}};
     std::optional<std::string> description = "Test Actor";

@@ -2,3 +2,16 @@
 
 # zmq false positive
 race:zmq::
+
+# libstdc++ exception_ptr false positive: _M_addref/_M_release (in eh_ptr.cc) and
+# rethrow_exception/current_exception/__cxa_end_catch are compiled into libstdc++.so
+# WITHOUT -fsanitize=thread, so TSAN cannot see their acquire/release atomic refcount
+# operations. This causes false data-race reports when an exception_ptr crosses threads
+# via stdexec's affine_on/finally sender chain.
+# See https://stackoverflow.com/q/37587096
+# We target __exception_ptr which appears in the demangled names of instrumented
+# callers (e.g. as a template parameter in stdexec receivers) -- the actual
+# uninstrumented libstdc++ symbols (_M_release, _M_addref, std::rethrow_exception)
+# don't show up as named frames in the TSAN stack, so this is the most precise
+# pattern available without over-suppressing unrelated stdexec logic.
+race:__exception_ptr

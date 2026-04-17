@@ -132,9 +132,12 @@ constexpr uint64_t FnvHash(std::string_view s) {
   return hash;
 }
 
-template <typename T>
-constexpr uint64_t GetHashValue() {
-  return FnvHash(GetTypeName<T>());
+// Boost-style hash combiner, adapted to 64-bit. The constant 0x9e3779b97f4a7c15ULL is the 64-bit
+// fractional part of the golden ratio (2^64 / φ); its irrational bit pattern seeds the mix so
+// every input bit influences many output bits and combining symmetric inputs doesn't collapse
+// to 0.
+constexpr uint64_t HashCombine(uint64_t seed, uint64_t value) {
+  return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
 }
 
 template <auto kFunc>
@@ -147,6 +150,16 @@ std::string GetUniqueNameForFunction() {
 #else
   return __PRETTY_FUNCTION__;
 #endif
+}
+
+// Compute the remote method handler key by mixing the actor's type hash with the hash of the
+// method's unique function signature. The resulting uint64_t is the on-the-wire identifier used
+// by both `ActorRef::SendRemote` and the handler registry, so collisions between methods that
+// share the same name across unrelated actor types are avoided.
+template <auto kMethod>
+uint64_t ComputeRemoteMethodHandlerKey(uint64_t actor_type_hash) {
+  uint64_t fn_hash = FnvHash(GetUniqueNameForFunction<kMethod>());
+  return HashCombine(actor_type_hash, fn_hash);
 }
 
 template <auto kFn>

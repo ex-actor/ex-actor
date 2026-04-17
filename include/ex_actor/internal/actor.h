@@ -184,7 +184,7 @@ class Actor : public TypeErasedActor {
 
   ~Actor() override = default;
 
-  uint64_t GetActorTypeHash() const override { return GetHashValue<UserClass>(); }
+  uint64_t GetActorTypeHash() const override { return FnvHash(GetTypeName<UserClass>()); }
 
   /// Async destroy the actor, if there are still messages in the mailbox, they might not be processed.
   ex::task<void> AsyncDestroy() override {

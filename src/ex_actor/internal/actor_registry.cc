@@ -148,8 +148,7 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorMet
 
   RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandler handler = nullptr;
   try {
-    handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorMethodCallHandler(msg.handler_key,
-                                                                                               msg.actor_type_hash);
+    handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorMethodCallHandler(msg.handler_key);
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
     co_return SerializeReply(NetworkReply {ActorMethodCallReply {.success = false, .error = std::move(error_msg)}});

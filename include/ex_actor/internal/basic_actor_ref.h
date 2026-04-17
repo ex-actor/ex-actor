@@ -33,7 +33,7 @@ class BasicActorRef {
         actor_id_(actor_id),
         type_erased_actor_(actor),
         adjusted_ptr_(actor != nullptr ? static_cast<UserClass*>(actor->GetUserClassInstanceAddress()) : nullptr),
-        actor_type_hash_(actor != nullptr ? actor->GetActorTypeHash() : GetHashValue<UserClass>()) {}
+        actor_type_hash_(actor != nullptr ? actor->GetActorTypeHash() : FnvHash(GetTypeName<UserClass>())) {}
 
   BasicActorRef(uint64_t actor_id, TypeErasedActor* actor, uint64_t actor_type_hash)
       : is_empty_(false),

@@ -144,8 +144,7 @@ class ActorRef : public BasicActorRef<UserClass> {
         .args_tuple = typename Sig::DecayedArgsTupleType(std::move(args)...)};
 
     NetworkRequest request {ActorMethodCallRequest {
-        .handler_key = GetUniqueNameForFunction<kMethod>(),
-        .actor_type_hash = this->actor_type_hash_,
+        .handler_key = ComputeRemoteMethodHandlerKey<kMethod>(this->actor_type_hash_),
         .actor_id = this->actor_id_,
         .serialized_args = Serialize(method_call_args),
     }};
@@ -199,10 +198,9 @@ struct hash<ex_actor::ActorRef<UserClass>> {
     if (ref.IsEmpty()) {
       return ex_actor::internal::kEmptyActorRefHashVal;
     }
-    size_t h = std::hash<uint64_t>()(ref.GetNodeId());
-    auto combine = [&](uint64_t v) { h ^= std::hash<uint64_t>()(v) + 0x9e3779b9 + (h << 6) + (h >> 2); };
-    combine(ref.GetActorId());
-    combine(ref.GetActorTypeHash());
+    uint64_t h = std::hash<uint64_t>()(ref.GetNodeId());
+    h = ex_actor::internal::HashCombine(h, std::hash<uint64_t>()(ref.GetActorId()));
+    h = ex_actor::internal::HashCombine(h, std::hash<uint64_t>()(ref.GetActorTypeHash()));
     return h;
   }
 };

@@ -59,8 +59,9 @@ struct ActorCreationRequest {
 };
 
 struct ActorMethodCallRequest {
-  std::string handler_key;
-  uint64_t actor_type_hash {};
+  // Combined hash of the target actor's type name and the method's unique function signature.
+  // Computed via ComputeRemoteMethodHandlerKey() so sender and receiver agree on the same key.
+  uint64_t handler_key {};
   uint64_t actor_id {};
   ByteBuffer serialized_args;  // serialized ActorMethodCallArgs
 };

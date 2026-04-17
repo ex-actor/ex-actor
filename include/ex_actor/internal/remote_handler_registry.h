@@ -56,18 +56,18 @@ class RemoteActorRequestHandlerRegistry {
       std::function<ex::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
   using RemoteActorCreationHandler = std::function<ActorCreationResult(RemoteActorCreationHandlerContext context)>;
 
-  void RegisterRemoteActorMethodCallHandler(const std::string& key, RemoteActorMethodCallHandler func) {
-    EXA_THROW_CHECK(!remote_actor_method_call_handler_.contains(key))
-        << "Duplicate remote actor method call handler: " << key
+  void RegisterRemoteActorMethodCallHandler(uint64_t handler_key, RemoteActorMethodCallHandler func) {
+    EXA_THROW_CHECK(!remote_actor_method_call_handler_.contains(handler_key))
+        << "Duplicate remote actor method call handler for key " << handler_key
         << ", maybe you have duplicated functions in EXA_REMOTE.";
-    remote_actor_method_call_handler_[key] = std::move(func);
+    remote_actor_method_call_handler_[handler_key] = std::move(func);
   }
 
-  RemoteActorMethodCallHandler GetRemoteActorMethodCallHandler(const std::string& key) const {
-    EXA_THROW_CHECK(remote_actor_method_call_handler_.contains(key))
-        << "Remote actor method call handler not found: " << key
+  RemoteActorMethodCallHandler GetRemoteActorMethodCallHandler(uint64_t handler_key) const {
+    EXA_THROW_CHECK(remote_actor_method_call_handler_.contains(handler_key))
+        << "Remote actor method call handler not found for key " << handler_key
         << ", maybe you forgot to register it with EXA_REMOTE.";
-    return remote_actor_method_call_handler_.at(key);
+    return remote_actor_method_call_handler_.at(handler_key);
   }
   void RegisterRemoteActorCreationHandler(const std::string& key, RemoteActorCreationHandler func) {
     EXA_THROW_CHECK(!remote_actor_creation_handler_.contains(key))
@@ -82,7 +82,7 @@ class RemoteActorRequestHandlerRegistry {
 
  private:
   std::unordered_map<std::string, RemoteActorCreationHandler> remote_actor_creation_handler_;
-  std::unordered_map<std::string, RemoteActorMethodCallHandler> remote_actor_method_call_handler_;
+  std::unordered_map<uint64_t, RemoteActorMethodCallHandler> remote_actor_method_call_handler_;
 };
 
 template <auto kActorCreateFn, auto... kActorMethods>
@@ -103,13 +103,16 @@ class RemoteFuncHandlerRegistrar {
     };
     (check_fn_class.template operator()<typename CreateFnSig::ReturnType, kActorMethods>(), ...);
     auto register_handler = [this]<auto kFuncPtr>() {
-      std::string func_name = GetUniqueNameForFunction<kFuncPtr>();
       if constexpr (std::is_member_function_pointer_v<decltype(kFuncPtr)>) {
+        using ActorClass = typename CreateFnSig::ReturnType;
+        uint64_t actor_type_hash = FnvHash(GetTypeName<ActorClass>());
+        uint64_t handler_key = ComputeRemoteMethodHandlerKey<kFuncPtr>(actor_type_hash);
         RemoteActorRequestHandlerRegistry::GetInstance().RegisterRemoteActorMethodCallHandler(
-            func_name, [this](RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
-              return DeserializeAndInvokeActorMethod<typename CreateFnSig::ReturnType, kFuncPtr>(std::move(context));
+            handler_key, [this](RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext context) {
+              return DeserializeAndInvokeActorMethod<ActorClass, kFuncPtr>(std::move(context));
             });
       } else {
+        std::string func_name = GetUniqueNameForFunction<kFuncPtr>();
         RemoteActorRequestHandlerRegistry::GetInstance().RegisterRemoteActorCreationHandler(
             func_name, [this](RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext context) {
               return DeserializeAndCreateActor<kFuncPtr>(std::move(context));

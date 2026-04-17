@@ -110,6 +110,36 @@ constexpr auto UnwrapReturnSenderIfNested() {
   }
 }
 
+template <typename T>
+constexpr std::string_view GetTypeName() {
+#if defined(_MSC_VER)
+  return __FUNCSIG__;
+#elif defined(__clang__)
+  return __PRETTY_FUNCTION__;
+#elif defined(__GNUC__)
+  return __PRETTY_FUNCTION__;
+#else
+  static_assert(false, "unsupported compiler.");
+#endif
+}
+
+constexpr uint64_t FnvHash(std::string_view s) {
+  uint64_t hash = 14695981039346656037ULL;
+  for (char c : s) {
+    hash ^= static_cast<uint64_t>(static_cast<unsigned char>(c));
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+// Boost-style hash combiner, adapted to 64-bit. The constant 0x9e3779b97f4a7c15ULL is the 64-bit
+// fractional part of the golden ratio (2^64 / φ); its irrational bit pattern seeds the mix so
+// every input bit influences many output bits and combining symmetric inputs doesn't collapse
+// to 0.
+constexpr uint64_t HashCombine(uint64_t seed, uint64_t value) {
+  return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
+}
+
 template <auto kFunc>
 std::string GetUniqueNameForFunction() {
   // The compiler-provided function signature string embeds the actual NTTP value
@@ -120,6 +150,16 @@ std::string GetUniqueNameForFunction() {
 #else
   return __PRETTY_FUNCTION__;
 #endif
+}
+
+// Compute the remote method handler key by mixing the actor's type hash with the hash of the
+// method's unique function signature. The resulting uint64_t is the on-the-wire identifier used
+// by both `ActorRef::SendRemote` and the handler registry, so collisions between methods that
+// share the same name across unrelated actor types are avoided.
+template <auto kMethod>
+uint64_t ComputeRemoteMethodHandlerKey(uint64_t actor_type_hash) {
+  uint64_t fn_hash = FnvHash(GetUniqueNameForFunction<kMethod>());
+  return HashCombine(actor_type_hash, fn_hash);
 }
 
 template <auto kFn>

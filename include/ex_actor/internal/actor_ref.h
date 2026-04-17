@@ -42,16 +42,35 @@ class ActorRef : public BasicActorRef<UserClass> {
         node_id_(node_id),
         broker_actor_ref_(broker_actor_ref) {}
 
+  ActorRef(uint64_t this_node_id, uint64_t node_id, uint64_t actor_id, uint64_t actor_type_hash, TypeErasedActor* actor,
+           const BasicActorRef<MessageBroker>& broker_actor_ref)
+      : BasicActorRef<UserClass>(actor_id, actor, actor_type_hash),
+        this_node_id_(this_node_id),
+        node_id_(node_id),
+        broker_actor_ref_(broker_actor_ref) {}
+
   friend bool operator==(const ActorRef& lhs, const ActorRef& rhs) {
-    if (lhs.is_empty_ && rhs.is_empty_) {
+    if (lhs.is_empty_ != rhs.is_empty_) {
+      return false;
+    }
+    if (lhs.is_empty_) {
       return true;
     }
-    return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_;
+    return lhs.node_id_ == rhs.node_id_ && lhs.actor_id_ == rhs.actor_id_ &&
+           lhs.actor_type_hash_ == rhs.actor_type_hash_;
   }
 
   void SetLocalRuntimeInfo(uint64_t this_node_id, TypeErasedActor* actor,
                            const BasicActorRef<MessageBroker>& broker_actor_ref) {
     this_node_id_ = this_node_id;
+    this->type_erased_actor_ = actor;
+    broker_actor_ref_ = broker_actor_ref;
+  }
+
+  void SetLocalRuntimeInfo(uint64_t this_node_id, uint64_t actor_type_hash, TypeErasedActor* actor,
+                           const BasicActorRef<MessageBroker>& broker_actor_ref) {
+    this_node_id_ = this_node_id;
+    this->actor_type_hash_ = actor_type_hash;
     this->type_erased_actor_ = actor;
     broker_actor_ref_ = broker_actor_ref;
   }
@@ -125,7 +144,7 @@ class ActorRef : public BasicActorRef<UserClass> {
         .args_tuple = typename Sig::DecayedArgsTupleType(std::move(args)...)};
 
     NetworkRequest request {ActorMethodCallRequest {
-        .handler_key = GetUniqueNameForFunction<kMethod>(),
+        .handler_key = ComputeRemoteMethodHandlerKey<kMethod>(this->actor_type_hash_),
         .actor_id = this->actor_id_,
         .serialized_args = Serialize(method_call_args),
     }};
@@ -179,7 +198,10 @@ struct hash<ex_actor::ActorRef<UserClass>> {
     if (ref.IsEmpty()) {
       return ex_actor::internal::kEmptyActorRefHashVal;
     }
-    return std::hash<uint64_t>()(ref.GetActorId()) ^ std::hash<uint64_t>()(ref.GetNodeId());
+    uint64_t h = std::hash<uint64_t>()(ref.GetNodeId());
+    h = ex_actor::internal::HashCombine(h, std::hash<uint64_t>()(ref.GetActorId()));
+    h = ex_actor::internal::HashCombine(h, std::hash<uint64_t>()(ref.GetActorTypeHash()));
+    return h;
   }
 };
 }  // namespace std
@@ -203,6 +225,7 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
     bool is_empty {};
     uint64_t node_id {};
     uint64_t actor_id {};
+    uint64_t actor_type_hash {};
     uint64_t adjusted_ptr_addr {};
   };
 
@@ -212,7 +235,8 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
     }
     // this_node_id(0) and TypeErasedActor*(nullptr) are placeholders;
     // filled later in the Parser::read below.
-    ex_actor::internal::ActorRef<U> actor(/*this_node_id=*/0, rfl_type.node_id, rfl_type.actor_id, /*actor=*/nullptr,
+    ex_actor::internal::ActorRef<U> actor(/*this_node_id=*/0, rfl_type.node_id, rfl_type.actor_id,
+                                          rfl_type.actor_type_hash, /*actor=*/nullptr,
                                           /*broker_actor_ref=*/ {});
     // Restore the already-adjusted pointer from the sender side.
     // This is only valid for local actors; remote actors never use adjusted_ptr_.
@@ -226,6 +250,7 @@ struct Reflector<ex_actor::internal::ActorRef<U>> {
         .is_empty = actor_ref.is_empty_,
         .node_id = actor_ref.node_id_,
         .actor_id = actor_ref.actor_id_,
+        .actor_type_hash = actor_ref.actor_type_hash_,
         .adjusted_ptr_addr = reinterpret_cast<uint64_t>(actor_ref.adjusted_ptr_),
     };
   }
@@ -248,8 +273,9 @@ struct Parser<capnproto::ReaderWithContext<ex_actor::internal::ActorRefSerdeCont
     }
     auto actor_ref = parse_res.value();
     const auto& info = reader.info;
-    actor_ref.SetLocalRuntimeInfo(info.this_node_id, info.actor_look_up_fn(actor_ref.GetActorId()),
-                                  info.broker_actor_ref);
+    actor_ref.SetLocalRuntimeInfo(info.this_node_id, actor_ref.GetActorTypeHash(),
+                                  info.actor_look_up_fn(actor_ref.GetActorId()), info.broker_actor_ref);
+
     return actor_ref;
   }
 

@@ -41,6 +41,7 @@ class TypeErasedActor {
   virtual ~TypeErasedActor() = default;
   virtual void PushMessage(ActorMessage* task) = 0;
   virtual ex::task<void> AsyncDestroy() = 0;
+  virtual uint64_t GetActorTypeHash() const = 0;
 
   const ActorConfig& GetActorConfig() const { return actor_config_; }
   void* GetUserClassInstanceAddress() const { return cached_user_class_instance_address_; }
@@ -182,6 +183,8 @@ class Actor : public TypeErasedActor {
   }
 
   ~Actor() override = default;
+
+  uint64_t GetActorTypeHash() const override { return FnvHash(GetTypeName<UserClass>()); }
 
   /// Async destroy the actor, if there are still messages in the mailbox, they might not be processed.
   ex::task<void> AsyncDestroy() override {

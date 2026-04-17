@@ -32,13 +32,24 @@ class BasicActorRef {
       : is_empty_(false),
         actor_id_(actor_id),
         type_erased_actor_(actor),
-        adjusted_ptr_(actor != nullptr ? static_cast<UserClass*>(actor->GetUserClassInstanceAddress()) : nullptr) {}
+        adjusted_ptr_(actor != nullptr ? static_cast<UserClass*>(actor->GetUserClassInstanceAddress()) : nullptr),
+        actor_type_hash_(actor != nullptr ? actor->GetActorTypeHash() : FnvHash(GetTypeName<UserClass>())) {}
+
+  BasicActorRef(uint64_t actor_id, TypeErasedActor* actor, uint64_t actor_type_hash)
+      : is_empty_(false),
+        actor_id_(actor_id),
+        type_erased_actor_(actor),
+        adjusted_ptr_(actor != nullptr ? static_cast<UserClass*>(actor->GetUserClassInstanceAddress()) : nullptr),
+        actor_type_hash_(actor_type_hash) {}
 
   friend bool operator==(const BasicActorRef& lhs, const BasicActorRef& rhs) {
-    if (lhs.is_empty_ && rhs.is_empty_) {
+    if (lhs.is_empty_ != rhs.is_empty_) {
+      return false;
+    }
+    if (lhs.is_empty_) {
       return true;
     }
-    return lhs.actor_id_ == rhs.actor_id_;
+    return lhs.actor_id_ == rhs.actor_id_ && lhs.actor_type_hash_ == rhs.actor_type_hash_;
   }
 
   template <class U>
@@ -57,7 +68,8 @@ class BasicActorRef {
         type_erased_actor_(other.type_erased_actor_),
         // static_cast between typed pointers applies a compile-time constant offset,
         // so this is correct even if the pointer is invalid (e.g. a remote address).
-        adjusted_ptr_(static_cast<UserClass*>(other.adjusted_ptr_)) {}
+        adjusted_ptr_(static_cast<UserClass*>(other.adjusted_ptr_)),
+        actor_type_hash_(other.actor_type_hash_) {}
 
   // Converting assignment operator - delegates to converting constructor
   template <class Other>
@@ -69,6 +81,7 @@ class BasicActorRef {
     // static_cast between typed pointers applies a compile-time constant offset,
     // so this is correct even if the pointer is invalid (e.g. a remote address).
     adjusted_ptr_ = static_cast<UserClass*>(other.adjusted_ptr_);
+    actor_type_hash_ = other.actor_type_hash_;
     return *this;
   }
 
@@ -87,12 +100,14 @@ class BasicActorRef {
 
   bool IsEmpty() const { return is_empty_; }
   uint64_t GetActorId() const { return actor_id_; }
+  uint64_t GetActorTypeHash() const { return actor_type_hash_; }
 
  protected:
   bool is_empty_ = true;
   uint64_t actor_id_ = 0;
   TypeErasedActor* type_erased_actor_ = nullptr;
   UserClass* adjusted_ptr_ = nullptr;
+  uint64_t actor_type_hash_ = 0;
 };
 
 }  // namespace ex_actor::internal

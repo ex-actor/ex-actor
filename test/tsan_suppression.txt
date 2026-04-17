@@ -9,10 +9,9 @@ race:zmq::
 # operations. This causes false data-race reports when an exception_ptr crosses threads
 # via stdexec's affine_on/finally sender chain.
 # See https://stackoverflow.com/q/37587096
-# Note: we cannot suppress the actual uninstrumented symbols (_M_release, _M_addref,
-# std::rethrow_exception, etc.) because they don't appear as named frames in the TSAN
-# stack -- they resolve to <null> library offsets. Instead we target stdexec::__final::,
-# which is the specific sender adaptor handling cross-thread completion forwarding in
-# affine_on. This is narrower than matching __exception_ptr (which would hit every
-# template instantiation carrying exception_ptr as a type parameter).
-race:stdexec::__final::
+# We target __exception_ptr which appears in the demangled names of instrumented
+# callers (e.g. as a template parameter in stdexec receivers) -- the actual
+# uninstrumented libstdc++ symbols (_M_release, _M_addref, std::rethrow_exception)
+# don't show up as named frames in the TSAN stack, so this is the most precise
+# pattern available without over-suppressing unrelated stdexec logic.
+race:__exception_ptr

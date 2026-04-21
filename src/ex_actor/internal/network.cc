@@ -154,8 +154,10 @@ void PeriodicalTaskScheduler::Loop(const std::stop_token& stop_token) {
 MessageBroker::MessageBroker(uint64_t this_node_id, ClusterConfig cluster_config)
     : this_node_id_(this_node_id), cluster_config_(std::move(cluster_config)) {
   EXA_THROW_CHECK(!cluster_config_.listen_address.empty()) << "listen_address must not be empty";
-  node_id_to_state_[this_node_id_] = {
-      .last_seen_timestamp_ms = GetTimeMs(), .node_id = this_node_id_, .address = cluster_config_.listen_address};
+  node_id_to_state_[this_node_id_] = {.last_seen_timestamp_ms = GetTimeMs(),
+                                      .node_id = this_node_id_,
+                                      .address = cluster_config_.listen_address,
+                                      .node_name = cluster_config_.node_name};
   if (!cluster_config_.contact_node_address.empty()) {
     EXA_THROW_CHECK_NE(cluster_config_.contact_node_address, cluster_config_.listen_address);
     contact_node_send_socket_ = zmq::socket_t(zmq_context_, zmq::socket_type::dealer);
@@ -385,6 +387,9 @@ void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_messag
     EXA_THROW_CHECK_EQ(cur_node_state.address, incoming_node_state.address)
         << fmt_lib::format("Node {:#x} has conflicting address, {} vs {}.", cur_node_state.node_id,
                            cur_node_state.address, incoming_node_state.address);
+    EXA_THROW_CHECK_EQ(cur_node_state.node_name, incoming_node_state.node_name)
+        << fmt_lib::format("Node {:#x} has conflicting node_name, {} vs {}.", cur_node_state.node_id,
+                           cur_node_state.node_name, incoming_node_state.node_name);
     cur_node_state.last_seen_timestamp_ms =
         std::max(cur_node_state.last_seen_timestamp_ms, incoming_node_state.last_seen_timestamp_ms);
   }
@@ -502,7 +507,7 @@ std::vector<NodeInfo> MessageBroker::BuildAliveNodeInfoList() const {
   std::vector<NodeInfo> result;
   result.reserve(node_id_to_state_.size());
   for (const auto& [node_id, state] : node_id_to_state_) {
-    result.push_back(NodeInfo {.node_id = node_id, .address = state.address});
+    result.push_back(NodeInfo {.node_id = node_id, .address = state.address, .node_name = state.node_name});
   }
   return result;
 }

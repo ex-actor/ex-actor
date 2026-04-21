@@ -15,11 +15,11 @@ ADDR0 = "tcp://127.0.0.1:5301"
 ADDR1 = "tcp://127.0.0.1:5302"
 
 log_file0 = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")
-node0 = subprocess.Popen([argv[1], ADDR0], stdout=log_file0, stderr=subprocess.STDOUT)
+node0 = subprocess.Popen([argv[1], ADDR0, "node0", "node1"], stdout=log_file0, stderr=subprocess.STDOUT)
 log_file0.close()
 
 log_file1 = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")
-node1 = subprocess.Popen([argv[1], ADDR1, ADDR0], stdout=log_file1, stderr=subprocess.STDOUT)
+node1 = subprocess.Popen([argv[1], ADDR1, "node1", "node0", ADDR0], stdout=log_file1, stderr=subprocess.STDOUT)
 log_file1.close()
 
 

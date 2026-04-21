@@ -35,9 +35,12 @@ EXA_REMOTE(&PingWorker::Create, &PingWorker::Ping);
 
 stdexec::task<void> MainCoroutine(int argc, char** argv) {
   std::string listen_address = argv[1];
-  std::string contact_address = (argc > 2) ? argv[2] : "";
-  // 2. Init the framework, then start or join a cluster.
+  std::string node_name = argv[2];
+  std::string peer_node_name = argv[3];
+  std::string contact_address = (argc > 4) ? argv[4] : "";
+
   ex_actor::Init(/*thread_pool_size=*/4);
+  // 2. start or join a cluster.
   co_await ex_actor::StartOrJoinCluster(ex_actor::ClusterConfig {
       // The public address other nodes use to connect to you,
       // we'll open a listening port at this address.
@@ -45,18 +48,22 @@ stdexec::task<void> MainCoroutine(int argc, char** argv) {
       // If you're the first node of the cluster, leave this empty.
       // Otherwise, set to any node in the cluster to join.
       .contact_node_address = contact_address,
+      // Optional friendly name for this node.
+      .node_name = node_name,
   });
 
-  // 3. Wait for the cluster to reach your desired state.
+  // 3. Wait until the peer we care about has joined the cluster.
   auto [cluster_state, condition_met] = co_await ex_actor::WaitClusterState(
-      /*predicate=*/[](const ex_actor::ClusterState& state) {
-        return state.nodes.size() >= 2;
+      /*predicate=*/[&](const ex_actor::ClusterState& state) {
+        return std::ranges::any_of(state.nodes,
+            [&](const auto& n) { return n.node_name == peer_node_name; });
       },
       /*timeout_ms=*/5000);
   assert(condition_met);
 
-  // 4. Pick a remote node, here we pick the first node whose address differs from ours.
-  auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address != listen_address; });
+  // 4. Look up the peer node by its user-defined name.
+  auto it = std::ranges::find_if(cluster_state.nodes,
+      [&](const auto& n) { return n.node_name == peer_node_name; });
   auto remote_node_id = it->node_id;
 
   // 5. Create actor at remote node and play!
@@ -67,9 +74,9 @@ stdexec::task<void> MainCoroutine(int argc, char** argv) {
   assert(ping_res == "ack from Alice, msg got: hello");
   std::cout << "All work done" << std::endl;
 
-  // 6. Wait for OS exit signal(like CTRL+C or kill) before shutting down, otherwise the process
-  // will exit immediately, which might be earlier than the other node finishes its work,
-  // causing error in the other node.
+
+  // helper function to wait for OS exit signal(like CTRL+C or kill) before shutting down, otherwise the process
+  // might exit earlier than the peer node finishes its work, causing error in the peer node.
   co_await ex_actor::WaitOsExitSignal();
   ex_actor::Shutdown();
 }
@@ -87,13 +94,13 @@ int main(int argc, char** argv) { stdexec::sync_wait(MainCoroutine(argc, argv));
 Compile this program into a binary, let's say `distributed_node`.
 
 ```bash
-# usage: `./distributed_node <listen_address> [contact_address]`
+# usage: `./distributed_node <listen_address> <node_name> <peer_node_name> [contact_address]`
 
 # in one shell
-./distributed_node tcp://127.0.0.1:5301
+./distributed_node tcp://127.0.0.1:5301 node0 node1
 
 # in another shell
-./distributed_node tcp://127.0.0.1:5302 tcp://127.0.0.1:5301
+./distributed_node tcp://127.0.0.1:5302 node1 node0 tcp://127.0.0.1:5301
 ```
 
 Both processes should print "All work done" log.
@@ -150,7 +157,5 @@ we can take advantage of a schemafull protocol. For this reason, we choose [Cap'
 ### Network
 
 We choose [ZeroMQ](https://zeromq.org/), it's a well-known and sophisticated message passing library.
-
-The topology is a full mesh. Each node holds one receive DEALER socket bound locally and several send DEALER sockets connected to other nodes.
 
 The node states are synchronized via gossip protocol, no centralized coordination node.

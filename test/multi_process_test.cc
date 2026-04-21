@@ -20,27 +20,34 @@ class PingWorker {
 };
 EXA_REMOTE(&PingWorker::CreateFn, &PingWorker::Ping);
 
-// Usage: <binary> <listen_address> [contact_address]
+// Usage: <binary> <listen_address> <node_name> <peer_node_name> [contact_address]
 stdexec::task<void> MainCoroutine(int argc, char** argv) {
+  EXA_THROW_CHECK(argc >= 4) << "Usage: <binary> <listen_address> <node_name> <peer_node_name> [contact_address]";
   auto shared_pool = std::make_shared<ex_actor::WorkSharingThreadPool>(4);
   std::string listen_address = argv[1];
-  std::string contact_address = (argc > 2) ? argv[2] : "";
+  std::string node_name = argv[2];
+  std::string peer_node_name = argv[3];
+  std::string contact_address = (argc > 4) ? argv[4] : "";
   ex_actor::ClusterConfig cluster_config {
       .listen_address = listen_address,
       .contact_node_address = contact_address,
       .network_config = {.heartbeat_timeout_ms = 5000},
+      .node_name = node_name,
   };
   ex_actor::Init(shared_pool->GetScheduler());
   co_await ex_actor::StartOrJoinCluster(cluster_config);
   ex_actor::HoldResource(shared_pool);
 
-  auto [cluster_state, condition_met] =
-      co_await ex_actor::WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
-                                          /*timeout_ms=*/5000);
-  EXA_THROW_CHECK(condition_met) << "Cannot connect to any remote node";
+  auto [cluster_state, condition_met] = co_await ex_actor::WaitClusterState(
+      [&](const auto& state) {
+        return std::ranges::any_of(state.nodes, [&](const auto& n) { return n.node_name == peer_node_name; });
+      },
+      /*timeout_ms=*/5000);
+  EXA_THROW_CHECK(condition_met) << "Cannot find peer node with name " << peer_node_name;
 
-  auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address != listen_address; });
-  EXA_THROW_CHECK(it != cluster_state.nodes.end()) << "Cannot find any remote node";
+  auto it = std::ranges::find_if(cluster_state.nodes,
+                                 [&](const auto& n) { return n.node_name == peer_node_name; });
+  EXA_THROW_CHECK(it != cluster_state.nodes.end()) << "Cannot find peer node with name " << peer_node_name;
   auto remote_node_id = it->node_id;
 
   auto ping_worker = co_await ex_actor::Spawn<&PingWorker::CreateFn>(/*name=*/"Alice").ToNode(remote_node_id);

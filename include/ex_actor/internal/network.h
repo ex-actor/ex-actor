@@ -50,11 +50,15 @@ struct ClusterConfig {
   std::string listen_address;
   std::string contact_node_address;
   NetworkConfig network_config;
+  // Optional user-defined name for this node. Free-form, not required to be unique.
+  // Surfaced on NodeInfo so users can identify nodes in WaitClusterState predicates.
+  std::string node_name;
 };
 
 struct NodeInfo {
   uint64_t node_id = 0;
   std::string address;
+  std::string node_name;
 };
 
 // now it only has one field, but we keep it as a separate struct for future extensibility

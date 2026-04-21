@@ -250,6 +250,80 @@ TEST(MessageBrokerTest, GossipWithConflictingAddressThrows) {
 }
 
 // ============================================================
+// node_name: surfaced on self NodeInfo
+// ============================================================
+
+TEST(MessageBrokerTest, NodeNameFromConfigAppearsOnSelfNodeInfo) {
+  auto config = MakeConfig("tcp://127.0.0.1:7265");
+  config.node_name = "master";
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
+
+  auto [result] = stdexec::sync_wait(broker.WaitClusterState(
+                                         [](const ex_actor::ClusterState& state) {
+                                           return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) {
+                                             return n.node_id == 0 && n.node_name == "master";
+                                           });
+                                         },
+                                         /*timeout_ms=*/10))
+                      .value();
+  EXPECT_TRUE(result.condition_met);
+
+  stdexec::sync_wait(broker.Stop());
+}
+
+// ============================================================
+// node_name: propagated via gossip onto peer NodeInfo
+// ============================================================
+
+TEST(MessageBrokerTest, NodeNameFromGossipAppearsOnPeerNodeInfo) {
+  auto config = MakeConfig("tcp://127.0.0.1:7266");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
+
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999,
+                           .node_id = 1,
+                           .address = "tcp://127.0.0.1:7267",
+                           .node_name = "worker-1"}});
+
+  auto [result] = stdexec::sync_wait(broker.WaitClusterState(
+                                         [](const ex_actor::ClusterState& state) {
+                                           return std::ranges::any_of(state.nodes, [](const ex_actor::NodeInfo& n) {
+                                             return n.node_id == 1 && n.node_name == "worker-1";
+                                           });
+                                         },
+                                         /*timeout_ms=*/10))
+                      .value();
+  EXPECT_TRUE(result.condition_met);
+
+  stdexec::sync_wait(broker.Stop());
+}
+
+// ============================================================
+// HandleGossipMessage: conflicting node_name for same node_id throws
+// ============================================================
+
+TEST(MessageBrokerTest, GossipWithConflictingNodeNameThrows) {
+  auto config = MakeConfig("tcp://127.0.0.1:7268");
+  ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
+
+  DispatchGossip(broker, {{.last_seen_timestamp_ms = 100,
+                           .node_id = 1,
+                           .address = "tcp://127.0.0.1:7269",
+                           .node_name = "worker-1"}});
+
+  EXPECT_THAT(
+      [&]() {
+        DispatchGossip(broker, {{.last_seen_timestamp_ms = 100,
+                                 .node_id = 1,
+                                 .address = "tcp://127.0.0.1:7269",
+                                 .node_name = "worker-2"}});
+      },
+      testing::Throws<std::exception>(
+          testing::Property(&std::exception::what, testing::HasSubstr("Node 0x1 has conflicting node_name"))));
+
+  stdexec::sync_wait(broker.Stop());
+}
+
+// ============================================================
 // CheckHeartbeatTimeout: deactivates timed-out nodes
 // ============================================================
 

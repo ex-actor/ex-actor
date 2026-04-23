@@ -6,6 +6,7 @@ endif()
 project(ex_actor VERSION 0.1)
 include(cmake/CPM.cmake)
 include(CMakePackageConfigHelpers)
+include(CheckLibraryExists)
 
 # ------------------- global setups -------------------
 set(CMAKE_CXX_STANDARD 20)
@@ -110,7 +111,9 @@ target_link_libraries(
   spdlog::spdlog
 )
 # Link libatomic for 128-bit atomic operations (required by MPSC_queue's Tagged_ptr)
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+# Some platforms (e.g. macOS) do not provide a standalone libatomic.
+check_library_exists(atomic __atomic_fetch_add_8 "" EX_ACTOR_HAS_LIBATOMIC)
+if(EX_ACTOR_HAS_LIBATOMIC)
   target_link_libraries(ex_actor PUBLIC atomic)
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")

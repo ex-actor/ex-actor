@@ -32,6 +32,8 @@ jobs:
         build_type: [RelWithDebInfo]
         toolchain:
           - { os: windows-2025-vs2026, compiler: { cc: cl, cpp: cl } }
+          # macOS baseline
+          - { os: macos-15, compiler: { cc: clang, cpp: clang++ }, cxxflags: "-mmacosx-version-min=11.0" }
           # GCC versions
           - { os: ubuntu-24.04, compiler: { cc: gcc-11, cpp: g++-11 } }
           - { os: ubuntu-24.04, compiler: { cc: gcc-12, cpp: g++-12 } }

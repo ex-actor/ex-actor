@@ -34,7 +34,7 @@ jobs:
         toolchain:
           - { os: windows-2025-vs2026, compiler: { cc: cl, cpp: cl } }
           # macOS baseline
-          - { os: macos-15, compiler: { cc: clang, cpp: clang++ }, osx_deployment_target: "11.0" }
+          - { os: macos-26, compiler: { cc: clang, cpp: clang++ } }
           # GCC versions
           - { os: ubuntu-24.04, compiler: { cc: gcc-11, cpp: g++-11 } }
           - { os: ubuntu-24.04, compiler: { cc: gcc-12, cpp: g++-12 } }

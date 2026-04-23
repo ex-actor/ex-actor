@@ -26,6 +26,7 @@ jobs:
       # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
       # 2. <Linux, Release, latest GCC compiler toolchain on the default runner image, default generator>
       # 3. <Linux, Release, latest Clang compiler toolchain on the default runner image, default generator>
+      # 4. <Macos, Release, latest Clang compiler toolchain on the default runner image, default generator>
       #
       # To add more build types (Release, Debug, RelWithDebInfo, etc.) customize the build_type list.
       matrix:
@@ -33,7 +34,7 @@ jobs:
         toolchain:
           - { os: windows-2025-vs2026, compiler: { cc: cl, cpp: cl } }
           # macOS baseline
-          - { os: macos-15, compiler: { cc: clang, cpp: clang++ }, cxxflags: "-mmacosx-version-min=11.0" }
+          - { os: macos-15, compiler: { cc: clang, cpp: clang++ }, osx_deployment_target: "11.0" }
           # GCC versions
           - { os: ubuntu-24.04, compiler: { cc: gcc-11, cpp: g++-11 } }
           - { os: ubuntu-24.04, compiler: { cc: gcc-12, cpp: g++-12 } }
@@ -84,9 +85,12 @@ jobs:
           -B ${{ steps.strings.outputs.build-output-dir }}
           -DCMAKE_CXX_COMPILER=${{ matrix.toolchain.compiler.cpp }}
           -DCMAKE_C_COMPILER=${{ matrix.toolchain.compiler.cc }}
+          -DCMAKE_CXX_STANDARD=20
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
           -DCMAKE_CXX_FLAGS="${{ matrix.toolchain.cxxflags }}"
           -DCMAKE_C_COMPILER_LAUNCHER=${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
+          ${{ matrix.toolchain.osx_deployment_target && format('-DCMAKE_OSX_DEPLOYMENT_TARGET={0}', matrix.toolchain.osx_deployment_target) || '' }}
           ${{ runner.os == 'Windows' && '-DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded' || '' }}
           -G "Ninja Multi-Config"
 

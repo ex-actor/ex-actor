@@ -112,8 +112,8 @@ target_link_libraries(
 )
 # Link libatomic for 128-bit atomic operations (required by MPSC_queue's Tagged_ptr)
 # Some platforms (e.g. macOS) do not provide a standalone libatomic.
-check_library_exists(atomic __atomic_fetch_add_8 "" EX_ACTOR_HAS_LIBATOMIC)
-if(EX_ACTOR_HAS_LIBATOMIC)
+check_library_exists(atomic __atomic_compare_exchange_16 "" EX_ACTOR_HAS_LIBATOMIC_16)
+if(EX_ACTOR_HAS_LIBATOMIC_16)
   target_link_libraries(ex_actor PUBLIC atomic)
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")

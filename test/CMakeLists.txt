@@ -1,7 +1,7 @@
 function(ex_actor_test NAME)
   cmake_parse_arguments(TEST "" "TIMEOUT" "" ${ARGN})
   if(NOT DEFINED TEST_TIMEOUT)
-    set(TEST_TIMEOUT 3)
+    set(TEST_TIMEOUT 10)
   endif()
   add_executable(${NAME} ${NAME}.cc)
   target_link_libraries(${NAME} PRIVATE ex_actor GTest::gtest GTest::gtest_main

@@ -160,10 +160,7 @@ MessageBroker::MessageBroker(uint64_t this_node_id, ClusterConfig cluster_config
                                       .node_name = cluster_config_.node_name};
   if (!cluster_config_.contact_node_address.empty()) {
     EXA_THROW_CHECK_NE(cluster_config_.contact_node_address, cluster_config_.listen_address);
-    contact_node_send_socket_ = zmq::socket_t(zmq_context_, zmq::socket_type::dealer);
-    contact_node_send_socket_.set(zmq::sockopt::linger, 0);
-    contact_node_send_socket_.set(zmq::sockopt::sndhwm, 0);
-    contact_node_send_socket_.connect(cluster_config_.contact_node_address);
+    ConnectContactSendSocket();
   }
 }
 
@@ -304,6 +301,17 @@ void MessageBroker::BroadcastGossip() {
   }
   // no matter the contact node is in `node_id_to_state_` or not, we always send a copy to it
   if (contact_node_send_socket_.handle() != nullptr) {
+    // On macOS, if `contact_node_send_socket_` was connected before the contact node
+    // bound its listener, ZMQ can complete the TCP handshake but silently skip the ZMTP
+    // handshake, leaving the socket "connected" to nothing. In that state every send is
+    // enqueued into a dead pipe and the contact node never hears from us. Detect this by
+    // checking whether any NodeState with the contact's address has reached us yet.
+    if (!contact_node_discovered_ &&
+        GetTimeMs() - contact_node_send_socket_last_build_ms_ >= kContactSocketRebuildCooldownMs) {
+      log::Info("[Gossip] Node {:#x} has not heard from contact {}, rebuilding contact socket", this_node_id_,
+                cluster_config_.contact_node_address);
+      ConnectContactSendSocket();
+    }
     ZmqSendOrDie(contact_node_send_socket_, ByteBufferToZmqBuffer(serialized));
   }
 }
@@ -374,6 +382,14 @@ void MessageBroker::StartPeriodicalTaskScheduler() {
       kDefaultWaiterExpirationCheckIntervalMs);
 }
 
+void MessageBroker::ConnectContactSendSocket() {
+  contact_node_send_socket_ = zmq::socket_t(zmq_context_, zmq::socket_type::dealer);
+  contact_node_send_socket_.set(zmq::sockopt::linger, 0);
+  contact_node_send_socket_.set(zmq::sockopt::sndhwm, 0);
+  contact_node_send_socket_.connect(cluster_config_.contact_node_address);
+  contact_node_send_socket_last_build_ms_ = GetTimeMs();
+}
+
 void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_message) {
   for (const auto& incoming_node_state : gossip_message.node_states) {
     auto [iter, inserted] = node_id_to_state_.try_emplace(incoming_node_state.node_id, incoming_node_state);
@@ -417,6 +433,10 @@ void MessageBroker::OnNodeAlive(uint64_t node_id) {
   log::Info("[Gossip] Node {:#x} found node {:#x}, connecting to it at {}", this_node_id_, new_node.node_id,
             new_node.address);
 
+  if (new_node.address == cluster_config_.contact_node_address) {
+    contact_node_discovered_ = true;
+  }
+
   // Create send socket
   auto& socket = (node_id_to_send_socket_[new_node.node_id] = zmq::socket_t(zmq_context_, zmq::socket_type::dealer));
   socket.set(zmq::sockopt::linger, 0);
@@ -454,7 +474,13 @@ void MessageBroker::OnNodeConnectionLost(uint64_t node_id) {
     // this will wake up the coroutine and erase the iterator, don't use it after this
     request.sem.Acquire(1);
   }
-  node_id_to_state_.erase(node_id);
+  auto state_it = node_id_to_state_.find(node_id);
+  if (state_it != node_id_to_state_.end()) {
+    if (state_it->second.address == cluster_config_.contact_node_address) {
+      contact_node_discovered_ = false;
+    }
+    node_id_to_state_.erase(state_it);
+  }
   node_id_to_send_socket_.erase(node_id);
 
   // `deferred_replies_` should not be cleared.

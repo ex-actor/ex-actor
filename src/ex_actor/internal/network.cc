@@ -160,10 +160,7 @@ MessageBroker::MessageBroker(uint64_t this_node_id, ClusterConfig cluster_config
                                       .node_name = cluster_config_.node_name};
   if (!cluster_config_.contact_node_address.empty()) {
     EXA_THROW_CHECK_NE(cluster_config_.contact_node_address, cluster_config_.listen_address);
-    contact_node_send_socket_ = zmq::socket_t(zmq_context_, zmq::socket_type::dealer);
-    contact_node_send_socket_.set(zmq::sockopt::linger, 0);
-    contact_node_send_socket_.set(zmq::sockopt::sndhwm, 0);
-    contact_node_send_socket_.connect(cluster_config_.contact_node_address);
+    ConnectContactSendSocket();
   }
 }
 
@@ -304,6 +301,18 @@ void MessageBroker::BroadcastGossip() {
   }
   // no matter the contact node is in `node_id_to_state_` or not, we always send a copy to it
   if (contact_node_send_socket_.handle() != nullptr) {
+    // On macOS, if `contact_node_send_socket_` was connected before the contact node
+    // bound its listener, ZMQ can complete the TCP handshake but silently skip the ZMTP
+    // handshake, leaving the socket "connected" to nothing. In that state every send is
+    // enqueued into a dead pipe and the node stays isolated. Detect this by checking
+    // whether we've been discovered by anyone yet -- if we still only know ourselves,
+    // rebuild the socket to force a fresh connection attempt.
+    if (node_id_to_state_.size() == 1 &&
+        GetTimeMs() - contact_node_send_socket_last_build_ms_ >= kContactSocketRebuildCooldownMs) {
+      log::Info("[Gossip] Node {:#x} not yet discovered by any peer, rebuilding contact socket to {}", this_node_id_,
+                cluster_config_.contact_node_address);
+      ConnectContactSendSocket();
+    }
     ZmqSendOrDie(contact_node_send_socket_, ByteBufferToZmqBuffer(serialized));
   }
 }
@@ -372,6 +381,14 @@ void MessageBroker::StartPeriodicalTaskScheduler() {
                   async_scope_.get_token());
       },
       kDefaultWaiterExpirationCheckIntervalMs);
+}
+
+void MessageBroker::ConnectContactSendSocket() {
+  contact_node_send_socket_ = zmq::socket_t(zmq_context_, zmq::socket_type::dealer);
+  contact_node_send_socket_.set(zmq::sockopt::linger, 0);
+  contact_node_send_socket_.set(zmq::sockopt::sndhwm, 0);
+  contact_node_send_socket_.connect(cluster_config_.contact_node_address);
+  contact_node_send_socket_last_build_ms_ = GetTimeMs();
 }
 
 void MessageBroker::HandleGossipMessage(const BrokerGossipMessage& gossip_message) {

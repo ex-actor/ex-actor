@@ -44,6 +44,7 @@ inline T GetEnv(const char* name, T default_val) {
 }
 
 constexpr size_t kEmptyActorRefHashVal = 10086;
+constexpr uint64_t kContactSocketRebuildCooldownMs = 1000;
 
 // Env-configurable constants
 inline const uint64_t kDefaultHeartbeatTimeoutMs = GetEnv<uint64_t>("EXA_HEARTBEAT_TIMEOUT_MS", 10000);

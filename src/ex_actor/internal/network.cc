@@ -304,12 +304,18 @@ void MessageBroker::BroadcastGossip() {
     // On macOS, if `contact_node_send_socket_` was connected before the contact node
     // bound its listener, ZMQ can complete the TCP handshake but silently skip the ZMTP
     // handshake, leaving the socket "connected" to nothing. In that state every send is
-    // enqueued into a dead pipe and the node stays isolated. Detect this by checking
-    // whether we've been discovered by anyone yet -- if we still only know ourselves,
-    // rebuild the socket to force a fresh connection attempt.
-    if (node_id_to_state_.size() == 1 &&
+    // enqueued into a dead pipe and the contact node never hears from us. Detect this by
+    // checking whether any NodeState with the contact's address has reached us yet.
+    bool contact_discovered = false;
+    for (const auto& [node_id, state] : node_id_to_state_) {
+      if (state.address == cluster_config_.contact_node_address) {
+        contact_discovered = true;
+        break;
+      }
+    }
+    if (!contact_discovered &&
         GetTimeMs() - contact_node_send_socket_last_build_ms_ >= kContactSocketRebuildCooldownMs) {
-      log::Info("[Gossip] Node {:#x} not yet discovered by any peer, rebuilding contact socket to {}", this_node_id_,
+      log::Info("[Gossip] Node {:#x} has not heard from contact {}, rebuilding contact socket", this_node_id_,
                 cluster_config_.contact_node_address);
       ConnectContactSendSocket();
     }

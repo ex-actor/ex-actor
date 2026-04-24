@@ -139,6 +139,6 @@ void Shutdown() {
 
 uint64_t GetNodeId() { return internal::GetGlobalDefaultRegistry().GetNodeId(); }
 
-void ConfigureLogging(const LogConfig& config) { internal::GlobalLogger() = internal::CreateLoggerUsingConfig(config); }
+void ConfigureLogging(const LogConfig& config) { internal::SetGlobalLogger(internal::CreateLoggerUsingConfig(config)); }
 
 }  // namespace ex_actor

@@ -251,6 +251,10 @@ class MessageBroker {
   // rate-limited so ZMQ has enough time to finish its own reconnect + handshake before we
   // wipe the socket. Set by ConnectContactSendSocket().
   uint64_t contact_node_send_socket_last_build_ms_ = 0;
+  // Whether a NodeState whose address matches `cluster_config_.contact_node_address` has
+  // been observed. Maintained by OnNodeAlive / OnNodeConnectionLost, consulted by
+  // BroadcastGossip to decide whether to rebuild `contact_node_send_socket_`.
+  bool contact_node_discovered_ = false;
   std::unordered_map<uint64_t, zmq::socket_t> node_id_to_send_socket_;
 
   BasicActorRef<MessageBroker> self_actor_ref_;

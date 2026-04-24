@@ -306,14 +306,7 @@ void MessageBroker::BroadcastGossip() {
     // handshake, leaving the socket "connected" to nothing. In that state every send is
     // enqueued into a dead pipe and the contact node never hears from us. Detect this by
     // checking whether any NodeState with the contact's address has reached us yet.
-    bool contact_discovered = false;
-    for (const auto& [node_id, state] : node_id_to_state_) {
-      if (state.address == cluster_config_.contact_node_address) {
-        contact_discovered = true;
-        break;
-      }
-    }
-    if (!contact_discovered &&
+    if (!contact_node_discovered_ &&
         GetTimeMs() - contact_node_send_socket_last_build_ms_ >= kContactSocketRebuildCooldownMs) {
       log::Info("[Gossip] Node {:#x} has not heard from contact {}, rebuilding contact socket", this_node_id_,
                 cluster_config_.contact_node_address);
@@ -440,6 +433,10 @@ void MessageBroker::OnNodeAlive(uint64_t node_id) {
   log::Info("[Gossip] Node {:#x} found node {:#x}, connecting to it at {}", this_node_id_, new_node.node_id,
             new_node.address);
 
+  if (new_node.address == cluster_config_.contact_node_address) {
+    contact_node_discovered_ = true;
+  }
+
   // Create send socket
   auto& socket = (node_id_to_send_socket_[new_node.node_id] = zmq::socket_t(zmq_context_, zmq::socket_type::dealer));
   socket.set(zmq::sockopt::linger, 0);
@@ -477,7 +474,13 @@ void MessageBroker::OnNodeConnectionLost(uint64_t node_id) {
     // this will wake up the coroutine and erase the iterator, don't use it after this
     request.sem.Acquire(1);
   }
-  node_id_to_state_.erase(node_id);
+  auto state_it = node_id_to_state_.find(node_id);
+  if (state_it != node_id_to_state_.end()) {
+    if (state_it->second.address == cluster_config_.contact_node_address) {
+      contact_node_discovered_ = false;
+    }
+    node_id_to_state_.erase(state_it);
+  }
   node_id_to_send_socket_.erase(node_id);
 
   // `deferred_replies_` should not be cleared.

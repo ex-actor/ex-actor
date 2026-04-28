@@ -138,7 +138,7 @@ BTW, with C++26's reflection, most boilerplate of the distributed mode API can b
 
 The single-process mode is heavily tested in our company's production environment. While minor issues can occur due to version divergence between internal and open source codes, the overall quality is good, feel free to use it in production.
 
-The distributed mode is fully functional and ready for use, but isn't tested in production yet. Welcome to have a try and build together with us!
+The distributed mode is fully functional and ready for use, but has not been extensively tested in production yet. Welcome to try it out and build together with us!
 
 ## The Team Behind `ex_actor`
 

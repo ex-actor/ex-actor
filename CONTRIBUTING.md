@@ -60,7 +60,10 @@ ctest -C Release --output-on-failure -R basic_api_test
 python3 scripts/format.py
 ```
 
-## Locate the dependency source code
+
+## Miscellaneous
+
+### Locate the dependency source code
 
 This project uses [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) to manage C++ dependencies, you can locate the source code of a dependency the following methods:
 
@@ -86,7 +89,7 @@ By default, the build script uses the Visual Studio generator on Windows. If you
 
 Without the developer environment, CMake will fail with `No CMAKE_C_COMPILER could be found` because the Ninja generator cannot locate MSVC on its own.
 
-## Clangd related
+### Clangd related
 
 `regen_build_dir.py` will generate `compile_commands.json` for you automatically.
 

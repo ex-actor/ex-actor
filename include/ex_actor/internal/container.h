@@ -21,6 +21,7 @@
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "ex_actor/3rd_lib/daking/MPSC_queue.h"
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
@@ -170,4 +171,58 @@ class LockGuardedSet {
   mutable std::mutex mutex_;
 };
 
+// Multiple single-threaded bounded queues sharing one contiguous buffer.
+// All queue slots are laid out sequentially in a single allocation:
+//   [queue0_slot0 .. queue0_slotN, queue1_slot0 .. queue1_slotN, ...]
+// This avoids per-queue heap allocations and improves cache locality,
+// especially when queue_size is small (e.g. 1).
+// No synchronization — the caller must ensure exclusive access.
+template <class T>
+class FlatBoundedUnsafeQueues {
+ public:
+  FlatBoundedUnsafeQueues() = default;
+  FlatBoundedUnsafeQueues(size_t queue_count, size_t queue_size)
+      : queue_count_(queue_count), queue_size_(queue_size), buffer_(queue_count * queue_size), states_(queue_count) {}
+
+  bool Push(size_t queue_index, T value) {
+    auto& [head, tail, size] = states_[queue_index];
+    if (size == queue_size_) {
+      return false;
+    }
+    size_t base = queue_index * queue_size_;
+    buffer_[base + tail] = std::move(value);
+    tail = (tail + 1) % queue_size_;
+    ++size;
+    return true;
+  }
+
+  std::optional<T> TryPop(size_t queue_index) {
+    auto& [head, tail, size] = states_[queue_index];
+    if (size == 0) {
+      return std::nullopt;
+    }
+    size_t base = queue_index * queue_size_;
+    T value = std::move(buffer_[base + head]);
+    head = (head + 1) % queue_size_;
+    --size;
+    return value;
+  }
+
+  size_t Size(size_t queue_index) const { return states_[queue_index].size; }
+  bool Empty(size_t queue_index) const { return states_[queue_index].size == 0; }
+  bool Full(size_t queue_index) const { return states_[queue_index].size == queue_size_; }
+  size_t QueueCount() const { return queue_count_; }
+  size_t QueueSize() const { return queue_size_; }
+
+ private:
+  struct QueueState {
+    size_t head = 0;
+    size_t tail = 0;
+    size_t size = 0;
+  };
+  size_t queue_count_ {};
+  size_t queue_size_ {};
+  std::vector<T> buffer_;
+  std::vector<QueueState> states_;
+};
 }  // namespace ex_actor::internal

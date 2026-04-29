@@ -80,6 +80,47 @@ class ActorRef : public BasicActorRef<UserClass> {
   template <class U>
   friend class ActorRef;
 
+  /**
+   * @brief A builder targeting a specific mailbox queue. Obtained via Mailbox(index).
+   * Extends BasicActorRef::SendBuilder with Send() for remote-capable refs.
+   */
+  class SendBuilder : public BasicActorRef<UserClass>::SendBuilder {
+   public:
+    SendBuilder(const ActorRef* ref, size_t mailbox_index)
+        : BasicActorRef<UserClass>::SendBuilder(ref, mailbox_index), actor_ref_(ref) {}
+
+    /**
+     * @brief Send message to a specific mailbox queue. Returns a sender carrying the result.
+     * @note Same serialization requirements as ActorRef::Send().
+     */
+    template <auto kMethod, class... Args>
+    [[nodiscard]] ex::sender auto Send(Args... args) const
+      requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
+    {
+      using LocalSenderType =
+          decltype(std::declval<const SendBuilder*>()->template SendLocal<kMethod>(std::declval<Args>()...));
+      using RemoteSenderType = decltype(actor_ref_->template SendRemote<kMethod>(std::declval<Args>()...));
+
+      EXA_THROW_CHECK(!actor_ref_->IsEmpty()) << "Empty ActorRef, cannot call method on it.";
+
+      using VariantType = std::variant<LocalSenderType, RemoteSenderType>;
+      VariantType chosen_sender = (actor_ref_->node_id_ == actor_ref_->this_node_id_)
+                                      ? VariantType(this->template SendLocal<kMethod>(std::move(args)...))
+                                      : VariantType(actor_ref_->template SendRemote<kMethod>(std::move(args)...));
+
+      return SenderVariant {std::move(chosen_sender)};
+    }
+
+   private:
+    const ActorRef* actor_ref_;
+  };
+
+  /**
+   * @brief Returns a SendBuilder targeting a specific mailbox queue of this actor.
+   * Usage: actor_ref.Mailbox(index).Send<&Method>(args...)
+   */
+  SendBuilder Mailbox(size_t index) const { return SendBuilder(this, index); }
+
   // Converting constructor from ActorRef<U> where U* is convertible to UserClass*
   template <class Other>
     requires std::is_convertible_v<Other*, UserClass*>
@@ -108,17 +149,7 @@ class ActorRef : public BasicActorRef<UserClass> {
   [[nodiscard]] ex::sender auto Send(Args... args) const
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
-    using LocalSenderType =
-        decltype(std::declval<const ActorRef*>()->template SendLocal<kMethod>(std::declval<Args>()...));
-    using RemoteSenderType = decltype(SendRemote<kMethod>(std::declval<Args>()...));
-
-    EXA_THROW_CHECK(!this->IsEmpty()) << "Empty ActorRef, cannot call method on it.";
-
-    using VariantType = std::variant<LocalSenderType, RemoteSenderType>;
-    VariantType chosen_sender = (node_id_ == this_node_id_) ? VariantType(SendLocal<kMethod>(std::move(args)...))
-                                                            : VariantType(SendRemote<kMethod>(std::move(args)...));
-
-    return SenderVariant {std::move(chosen_sender)};
+    return Mailbox(0).template Send<kMethod>(std::move(args)...);
   }
 
   /**
@@ -129,7 +160,7 @@ class ActorRef : public BasicActorRef<UserClass> {
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
     EXA_THROW_CHECK_EQ(node_id_, this_node_id_) << "Cannot call remote actor using SendLocal, use Send instead.";
-    return BasicActorRef<UserClass>::template SendLocal<kMethod>(std::move(args)...);
+    return Mailbox(0).template SendLocal<kMethod>(std::move(args)...);
   }
 
   uint64_t GetNodeId() const { return node_id_; }

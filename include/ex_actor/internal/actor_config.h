@@ -24,8 +24,25 @@
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 
 namespace ex_actor {
+
+enum class MailboxType : uint8_t {
+  // the default type, suitable for most cases
+  kUnboundedThreadSafeQueue,
+  // very dangerous, should be paired with manually activation, used in some low-latency scenarios
+  kBoundedUnsafeQueue,
+};
+
+struct MailboxConfig {
+  MailboxType type = MailboxType::kUnboundedThreadSafeQueue;
+  size_t mailbox_number = 1;
+  // only used when queue type is bounded queue
+  size_t mailbox_size = 0;
+};
+
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
+
+  MailboxConfig mailbox_config;
 
   /**
    * @brief Actor's name, should be unique within one node.

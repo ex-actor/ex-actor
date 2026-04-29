@@ -92,11 +92,38 @@ class BasicActorRef {
   [[nodiscard]] ex::sender auto SendLocal(Args... args) const
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
-    EXA_THROW_CHECK(!IsEmpty()) << "Empty BasicActorRef, cannot call method on it.";
-    EXA_THROW_CHECK(type_erased_actor_ != nullptr) << "Underlying actor instance not set, it's typically because you "
-                                                      "converted a remote ActorRef to BasicActorRef.";
-    return CallActorMethodUseTuple<kMethod>(type_erased_actor_, adjusted_ptr_, std::make_tuple(std::move(args)...));
+    return Mailbox(0).template SendLocal<kMethod>(std::move(args)...);
   }
+
+  /**
+   * @brief A builder targeting a specific mailbox queue. Obtained via Mailbox(index).
+   */
+  class SendBuilder {
+   public:
+    SendBuilder(const BasicActorRef* ref, size_t mailbox_index) : ref_(ref), mailbox_index_(mailbox_index) {}
+
+    template <auto kMethod, class... Args>
+    [[nodiscard]] ex::sender auto SendLocal(Args... args) const
+      requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
+    {
+      EXA_THROW_CHECK(!ref_->IsEmpty()) << "Empty BasicActorRef, cannot call method on it.";
+      EXA_THROW_CHECK(ref_->type_erased_actor_ != nullptr)
+          << "Underlying actor instance not set, it's typically because you "
+             "converted a remote ActorRef to BasicActorRef.";
+      return CallActorMethodUseTuple<kMethod>(ref_->type_erased_actor_, ref_->adjusted_ptr_,
+                                              std::make_tuple(std::move(args)...), mailbox_index_);
+    }
+
+   protected:
+    const BasicActorRef* ref_;
+    size_t mailbox_index_;
+  };
+
+  /**
+   * @brief Returns a SendBuilder targeting a specific mailbox queue of this actor.
+   * Usage: actor_ref.Mailbox(index).SendLocal<&Method>(args...)
+   */
+  SendBuilder Mailbox(size_t index) const { return SendBuilder(this, index); }
 
   bool IsEmpty() const { return is_empty_; }
   uint64_t GetActorId() const { return actor_id_; }

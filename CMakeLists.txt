@@ -141,21 +141,31 @@ if(EX_ACTOR_BUILD_TESTS)
 endif()
 
 # ------------------- install -------------------
-install(TARGETS ex_actor EXPORT ex_actor-targets)
-install(DIRECTORY include/ DESTINATION include)
-install(
-  EXPORT ex_actor-targets
-  NAMESPACE ex_actor::
-  DESTINATION lib/cmake/ex_actor
-)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  set(EX_ACTOR_IS_TOPLEVEL ON)
+else()
+  set(EX_ACTOR_IS_TOPLEVEL OFF)
+endif()
 
-configure_package_config_file(
-  cmake/ex_actor-config.cmake.in
-  ${CMAKE_CURRENT_BINARY_DIR}/ex_actor-config.cmake
-  INSTALL_DESTINATION lib/cmake/ex_actor
-)
+option(EX_ACTOR_INSTALL "Enable installation of ex_actor" ${EX_ACTOR_IS_TOPLEVEL})
 
-install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/ex_actor-config.cmake
-  DESTINATION lib/cmake/ex_actor
-)
+if(EX_ACTOR_INSTALL)
+  install(TARGETS ex_actor EXPORT ex_actor-targets)
+  install(DIRECTORY include/ DESTINATION include)
+  install(
+    EXPORT ex_actor-targets
+    NAMESPACE ex_actor::
+    DESTINATION lib/cmake/ex_actor
+  )
+
+  configure_package_config_file(
+    cmake/ex_actor-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/ex_actor-config.cmake
+    INSTALL_DESTINATION lib/cmake/ex_actor
+  )
+
+  install(
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/ex_actor-config.cmake
+    DESTINATION lib/cmake/ex_actor
+  )
+endif()

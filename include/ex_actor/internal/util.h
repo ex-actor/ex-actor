@@ -128,20 +128,26 @@ class Semaphore {
   explicit Semaphore(int64_t initial_count) : count_(initial_count) {}
 
   int64_t Acquire(int64_t n) {
+    // Increment pending BEFORE fetch_sub to close race window with OnDrained().
+    // This ensures OnDrained() sees pending > 0 if we're about to lock the mutex.
+    pending_notifiers_.fetch_add(1, std::memory_order_acquire);
     auto prev = count_.fetch_sub(n, std::memory_order_release);
     if (prev <= n) {
       std::unique_lock lock(waiters_mu_);
+      pending_notifiers_.fetch_sub(1, std::memory_order_release);
       auto waiters = std::move(waiters_);
       lock.unlock();
       for (auto* waiter : waiters) {
         waiter->Complete();
       }
+    } else {
+      pending_notifiers_.fetch_sub(1, std::memory_order_release);
     }
     return prev - n;
   }
 
   int64_t Release(int64_t n) {
-    auto prev = count_.fetch_add(n, std::memory_order_release);
+    auto prev = count_.fetch_add(n, std::memory_order_relaxed);
     return prev + n;
   }
 
@@ -150,7 +156,8 @@ class Semaphore {
   struct OnDrainedSender;
 
   /**
-   * @brief Return a sender that will be completed when the semaphore is drained(value <= 0).
+   * @brief Return a sender that will be completed when the semaphore is drained(value <= 0). If it's already drained,
+   * the sender will be completed immediately.
    */
   OnDrainedSender OnDrained() { return OnDrainedSender {.semaphore = this}; }
 
@@ -169,7 +176,11 @@ class Semaphore {
       // must get lock before checking count_, or if the count_ is drained before the waiter is queued but after
       // counter_ is checked, the waiter will never be completed
       std::scoped_lock lock(semaphore->waiters_mu_);
-      if (semaphore->count_.load(std::memory_order_acquire) <= 0) {
+      // Also check pending_notifiers_ to avoid race with in-flight Acquire() calls.
+      // An Acquire() that did fetch_sub but hasn't locked the mutex yet will have
+      // incremented pending_notifiers_, preventing us from completing immediately.
+      if (semaphore->count_.load(std::memory_order_acquire) <= 0 &&
+          semaphore->pending_notifiers_.load(std::memory_order_acquire) == 0) {
         Complete();
       } else {
         semaphore->waiters_.push_back(this);
@@ -193,6 +204,7 @@ class Semaphore {
   mutable std::mutex waiters_mu_;
   std::vector<TypeErasedOnDrainedOperation*> waiters_;
   std::atomic_int64_t count_;
+  mutable std::atomic_int64_t pending_notifiers_ {0};  // Track in-flight Acquire() calls
 };
 
 /// Wraps a sender so that its result is discarded and errors are logged.

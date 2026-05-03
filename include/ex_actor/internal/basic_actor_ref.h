@@ -92,9 +92,8 @@ class BasicActorRef {
   [[nodiscard]] ex::sender auto SendLocal(Args... args) const
     requires(std::is_invocable_v<decltype(kMethod), UserClass*, Args...>)
   {
-    EXA_THROW_CHECK(!IsEmpty()) << "Empty BasicActorRef, cannot call method on it.";
-    EXA_THROW_CHECK(type_erased_actor_ != nullptr) << "Underlying actor instance not set, it's typically because you "
-                                                      "converted a remote ActorRef to BasicActorRef.";
+    CheckNotEmpty();
+    CheckIsValidLocalActorRef();
     return CallActorMethodUseTuple<kMethod>(type_erased_actor_, adjusted_ptr_, std::make_tuple(std::move(args)...));
   }
 
@@ -104,12 +103,10 @@ class BasicActorRef {
 
   /**
    * @brief Get the number of pending messages in the actor's mailbox synchronously.
-   * @return The number of pending messages if the actor is local, or 0 if it's remote or empty.
    */
   size_t GetPendingMessageCountLocal() const {
-    if (IsEmpty() || type_erased_actor_ == nullptr) {
-      return 0;
-    }
+    CheckNotEmpty();
+    CheckIsValidLocalActorRef();
     return type_erased_actor_->GetPendingMessageCount();
   }
 
@@ -119,6 +116,13 @@ class BasicActorRef {
   TypeErasedActor* type_erased_actor_ = nullptr;
   UserClass* adjusted_ptr_ = nullptr;
   uint64_t actor_type_hash_ = 0;
+
+  void CheckNotEmpty() const { EXA_THROW_CHECK(!IsEmpty()) << "Cannot call method on an empty actor ref."; }
+
+  void CheckIsValidLocalActorRef() const {
+    EXA_THROW_CHECK(type_erased_actor_ != nullptr) << "Underlying actor instance not set, it's typically because you "
+                                                      "sliced a remote ActorRef to BasicActorRef.";
+  }
 };
 
 }  // namespace ex_actor::internal

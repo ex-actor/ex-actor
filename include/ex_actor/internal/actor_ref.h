@@ -112,7 +112,7 @@ class ActorRef : public BasicActorRef<UserClass> {
         decltype(std::declval<const ActorRef*>()->template SendLocal<kMethod>(std::declval<Args>()...));
     using RemoteSenderType = decltype(SendRemote<kMethod>(std::declval<Args>()...));
 
-    EXA_THROW_CHECK(!this->IsEmpty()) << "Empty ActorRef, cannot call method on it.";
+    this->CheckNotEmpty();
 
     using VariantType = std::variant<LocalSenderType, RemoteSenderType>;
     VariantType chosen_sender = (node_id_ == this_node_id_) ? VariantType(SendLocal<kMethod>(std::move(args)...))
@@ -140,6 +140,7 @@ class ActorRef : public BasicActorRef<UserClass> {
    * @return A sender that yields the number of pending messages.
    */
   [[nodiscard]] ex::sender auto GetPendingMessageCount() const {
+    this->CheckNotEmpty();
     using LocalSenderType = decltype(GetPendingMessageCountLocalAsync());
     using RemoteSenderType = decltype(GetPendingMessageCountRemote());
 

@@ -144,11 +144,8 @@ class ActorRef : public BasicActorRef<UserClass> {
     using RemoteSenderType = decltype(GetPendingMessageCountRemote());
 
     using VariantType = std::variant<LocalSenderType, RemoteSenderType>;
-    if (node_id_ == this_node_id_) {
-      return SenderVariant {VariantType(GetPendingMessageCountLocalAsync())};
-    } else {
-      return SenderVariant {VariantType(GetPendingMessageCountRemote())};
-    }
+    return node_id_ == this_node_id_ ? SenderVariant {VariantType(GetPendingMessageCountLocalAsync())}
+                                     : SenderVariant {VariantType(GetPendingMessageCountRemote())};
   }
 
  private:

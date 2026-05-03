@@ -74,8 +74,14 @@ struct ActorDestroyRequest {
   uint64_t actor_id {};
 };
 
+struct ActorGetPendingMessageCountRequest {
+  uint64_t actor_id {};
+};
+
 struct NetworkRequest {
-  std::variant<ActorCreationRequest, ActorMethodCallRequest, ActorLookUpRequest, ActorDestroyRequest> variant;
+  std::variant<ActorCreationRequest, ActorMethodCallRequest, ActorLookUpRequest, ActorDestroyRequest,
+               ActorGetPendingMessageCountRequest>
+      variant;
 };
 
 // ===================================================
@@ -104,8 +110,16 @@ struct ActorDestroyReply {
   std::string error;
 };
 
+struct ActorGetPendingMessageCountReply {
+  bool success {};
+  size_t count {};
+  std::string error;
+};
+
 struct NetworkReply {
-  std::variant<ActorCreationReply, ActorMethodCallReply, ActorLookUpReply, ActorDestroyReply> variant;
+  std::variant<ActorCreationReply, ActorMethodCallReply, ActorLookUpReply, ActorDestroyReply,
+               ActorGetPendingMessageCountReply>
+      variant;
 };
 
 // ===================================================

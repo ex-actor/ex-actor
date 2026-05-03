@@ -1,6 +1,8 @@
+#include <atomic>
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 
 #include <gmock/gmock-matchers.h>
@@ -190,4 +192,47 @@ TEST(BasicApiTest, ActorCanBePolymorphic) {
     ex_actor::Shutdown();
   };
   ex::sync_wait(coroutine());
+}
+
+struct SlowPendingActor {
+  void Wait(int ms, std::atomic<int>* counter) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    (*counter)++;
+  }
+};
+
+TEST(BasicApiTest, GetPendingMessageCountShouldWork) {
+  std::atomic<int> counter {0};
+  auto coroutine = [&]() -> stdexec::task<void> {
+    auto actor = co_await ex_actor::Spawn<SlowPendingActor>();
+
+    // 1. Send 5 long-running tasks
+    stdexec::simple_counting_scope scope;
+    for (int i = 0; i < 5; ++i) {
+      stdexec::spawn(actor.SendLocal<&SlowPendingActor::Wait>(200, &counter) | ex_actor::DiscardResult(),
+                     scope.get_token());
+    }
+
+    // 2. Give it a tiny bit of time to start the first one
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // 3. Check pending count using transparent API
+    size_t pending = co_await actor.GetPendingMessageCount();
+    EXPECT_GE(pending, 1U);
+    EXPECT_LE(pending, 5U);
+
+    // 4. Check pending count using sync API
+    size_t pending_sync = actor.GetPendingMessageCountLocal();
+    EXPECT_EQ(pending_sync, pending);
+
+    std::cout << "Detected " << pending << " pending messages" << std::endl;
+
+    co_await scope.join();
+    EXPECT_EQ(actor.GetPendingMessageCountLocal(), 0U);
+    EXPECT_EQ(counter.load(), 5);
+  };
+
+  ex_actor::Init(/*thread_pool_size=*/1);  // Use 1 thread to ensure queueing
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
 }

@@ -134,7 +134,40 @@ class ActorRef : public BasicActorRef<UserClass> {
 
   uint64_t GetNodeId() const { return node_id_; }
 
+  /**
+   * @brief Get the number of pending messages in the actor's mailbox asynchronously.
+   * Works for both local and remote actors.
+   * @return A sender that yields the number of pending messages.
+   */
+  [[nodiscard]] ex::sender auto GetPendingMessageCount() const {
+    using LocalSenderType = decltype(GetPendingMessageCountLocalAsync());
+    using RemoteSenderType = decltype(GetPendingMessageCountRemote());
+
+    using VariantType = std::variant<LocalSenderType, RemoteSenderType>;
+    if (node_id_ == this_node_id_) {
+      return SenderVariant {VariantType(GetPendingMessageCountLocalAsync())};
+    } else {
+      return SenderVariant {VariantType(GetPendingMessageCountRemote())};
+    }
+  }
+
  private:
+  [[nodiscard]] auto GetPendingMessageCountLocalAsync() const { return ex::just(this->GetPendingMessageCountLocal()); }
+
+  [[nodiscard]] auto GetPendingMessageCountRemote() const {
+    EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
+    NetworkRequest request {ActorGetPendingMessageCountRequest {.actor_id = this->actor_id_}};
+    return broker_actor_ref_.template SendLocal<&MessageBroker::SendRequest>(node_id_, Serialize(request)) |
+           ex::then([node_id = node_id_](ByteBuffer response_buf) -> size_t {
+             auto reply = Deserialize<NetworkReply>(std::move(response_buf));
+             auto& ret = std::get<ActorGetPendingMessageCountReply>(reply.variant);
+             if (!ret.success) {
+               EXA_THROW << "Got error getting pending message count from node " << node_id << ": " << ret.error;
+             }
+             return ret.count;
+           });
+  }
+
   template <auto kMethod, class... Args>
   [[nodiscard]] ex::sender auto SendRemote(Args... args) const {
     using UnwrappedType = typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type;

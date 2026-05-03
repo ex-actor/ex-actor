@@ -206,6 +206,7 @@ class ActorRegistryBackend {
   void HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out);
   ex::task<ByteBuffer> HandleActorMethodCallRequest(ActorMethodCallRequest msg);
   ex::task<ByteBuffer> HandleActorDestroyRequest(ActorDestroyRequest msg);
+  ex::task<ByteBuffer> HandleActorGetPendingMessageCountRequest(ActorGetPendingMessageCountRequest msg);
 };
 
 // -----------SpawnBuilder: a builder-style sender for actor spawning-----------

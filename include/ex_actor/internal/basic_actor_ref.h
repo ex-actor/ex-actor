@@ -102,6 +102,17 @@ class BasicActorRef {
   uint64_t GetActorId() const { return actor_id_; }
   uint64_t GetActorTypeHash() const { return actor_type_hash_; }
 
+  /**
+   * @brief Get the number of pending messages in the actor's mailbox synchronously.
+   * @return The number of pending messages if the actor is local, or 0 if it's remote or empty.
+   */
+  size_t GetPendingMessageCountLocal() const {
+    if (IsEmpty() || type_erased_actor_ == nullptr) {
+      return 0;
+    }
+    return type_erased_actor_->GetPendingMessageCount();
+  }
+
  protected:
   bool is_empty_ = true;
   uint64_t actor_id_ = 0;

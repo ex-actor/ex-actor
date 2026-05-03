@@ -533,3 +533,74 @@ TEST(DistributedTest, NonMovableActorCompiles) {
     return registry.Spawn<&NonMovableActor::Create>(/*name=*/"Bob").ToNode(0);
   };
 }
+
+class SlowRemoteActor {
+ public:
+  static SlowRemoteActor Create() { return SlowRemoteActor(); }
+  void Wait(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+};
+EXA_REMOTE(&SlowRemoteActor::Create, &SlowRemoteActor::Wait);
+
+TEST(DistributedTest, GetPendingMessageCountRemote) {
+  std::barrier bar {2};
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
+    std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
+    ex_actor::ClusterConfig cluster_config {
+        .listen_address = addresses.at(index),
+        .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
+    };
+    // Use 1 thread on node 0 to make it easy to block the actor
+    ex_actor::ActorRegistry registry(/*thread_pool_size=*/1);
+    co_await registry.StartOrJoinCluster(cluster_config);
+
+    auto [cluster_state, condition_met] =
+        co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
+    EXPECT_TRUE(condition_met);
+
+    if (index == 1) {
+      // Node 1: Get remote node ID (Node 0)
+      std::string remote_address = addresses.at(0);
+      auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+      auto remote_node_id = it->node_id;
+
+      // Spawn actor on Node 0
+      auto actor = co_await registry.Spawn<&SlowRemoteActor::Create>().ToNode(remote_node_id);
+
+      // Send 3 slow messages to Node 0
+      stdexec::simple_counting_scope scope;
+      for (int i = 0; i < 3; ++i) {
+        stdexec::spawn(actor.Send<&SlowRemoteActor::Wait>(500) | ex_actor::DiscardResult(), scope.get_token());
+      }
+
+      // 2. Wait for messages to propagate and the actor to be busy
+      size_t count = 0;
+      bool success = false;
+      for (int retry = 0; retry < 50; ++retry) {
+        count = co_await actor.GetPendingMessageCount();
+        if (count >= 1U) {
+          success = true;
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+
+      EXPECT_TRUE(success) << "Timed out waiting for remote pending messages to be >= 1";
+      EXPECT_LE(count, 3U);
+      logging::Info("Remote pending message count: {}", count);
+
+      co_await scope.join();
+
+      size_t final_count = co_await actor.GetPendingMessageCount();
+      EXPECT_EQ(final_count, 0U);
+    }
+
+    bar.arrive_and_wait();
+  };
+  std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });
+  std::jthread node_1([&] { stdexec::sync_wait(node_main(1)); });
+
+  node_0.join();
+  node_1.join();
+}

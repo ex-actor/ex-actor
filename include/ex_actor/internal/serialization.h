@@ -184,7 +184,7 @@ ByteBuffer Serialize(const T& obj) {
   size_t size_in_words = capnp::computeSerializedSizeInWords(message_builder);
   size_t size_in_bytes = size_in_words * sizeof(capnp::word);
   // Packed worst case: 1 tag byte per 8 data bytes on top of unpacked size.
-  size_t max_packed_size = size_in_bytes + (size_in_bytes + 7) / 8;
+  size_t max_packed_size = size_in_bytes + ((size_in_bytes + 7) / 8) + 32;
 
   ByteBuffer result(max_packed_size);
   kj::ArrayOutputStream output_stream(kj::ArrayPtr<uint8_t>(reinterpret_cast<uint8_t*>(result.data()), result.size()));

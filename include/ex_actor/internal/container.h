@@ -16,6 +16,7 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -29,6 +30,7 @@
 namespace ex_actor::internal {
 
 template <class T, size_t kN = 256>
+  requires std::is_trivially_copyable_v<T> && std::is_trivially_destructible_v<T>
 class SmallVector {
  public:
   SmallVector() : capacity_(kN) {}
@@ -87,7 +89,7 @@ class SmallVector {
       return *this;
     }
     if (using_heap_) {
-      delete[] heap_data_;
+      operator delete[](heap_data_);
     }
     size_ = other.size_;
     capacity_ = other.capacity_;
@@ -106,7 +108,7 @@ class SmallVector {
 
   ~SmallVector() {
     if (using_heap_) {
-      delete[] heap_data_;
+      operator delete[](heap_data_);
     }
   }
 
@@ -216,22 +218,19 @@ class SmallVector {
     if (new_capacity <= capacity_) {
       return;
     }
-    T* new_heap = new T[new_capacity];
-    std::move(begin(), end(), new_heap);
+    T* new_heap = static_cast<T*>(operator new[](sizeof(T) * new_capacity));
+    std::uninitialized_move(begin(), end(), new_heap);
     if (using_heap_) {
-      delete[] heap_data_;
+      operator delete[](heap_data_);
     }
     heap_data_ = new_heap;
     using_heap_ = true;
     capacity_ = new_capacity;
   }
 
- public:
   size_t size_ = 0;
   size_t capacity_ = kN;
   bool using_heap_ = false;
-
- private:
   union {
     T stack_data_[kN];
     T* heap_data_;

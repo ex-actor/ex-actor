@@ -17,10 +17,12 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "ex_actor/3rd_lib/daking/MPSC_queue.h"
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
@@ -28,10 +30,82 @@
 
 namespace ex_actor::internal {
 
+// Heap-allocated buffer with fixed capacity set at construction time. Storage is
+// allocated up front but elements are NOT default-constructed; callers populate
+// slots one at a time via EmplaceBack.
+//
+// Works with non-movable / non-copyable element types, unlike std::vector whose
+// emplace_back requires the element type to be MoveInsertable (even when no
+// reallocation happens).
+template <class T>
+class FixedCapacityBuffer {
+ public:
+  explicit FixedCapacityBuffer(size_t capacity)
+      : capacity_(capacity),
+        storage_(capacity == 0 ? nullptr
+                               : static_cast<T*>(::operator new(sizeof(T) * capacity, std::align_val_t {alignof(T)}))) {
+  }
+
+  ~FixedCapacityBuffer() {
+    for (size_t i = 0; i < size_; ++i) {
+      storage_[i].~T();
+    }
+    ::operator delete(storage_, std::align_val_t {alignof(T)});
+  }
+
+  FixedCapacityBuffer(const FixedCapacityBuffer&) = delete;
+  FixedCapacityBuffer& operator=(const FixedCapacityBuffer&) = delete;
+
+  FixedCapacityBuffer(FixedCapacityBuffer&& other) noexcept
+      : capacity_(other.capacity_), size_(other.size_), storage_(other.storage_) {
+    other.capacity_ = 0;
+    other.size_ = 0;
+    other.storage_ = nullptr;
+  }
+  FixedCapacityBuffer& operator=(FixedCapacityBuffer&& other) noexcept {
+    if (this != &other) {
+      for (size_t i = 0; i < size_; ++i) {
+        storage_[i].~T();
+      }
+      ::operator delete(storage_, std::align_val_t {alignof(T)});
+      capacity_ = other.capacity_;
+      size_ = other.size_;
+      storage_ = other.storage_;
+      other.capacity_ = 0;
+      other.size_ = 0;
+      other.storage_ = nullptr;
+    }
+    return *this;
+  }
+
+  template <class... Args>
+  T& EmplaceBack(Args&&... args) {
+    EXA_THROW_CHECK(size_ < capacity_) << "FixedCapacityBuffer is full, capacity=" << capacity_;
+    T* slot = ::new (static_cast<void*>(storage_ + size_)) T(std::forward<Args>(args)...);
+    ++size_;
+    return *slot;
+  }
+
+  T& operator[](size_t index) { return storage_[index]; }
+  const T& operator[](size_t index) const { return storage_[index]; }
+
+  size_t Size() const { return size_; }
+  size_t Capacity() const { return capacity_; }
+
+ private:
+  size_t capacity_;
+  size_t size_ = 0;
+  T* storage_;
+};
+
 template <class T>
 struct LinearizableUnboundedMpscQueue {
  public:
-  void Push(T value) { queue_.enqueue(std::move(value)); }
+  // Returns true unconditionally; signature mirrors bounded queues so callers can dispatch uniformly.
+  bool Push(T value) {
+    queue_.enqueue(std::move(value));
+    return true;
+  }
 
   std::optional<T> TryPop() {
     T value;
@@ -43,6 +117,33 @@ struct LinearizableUnboundedMpscQueue {
 
  private:
   ex_actor::embedded_3rd::daking::MPSC_queue<T> queue_;
+};
+
+// Single-slot bounded queue. No synchronization — the caller must ensure exclusive access.
+template <class T>
+class OneSlotUnsafeQueue {
+ public:
+  // Returns false when the slot is already occupied.
+  bool Push(T value) {
+    if (has_value_) {
+      return false;
+    }
+    slot_ = std::move(value);
+    has_value_ = true;
+    return true;
+  }
+
+  std::optional<T> TryPop() {
+    if (!has_value_) {
+      return std::nullopt;
+    }
+    has_value_ = false;
+    return std::move(slot_);
+  }
+
+ private:
+  T slot_ {};
+  bool has_value_ = false;
 };
 
 template <class T>

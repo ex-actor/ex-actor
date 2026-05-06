@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <tuple>
 #include <type_traits>
@@ -21,6 +22,7 @@
 #include <rfl/Tuple.hpp>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 
 namespace ex_actor::internal {
@@ -167,6 +169,15 @@ using FnReturnType = std::decay_t<typename Signature<decltype(kFn)>::ReturnType>
 
 template <class T, class... Ts>
 constexpr bool kContainedIn = (std::is_same_v<T, Ts> || ...);
+
+// Detects whether the user actor class defines the optional
+// `bool ExActorShouldActivate(MailboxPushEvent)` hook.
+template <class UserClass>
+consteval bool HasShouldActivateHook() {
+  return requires(UserClass& uc, MailboxPushEvent e) {
+    { uc.ExActorShouldActivate(e) } -> std::convertible_to<bool>;
+  };
+}
 
 // Compute the set-union of two completion_signatures types.
 template <class Merged, class Remaining>

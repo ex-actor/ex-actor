@@ -63,6 +63,10 @@ struct ActorMethodCallRequest {
   // Computed via ComputeRemoteMethodHandlerKey() so sender and receiver agree on the same key.
   uint64_t handler_key {};
   uint64_t actor_id {};
+  // Index of the target mailbox on the receiving actor. Matches BasicActorRef::SendBuilder's
+  // mailbox_index_ on the sender side; used to route the message to the correct mailbox on the
+  // receiver side.
+  uint64_t mailbox_index {};
   ByteBuffer serialized_args;  // serialized ActorMethodCallArgs
 };
 

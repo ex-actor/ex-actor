@@ -2,6 +2,8 @@
 #include <barrier>
 #include <exception>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -603,4 +605,92 @@ TEST(DistributedTest, GetPendingMessageCountRemote) {
 
   node_0.join();
   node_1.join();
+}
+
+// Records the mailbox index observed at push time for every non-destroy push via the
+// ExActorShouldActivate hook. Used to verify that remote sends honor Mailbox(index).
+class MultiMailboxRemoteActor {
+ public:
+  static MultiMailboxRemoteActor Create() { return MultiMailboxRemoteActor(); }
+
+  bool ExActorShouldActivate(ex_actor::MailboxPushEvent event) {
+    if (!event.is_destroy_signal) {
+      std::lock_guard lock(mu_);
+      observed_mailbox_indices_.push_back(event.mailbox_index);
+    }
+    return true;
+  }
+
+  void Noop() {}
+
+  std::vector<size_t> GetObservedMailboxIndices() {
+    std::lock_guard lock(mu_);
+    return observed_mailbox_indices_;
+  }
+
+ private:
+  std::mutex mu_;
+  std::vector<size_t> observed_mailbox_indices_;
+};
+EXA_REMOTE(&MultiMailboxRemoteActor::Create, &MultiMailboxRemoteActor::Noop,
+           &MultiMailboxRemoteActor::GetObservedMailboxIndices);
+
+TEST(DistributedTest, RemoteSendHonorsMailboxIndex) {
+  std::barrier bar {2};
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
+    std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
+    ex_actor::ClusterConfig cluster_config {
+        .listen_address = addresses.at(index),
+        .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
+    };
+    ex_actor::ActorRegistry registry(/*thread_pool_size=*/4);
+    co_await registry.StartOrJoinCluster(cluster_config);
+
+    auto [cluster_state, condition_met] =
+        co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
+    EXPECT_TRUE(condition_met);
+    EXPECT_GE(cluster_state.nodes.size(), 2U);
+    if (cluster_state.nodes.size() < 2U) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+
+    std::string remote_address = addresses.at(1 - index);
+    auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+    EXPECT_NE(it, cluster_state.nodes.end());
+    if (it == cluster_state.nodes.end()) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+    auto remote_node_id = it->node_id;
+
+    // Only one side drives the test; the other just keeps the cluster alive.
+    if (index == 0) {
+      ex_actor::ActorConfig config {
+          .mailbox_configs = std::vector<ex_actor::MailboxConfig>(3, ex_actor::UnboundedThreadSafeMailbox {})};
+      auto actor =
+          co_await registry.Spawn<&MultiMailboxRemoteActor::Create>().ToNode(remote_node_id).WithConfig(config);
+
+      co_await actor.Mailbox(0).Send<&MultiMailboxRemoteActor::Noop>();
+      co_await actor.Mailbox(2).Send<&MultiMailboxRemoteActor::Noop>();
+      co_await actor.Mailbox(1).Send<&MultiMailboxRemoteActor::Noop>();
+
+      // The fourth push (for GetObservedMailboxIndices) goes to mailbox 0 and is recorded
+      // by the hook synchronously on the push thread before the method executes, so it
+      // appears in the returned vector too.
+      auto observed = co_await actor.Mailbox(0).Send<&MultiMailboxRemoteActor::GetObservedMailboxIndices>();
+      EXPECT_EQ(observed.size(), 4U);
+      if (observed.size() == 4U) {
+        EXPECT_EQ(observed[0], 0U);
+        EXPECT_EQ(observed[1], 2U);
+        EXPECT_EQ(observed[2], 1U);
+        EXPECT_EQ(observed[3], 0U);
+      }
+    }
+    bar.arrive_and_wait();
+  };
+  std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });
+  std::jthread node_1([&] { stdexec::sync_wait(node_main(1)); });
 }

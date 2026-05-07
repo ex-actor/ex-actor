@@ -171,7 +171,8 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorMet
     auto task = handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
         .actor = actor_id_to_actor_.at(msg.actor_id).get(),
         .serialized_args = std::move(msg.serialized_args),
-        .actor_ref_serde_ctx = info});
+        .actor_ref_serde_ctx = info,
+        .mailbox_index = msg.mailbox_index});
     auto reply = co_await std::move(task);
     co_return SerializeReply(reply);
   } catch (std::exception& error) {

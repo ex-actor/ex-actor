@@ -75,8 +75,7 @@ struct TestActor2 {
 TEST(SchedulerTest, SchedulerUnionTest) {
   ex_actor::WorkSharingThreadPool thread_pool1(1);
   ex_actor::WorkSharingThreadPool thread_pool2(1);
-  ex_actor::SchedulerUnion scheduler_union(std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {
-      thread_pool1.GetScheduler(), thread_pool2.GetScheduler()});
+  ex_actor::SchedulerUnion scheduler_union(thread_pool1.GetScheduler(), thread_pool2.GetScheduler());
   auto scheduler = scheduler_union.GetScheduler();
   auto start = ex::schedule(scheduler) | ex::then([] { return std::this_thread::get_id(); });
 
@@ -101,12 +100,27 @@ TEST(SchedulerTest, SchedulerUnionTest) {
   ex_actor::Shutdown();
 }
 
+TEST(SchedulerTest, SchedulerUnionHeterogeneousTest) {
+  // Mix two different scheduler types to prove variadic SchedulerUnion works.
+  ex_actor::WorkSharingThreadPool ws_pool(1);
+  ex_actor::PriorityThreadPool prio_pool(1);
+  ex_actor::SchedulerUnion scheduler_union(ws_pool.GetScheduler(), prio_pool.GetScheduler());
+  auto scheduler = scheduler_union.GetScheduler();
+  auto start = ex::schedule(scheduler) | ex::then([] { return std::this_thread::get_id(); });
+
+  auto sender1 = start | ex::write_env(ex::prop {ex_actor::get_scheduler_index, 0});
+  auto sender2 = start | ex::write_env(ex::prop {ex_actor::get_scheduler_index, 1});
+  auto [thread_id1] = ex::sync_wait(sender1).value();
+  auto [thread_id2] = ex::sync_wait(sender2).value();
+  ASSERT_NE(thread_id1, thread_id2);
+}
+
 TEST(SchedulerTest, TestResourceHolder) {
   auto shared_pool1 = std::make_unique<ex_actor::WorkSharingThreadPool>(10);
   auto shared_pool2 = std::make_unique<ex_actor::WorkSharingThreadPool>(10);
-  auto union_pool = std::make_unique<ex_actor::SchedulerUnion<ex_actor::WorkSharingThreadPool::Scheduler>>(
-      std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {shared_pool1->GetScheduler(),
-                                                               shared_pool2->GetScheduler()});
+  auto union_pool = std::make_unique<
+      ex_actor::SchedulerUnion<ex_actor::WorkSharingThreadPool::Scheduler, ex_actor::WorkSharingThreadPool::Scheduler>>(
+      shared_pool1->GetScheduler(), shared_pool2->GetScheduler());
   ex_actor::Init(union_pool->GetScheduler());
   ex_actor::HoldResource(std::move(shared_pool1));
   ex_actor::HoldResource(std::move(shared_pool2));

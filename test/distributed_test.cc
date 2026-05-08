@@ -571,7 +571,7 @@ TEST(DistributedTest, GetPendingMessageCountRemote) {
       // Send 3 slow messages to Node 0
       stdexec::simple_counting_scope scope;
       for (int i = 0; i < 3; ++i) {
-        stdexec::spawn(actor.Send<&SlowRemoteActor::Wait>(500) | ex_actor::DiscardResult(), scope.get_token());
+        stdexec::spawn(actor.Send<&SlowRemoteActor::Wait>(1000) | ex_actor::DiscardResult(), scope.get_token());
       }
 
       // 2. Wait for messages to propagate and the actor to be busy

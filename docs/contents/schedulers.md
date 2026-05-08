@@ -137,11 +137,9 @@ struct TestActor {
 stdexec::task<void> MainCoroutine() {
   // 1. create two thread pools
   ex_actor::WorkSharingThreadPool thread_pool1(1);
-  ex_actor::WorkSharingThreadPool thread_pool2(1);
+  ex_actor::PriorityThreadPool thread_pool2(1);
   // 2. create a scheduler union, union two schedulers into one.
-  ex_actor::SchedulerUnion scheduler_union(std::vector<ex_actor::WorkSharingThreadPool::Scheduler> {
-    thread_pool1.GetScheduler(), thread_pool2.GetScheduler()
-  });
+  ex_actor::SchedulerUnion scheduler_union(thread_pool1.GetScheduler(), thread_pool2.GetScheduler());
   // 3. initialize the runtime with the scheduler union
   ex_actor::Init(scheduler_union.GetScheduler());
   // 4. create two actors, specify the scheduler index using .WithConfig().

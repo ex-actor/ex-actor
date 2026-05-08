@@ -15,6 +15,9 @@
 #pragma once
 
 #include <thread>
+#include <tuple>
+#include <utility>
+#include <variant>
 
 #include <exec/static_thread_pool.hpp>
 
@@ -163,18 +166,19 @@ class WorkStealingThreadPool : public exec::static_thread_pool {
   auto GetScheduler() { return get_scheduler(); }
 };
 
-template <class InnerScheduler>
+template <class... Schedulers>
 class SchedulerUnion {
- public:
-  explicit SchedulerUnion(std::vector<InnerScheduler> schedulers, size_t default_scheduler_index = 0)
-      : schedulers_(std::move(schedulers)), default_scheduler_index_(default_scheduler_index) {
-    EXA_THROW_CHECK_GT(schedulers_.size(), 0) << "SchedulerUnion must have at least one scheduler";
-  }
+  static_assert(sizeof...(Schedulers) > 0, "SchedulerUnion must have at least one scheduler");
 
-  class Scheduler;
-  class Sender;
+ public:
+  template <class... Args>
+    requires(sizeof...(Args) == sizeof...(Schedulers))
+  explicit SchedulerUnion(Args&&... schedulers) : schedulers_(std::forward<Args>(schedulers)...) {}
+
+  struct Scheduler;
+  struct Sender;
   template <ex::receiver R>
-  class Operation;
+  struct Operation;
 
   Scheduler GetScheduler() { return Scheduler {.scheduler_union = this}; }
 
@@ -183,6 +187,16 @@ class SchedulerUnion {
     Sender schedule() const noexcept { return {.scheduler_union = scheduler_union}; }
     friend bool operator==(const Scheduler& lhs, const Scheduler& rhs) noexcept {
       return lhs.scheduler_union == rhs.scheduler_union;
+    }
+  };
+
+  template <ex::receiver R>
+  struct Operation {
+    using Variant = std::variant<decltype(std::declval<Schedulers&>().schedule().connect(std::declval<R>()))...>;
+    Variant inner;
+
+    void start() noexcept {
+      std::visit([](auto& inner_op) noexcept { inner_op.start(); }, inner);
     }
   };
 
@@ -199,17 +213,33 @@ class SchedulerUnion {
     };
     auto get_env() const noexcept -> Env { return Env {.scheduler_union = scheduler_union}; }
 
-    auto connect(ex::receiver auto receiver) {
+    template <ex::receiver R>
+    auto connect(R receiver) -> Operation<R> {
       auto env = ex::get_env(receiver);
-      auto scheduler_index = ex_actor::get_scheduler_index(env);
-      EXA_THROW_CHECK_LT(scheduler_index, scheduler_union->schedulers_.size()) << "Scheduler index out of range";
-      return scheduler_union->schedulers_[scheduler_index].schedule().connect(std::move(receiver));
+      size_t scheduler_index = ex_actor::get_scheduler_index(env);
+      EXA_THROW_CHECK_LT(scheduler_index, sizeof...(Schedulers)) << "Scheduler index out of range";
+      return BuildOperation<R>(std::move(receiver), scheduler_index, std::index_sequence_for<Schedulers...> {});
+    }
+
+   private:
+    template <ex::receiver R, size_t... kIndices>
+    Operation<R> BuildOperation(R receiver, size_t scheduler_index, std::index_sequence<kIndices...>) {
+      using Variant = typename Operation<R>::Variant;
+      using MakeFn = Variant (*)(SchedulerUnion*, R&&);
+      // Dispatch table: one entry per alternative. Each function moves the receiver exactly once.
+      static constexpr MakeFn kTable[sizeof...(Schedulers)] = {+[](SchedulerUnion* self, R&& r) -> Variant {
+        return Variant {std::in_place_index<kIndices>,
+                        std::get<kIndices>(self->schedulers_).schedule().connect(std::move(r))};
+      }...};
+      return Operation<R> {.inner = kTable[scheduler_index](scheduler_union, std::move(receiver))};
     }
   };
 
  private:
-  std::vector<InnerScheduler> schedulers_;
-  size_t default_scheduler_index_;
+  std::tuple<Schedulers...> schedulers_;
 };
+
+template <class... Schedulers>
+SchedulerUnion(Schedulers...) -> SchedulerUnion<Schedulers...>;
 
 }  // namespace ex_actor

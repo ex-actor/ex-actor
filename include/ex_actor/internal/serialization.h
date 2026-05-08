@@ -18,13 +18,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <span>
 #include <type_traits>
-#include <vector>
 
+#include <capnp/serialize-packed.h>
 #include <rfl/capnproto.hpp>
 #include <spdlog/spdlog.h>
 
+#include "ex_actor/internal/container.h"
 #include "ex_actor/internal/logging.h"
 
 // ===================================================
@@ -84,25 +86,112 @@ Result<internal::wrap_in_rfl_array_t<T>> read(const concepts::ByteLike auto* byt
 };  // namespace rfl
 
 // ===================================================
+// Custom Parser for SmallVector<std::byte, kN> → capnproto Data.
+// Bypasses Writer entirely: no intermediate Bytestring allocation, zero-copy write.
+// Covers both capnproto::Reader and ReaderWithContext<Ctx> (which inherits Reader).
+// ===================================================
+
+namespace rfl::parsing {
+
+template <class R, class W, size_t kN, class ProcessorsType>
+  requires(std::is_base_of_v<rfl::capnproto::Reader, R> && std::is_same_v<W, rfl::capnproto::Writer>)
+struct Parser<R, W, ex_actor::internal::SmallVector<std::byte, kN>, ProcessorsType> {
+  using InputVarType = typename rfl::capnproto::Reader::InputVarType;
+  using ParentType = Parent<rfl::capnproto::Writer>;
+
+  static rfl::Result<ex_actor::internal::SmallVector<std::byte, kN>> read(const R& /*_r*/,
+                                                                          const InputVarType& _var) noexcept {
+    if (_var.val_.getType() != capnp::DynamicValue::DATA) {
+      return rfl::error("Expected DATA type for SmallVector<byte>");
+    }
+    const auto data = _var.val_.as<capnp::Data>();
+    const auto* begin = reinterpret_cast<const std::byte*>(data.begin());
+    return ex_actor::internal::SmallVector<std::byte, kN>(begin, begin + data.size());
+  }
+
+  template <class P>
+  static void write(const rfl::capnproto::Writer& /*_w*/, const ex_actor::internal::SmallVector<std::byte, kN>& _sv,
+                    const P& _parent) {
+    using PType = std::remove_cvref_t<P>;
+    const auto arr = kj::ArrayPtr<const kj::byte>(reinterpret_cast<const kj::byte*>(_sv.data()), _sv.size());
+    const capnp::Data::Reader data_reader(arr);
+    if constexpr (std::is_same_v<PType, typename ParentType::Object>) {
+      _parent.obj_->val_.set(kj::StringPtr(_parent.name_.data(), _parent.name_.size()), data_reader);
+    } else if constexpr (std::is_same_v<PType, typename ParentType::Array>) {
+      _parent.arr_->val_.set(_parent.arr_->ix_++, data_reader);
+    } else if constexpr (std::is_same_v<PType, typename ParentType::Union<rfl::capnproto::Writer::OutputUnionType>>) {
+      const auto field = _parent.union_->val_.getSchema().getFields()[_parent.index_];
+      _parent.union_->val_.set(field, data_reader);
+    }
+    // Root: ByteBuffer as a standalone root message is not used in ex_actor
+  }
+
+  static schema::Type to_schema(std::map<std::string, schema::Type>*) {
+    return schema::Type {schema::Type::Bytestring {}};
+  }
+};
+
+}  // namespace rfl::parsing
+
+// ===================================================
 // ex_actor's own serialization related code
 // ===================================================
 namespace ex_actor::internal {
 
-using ByteBuffer = std::vector<std::byte>;
+using ByteBuffer = SmallVector<std::byte, 512>;  // SBO: no heap alloc for messages <= 512 bytes
+
+constexpr size_t kBuilderBufferSize = 65536;
+
+struct ThreadLocalMessageBuilderBuffer {
+  static constexpr size_t kSize = kBuilderBufferSize;
+  std::array<capnp::word, kSize / sizeof(capnp::word)> buffer;
+};
+
+inline ThreadLocalMessageBuilderBuffer& GetThreadLocalBuilderBuffer() {
+  thread_local ThreadLocalMessageBuilderBuffer buffer;
+  return buffer;
+}
 
 template <class T>
-static auto GetCachedSchema() {
+auto GetCachedSchema() {
   thread_local auto schema = rfl::capnproto::to_schema<T>();
   return schema;
 }
 
 template <class T>
+void SerializeTo(const T& obj, capnp::DynamicStruct::Builder* root) {
+  const auto writer = rfl::capnproto::Writer(root);
+  rfl::capnproto::Parser<T, rfl::Processors<rfl::SnakeCaseToCamelCase>>::write(
+      writer, obj, typename rfl::parsing::Parent<rfl::capnproto::Writer>::Root {});
+}
+
+template <class T>
 ByteBuffer Serialize(const T& obj) {
-  std::vector<char> chars = rfl::capnproto::write(obj, GetCachedSchema<T>());
-  ByteBuffer result(chars.size());
-  // TODO: a copy here, optimize it in the future. Find a way to convert the vector<char> to vector<std::byte> without
-  // copy and not causing undefined behavior(don't violating strict aliasing rules, specifically).
-  std::memcpy(result.data(), chars.data(), chars.size());
+  const auto& schema = GetCachedSchema<T>();
+  const auto root_name = rfl::capnproto::get_root_name<T>();
+  const auto root_schema = schema.value().getNested(root_name.c_str());
+
+  // Thread-local buffer is reused across calls. MallocMessageBuilder automatically allocates
+  // additional heap segments if the message exceeds the pre-allocated buffer size.
+  auto& tls_buffer = GetThreadLocalBuilderBuffer();
+
+  capnp::MallocMessageBuilder message_builder(
+      kj::ArrayPtr<capnp::word>(tls_buffer.buffer.data(), tls_buffer.buffer.size()));
+  auto root = message_builder.initRoot<capnp::DynamicStruct>(root_schema.asStruct());
+
+  SerializeTo(obj, &root);
+
+  size_t size_in_words = capnp::computeSerializedSizeInWords(message_builder);
+  size_t size_in_bytes = size_in_words * sizeof(capnp::word);
+  // Packed worst case: 1 tag byte per 8 data bytes on top of unpacked size.
+  size_t max_packed_size = size_in_bytes + ((size_in_bytes + 7) / 8) + 32;
+
+  ByteBuffer result(max_packed_size);
+  kj::ArrayOutputStream output_stream(kj::ArrayPtr<uint8_t>(reinterpret_cast<uint8_t*>(result.data()), result.size()));
+  capnp::writePackedMessage(output_stream, message_builder);
+
+  result.resize(output_stream.getArray().size());
+
   return result;
 }
 

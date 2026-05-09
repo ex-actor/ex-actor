@@ -184,11 +184,9 @@ struct ActorRuntimeInfo {
 
 template <class UserClass>
 void NotifyOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref) {
-  if constexpr (requires(UserClass& user_class, ActorRef<UserClass> self_ref) { user_class.OnSpawned(self_ref); }) {
-    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(self_ref);
-  } else if constexpr (requires(UserClass& user_class, const ActorRuntimeInfo<UserClass>& info) {
-                         user_class.OnSpawned(info);
-                       }) {
+  if constexpr (requires(UserClass& user_class, const ActorRuntimeInfo<UserClass>& info) {
+                  user_class.OnSpawned(info);
+                }) {
     ActorRuntimeInfo<UserClass> runtime_info {.self_actor_ref = self_ref,
                                               .pending_message_count = &actor->GetPendingMessageCountRef()};
     static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(runtime_info);

@@ -194,45 +194,63 @@ TEST(BasicApiTest, ActorCanBePolymorphic) {
   ex::sync_wait(coroutine());
 }
 
-struct SlowPendingActor {
-  void Wait(int ms, std::atomic<int>* counter) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-    (*counter)++;
+class ActorWithRuntimeInfo {
+ public:
+  void OnSpawned(const ex_actor::ActorRuntimeInfo<ActorWithRuntimeInfo>& context) { runtime_info_ = context; }
+
+  ex_actor::ActorRef<ActorWithRuntimeInfo> GetSelfRef() const { return runtime_info_.self_actor_ref; }
+
+  size_t GetPendingCountFromRuntimeInfo() const {
+    return runtime_info_.pending_message_count->load(std::memory_order_acquire);
   }
+
+  // Simulates a slow task and returns the pending count as observed from inside the actor during execution.
+  size_t WaitAndGetPendingCount(int ms) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    return runtime_info_.pending_message_count->load(std::memory_order_acquire);
+  }
+
+ private:
+  ex_actor::ActorRuntimeInfo<ActorWithRuntimeInfo> runtime_info_;
 };
 
-TEST(BasicApiTest, GetPendingMessageCountShouldWork) {
-  std::atomic<int> counter {0};
-  auto coroutine = [&]() -> stdexec::task<void> {
-    auto actor = co_await ex_actor::Spawn<SlowPendingActor>();
+TEST(BasicApiTest, OnSpawnedWithActorRuntimeInfoShouldWork) {
+  auto coroutine = []() -> stdexec::task<void> {
+    auto actor = co_await ex_actor::Spawn<ActorWithRuntimeInfo>();
 
-    // 1. Send 5 long-running tasks
-    stdexec::simple_counting_scope scope;
-    for (int i = 0; i < 5; ++i) {
-      stdexec::spawn(actor.SendLocal<&SlowPendingActor::Wait>(200, &counter) | ex_actor::DiscardResult(),
-                     scope.get_token());
+    // 1. Verify self ref is correctly populated via ActorRuntimeInfo
+    auto self_ref = co_await actor.Send<&ActorWithRuntimeInfo::GetSelfRef>();
+    EXPECT_EQ(self_ref, actor);
+
+    // 2. Multi-task: with 1 thread, all 5 spawns complete synchronously before the main coroutine
+    //    suspends. When co_await scope.join() suspends the main coroutine, the thread becomes
+    //    free and the actor drains all 5 messages in one activation batch.
+    //    pending_message_count_ is decremented only after the whole batch finishes, so each
+    //    task observes count == 5 during execution.
+    constexpr size_t kTaskCount = 5;
+    std::array<size_t, kTaskCount> observed_counts {};
+    {
+      stdexec::simple_counting_scope scope;
+      for (size_t i = 0; i < kTaskCount; ++i) {
+        stdexec::spawn(actor.SendLocal<&ActorWithRuntimeInfo::WaitAndGetPendingCount>(50) |
+                           ex::then([&observed_counts, i](size_t count) { observed_counts[i] = count; }) |
+                           ex_actor::DiscardResult(),
+                       scope.get_token());
+      }
+      co_await scope.join();
     }
 
-    // 2. Give it a tiny bit of time to start the first one
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    for (size_t count : observed_counts) {
+      EXPECT_EQ(count, kTaskCount);
+    }
 
-    // 3. Check pending count using transparent API
-    size_t pending = co_await actor.GetPendingMessageCount();
-    EXPECT_GE(pending, 1U);
-    EXPECT_LE(pending, 5U);
-
-    // 4. Check pending count using sync API
-    size_t pending_sync = actor.GetPendingMessageCountLocal();
-    EXPECT_EQ(pending_sync, pending);
-
-    std::cout << "Detected " << pending << " pending messages" << std::endl;
-
-    co_await scope.join();
-    EXPECT_EQ(actor.GetPendingMessageCountLocal(), 0U);
-    EXPECT_EQ(counter.load(), 5);
+    // 3. After the 5-task batch finishes (pending == 0), send a standalone task.
+    //    It runs alone in its own activation and observes count == 1.
+    size_t pending_alone = co_await actor.SendLocal<&ActorWithRuntimeInfo::GetPendingCountFromRuntimeInfo>();
+    EXPECT_EQ(pending_alone, 1U);
   };
 
-  ex_actor::Init(/*thread_pool_size=*/1);  // Use 1 thread to ensure queueing
+  ex_actor::Init(/*thread_pool_size=*/1);  // 1 thread to ensure queueing
   ex::sync_wait(coroutine());
   ex_actor::Shutdown();
 }

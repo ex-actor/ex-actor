@@ -116,6 +116,24 @@ class BasicActorRef {
   }
 };
 
+// used internally for bootstrapping internal framework actors like MessageBroker
+template <class UserClass>
+struct BasicActorRuntimeInfo {
+  BasicActorRef<UserClass> self_actor_ref;
+  const std::atomic_size_t* pending_message_count = nullptr;
+};
+
+template <class UserClass>
+void NotifyOnSpawned(TypeErasedActor* actor, const BasicActorRef<UserClass>& self_ref) {
+  if constexpr (requires(UserClass& user_class, const BasicActorRuntimeInfo<UserClass>& info) {
+                  user_class.OnSpawned(info);
+                }) {
+    BasicActorRuntimeInfo<UserClass> runtime_info {.self_actor_ref = self_ref,
+                                                   .pending_message_count = &actor->GetPendingMessageCountRef()};
+    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(runtime_info);
+  }
+}
+
 }  // namespace ex_actor::internal
 
 namespace ex_actor {

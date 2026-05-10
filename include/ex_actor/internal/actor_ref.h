@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -170,6 +169,13 @@ class ActorRef : public BasicActorRef<UserClass> {
   uint64_t node_id_ = 0;
   BasicActorRef<MessageBroker> broker_actor_ref_;
 };
+}  // namespace ex_actor::internal
+
+// ==============================
+// Publicly exposed types
+// ==============================
+namespace ex_actor {
+using internal::ActorRef;
 
 /**
  * @brief Passed to OnSpawned hook. Provides access to the actor's self reference and pending message count.
@@ -181,7 +187,12 @@ struct ActorRuntimeInfo {
   ActorRef<UserClass> self_actor_ref;
   const std::atomic_size_t* pending_message_count = nullptr;
 };
+}  // namespace ex_actor
 
+// ==============================
+// OnSpawned hook
+// ==============================
+namespace ex_actor::internal {
 template <class UserClass>
 void NotifyOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref) {
   if constexpr (requires(UserClass& user_class, const ActorRuntimeInfo<UserClass>& info) {
@@ -192,22 +203,11 @@ void NotifyOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref
     static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(runtime_info);
   }
 }
+};  // namespace ex_actor::internal
 
-template <class UserClass>
-void NotifyOnSpawned(TypeErasedActor* actor, const BasicActorRef<UserClass>& self_ref) {
-  if constexpr (requires(UserClass& user_class, BasicActorRef<UserClass> self_ref) {
-                  user_class.OnSpawned(self_ref);
-                }) {
-    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(self_ref);
-  }
-}
-}  // namespace ex_actor::internal
-
-namespace ex_actor {
-using internal::ActorRef;
-using internal::ActorRuntimeInfo;
-}  // namespace ex_actor
-
+// ==============================
+// std::hash support
+// ==============================
 namespace std {
 template <class UserClass>
 struct hash<ex_actor::ActorRef<UserClass>> {

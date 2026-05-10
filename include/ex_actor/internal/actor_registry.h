@@ -178,7 +178,7 @@ class ActorRegistryBackend {
     auto actor_id = GenerateRandomActorId();
     auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::move(args)...);
     auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor.get(), broker_actor_ref_);
-    NotifyOnSpawned<UserClass>(actor.get(), handle);
+    NotifyExActorOnSpawned<UserClass>(actor.get(), handle);
     if (config.actor_name.has_value()) {
       std::string& name = *config.actor_name;
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists, name=" << name;
@@ -206,7 +206,6 @@ class ActorRegistryBackend {
   void HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out);
   ex::task<ByteBuffer> HandleActorMethodCallRequest(ActorMethodCallRequest msg);
   ex::task<ByteBuffer> HandleActorDestroyRequest(ActorDestroyRequest msg);
-  ex::task<ByteBuffer> HandleActorGetPendingMessageCountRequest(ActorGetPendingMessageCountRequest msg);
 };
 
 // -----------SpawnBuilder: a builder-style sender for actor spawning-----------

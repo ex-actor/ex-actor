@@ -161,7 +161,7 @@ class MessageBroker {
   /**
    * @brief Called by the framework after the actor is spawned to inject the self actor ref.
    */
-  void OnSpawned(BasicActorRef<MessageBroker> self_actor_ref);
+  void ExActorOnSpawned(const BasicActorRuntimeInfo<MessageBroker>& runtime_info);
 
   /**
    * @brief Start the recv socket puller and periodical task scheduler.

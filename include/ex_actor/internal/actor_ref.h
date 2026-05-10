@@ -134,38 +134,7 @@ class ActorRef : public BasicActorRef<UserClass> {
 
   uint64_t GetNodeId() const { return node_id_; }
 
-  /**
-   * @brief Get the number of pending messages in the actor's mailbox asynchronously.
-   * Works for both local and remote actors.
-   * @return A sender that yields the number of pending messages.
-   */
-  [[nodiscard]] ex::sender auto GetPendingMessageCount() const {
-    this->CheckNotEmpty();
-    using LocalSenderType = decltype(GetPendingMessageCountLocalAsync());
-    using RemoteSenderType = decltype(GetPendingMessageCountRemote());
-
-    using VariantType = std::variant<LocalSenderType, RemoteSenderType>;
-    return node_id_ == this_node_id_ ? SenderVariant {VariantType(GetPendingMessageCountLocalAsync())}
-                                     : SenderVariant {VariantType(GetPendingMessageCountRemote())};
-  }
-
  private:
-  [[nodiscard]] auto GetPendingMessageCountLocalAsync() const { return ex::just(this->GetPendingMessageCountLocal()); }
-
-  [[nodiscard]] auto GetPendingMessageCountRemote() const {
-    EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
-    NetworkRequest request {ActorGetPendingMessageCountRequest {.actor_id = this->actor_id_}};
-    return broker_actor_ref_.template SendLocal<&MessageBroker::SendRequest>(node_id_, Serialize(request)) |
-           ex::then([node_id = node_id_](ByteBuffer response_buf) -> size_t {
-             auto reply = Deserialize<NetworkReply>(std::move(response_buf));
-             auto& ret = std::get<ActorGetPendingMessageCountReply>(reply.variant);
-             if (!ret.success) {
-               EXA_THROW << "Got error getting pending message count from node " << node_id << ": " << ret.error;
-             }
-             return ret.count;
-           });
-  }
-
   template <auto kMethod, class... Args>
   [[nodiscard]] ex::sender auto SendRemote(Args... args) const {
     using UnwrappedType = typename decltype(UnwrapReturnSenderIfNested<kMethod>())::type;
@@ -200,28 +169,45 @@ class ActorRef : public BasicActorRef<UserClass> {
   uint64_t node_id_ = 0;
   BasicActorRef<MessageBroker> broker_actor_ref_;
 };
-
-template <class UserClass>
-void NotifyOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref) {
-  if constexpr (requires(UserClass& user_class, ActorRef<UserClass> self_ref) { user_class.OnSpawned(self_ref); }) {
-    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(self_ref);
-  }
-}
-
-template <class UserClass>
-void NotifyOnSpawned(TypeErasedActor* actor, const BasicActorRef<UserClass>& self_ref) {
-  if constexpr (requires(UserClass& user_class, BasicActorRef<UserClass> self_ref) {
-                  user_class.OnSpawned(self_ref);
-                }) {
-    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(self_ref);
-  }
-}
 }  // namespace ex_actor::internal
 
+// ==============================
+// Publicly exposed types
+// ==============================
 namespace ex_actor {
 using internal::ActorRef;
+
+/**
+ * @brief Passed to ExActorOnSpawned hook. Provides access to the actor's self reference and pending message count.
+ * The struct is copyable and can be stored as a member variable inside the user class.
+ * pending_message_count points to the actor's internal atomic counter; it remains valid for the actor's lifetime.
+ */
+template <class UserClass>
+struct ActorRuntimeInfo {
+  ActorRef<UserClass> self_actor_ref;
+  const std::atomic_size_t* pending_message_count = nullptr;
+};
 }  // namespace ex_actor
 
+// ==============================
+// ExActorOnSpawned hook
+// ==============================
+namespace ex_actor::internal {
+template <class UserClass>
+void NotifyExActorOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref) {
+  if constexpr (requires(UserClass& user_class, const ActorRuntimeInfo<UserClass>& info) {
+                  user_class.ExActorOnSpawned(info);
+                }) {
+    ActorRuntimeInfo<UserClass> runtime_info {.self_actor_ref = self_ref,
+                                              .pending_message_count = &actor->GetPendingMessageCountRef()};
+    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->ExActorOnSpawned(runtime_info);
+  }
+}
+};  // namespace ex_actor::internal
+
+// ==============================
+// std::hash support
+// ==============================
 namespace std {
 template <class UserClass>
 struct hash<ex_actor::ActorRef<UserClass>> {

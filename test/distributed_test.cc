@@ -533,7 +533,3 @@ TEST(DistributedTest, NonMovableActorCompiles) {
     return registry.Spawn<&NonMovableActor::Create>(/*name=*/"Bob").ToNode(0);
   };
 }
-
-TEST(DistributedTest, GetPendingMessageCountRemote) {
-  // Test GetPendingMessageCountRemote after implementing the ForcedDestroyActor method.
-}

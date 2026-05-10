@@ -87,10 +87,6 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer reque
     co_return co_await HandleActorDestroyRequest(std::move(*msg));
   }
 
-  if (auto* msg = std::get_if<ActorGetPendingMessageCountRequest>(&request.variant)) {
-    co_return co_await HandleActorGetPendingMessageCountRequest(std::move(*msg));
-  }
-
   EXA_THROW << "Unknown network request variant";
 }
 
@@ -190,26 +186,6 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleActorDestroyRequest(ActorDestro
   }
 }
 
-ex::task<ByteBuffer> ActorRegistryBackend::HandleActorGetPendingMessageCountRequest(
-    ActorGetPendingMessageCountRequest msg) {
-  if (!actor_id_to_actor_.contains(msg.actor_id)) {
-    auto error_msg =
-        fmt_lib::format("Can't find actor at remote node, actor_id={}, node_id={}, maybe it's already destroyed.",
-                        msg.actor_id, this_node_id_);
-    co_return SerializeReply(
-        NetworkReply {ActorGetPendingMessageCountReply {.success = false, .error = std::move(error_msg)}});
-  }
-
-  try {
-    size_t count = actor_id_to_actor_.at(msg.actor_id)->GetPendingMessageCount();
-    co_return SerializeReply(NetworkReply {ActorGetPendingMessageCountReply {.success = true, .count = count}});
-  } catch (std::exception& error) {
-    auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-    co_return SerializeReply(
-        NetworkReply {ActorGetPendingMessageCountReply {.success = false, .error = std::move(error_msg)}});
-  }
-}
-
 // ----------------------ActorRegistry--------------------------
 ActorRegistry::~ActorRegistry() {
   log::Info("Start to shutdown actor registry");
@@ -253,7 +229,7 @@ ex::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_co
                                                          this_node_id_, cluster_config);
 
   broker_actor_ref_ = BasicActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
-  NotifyOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
+  NotifyExActorOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
 
   // Update the backend actor's broker ref so it can forward network requests
   co_await backend_actor_ref_.SendLocal<&ActorRegistryBackend::SetBrokerActorRef>(broker_actor_ref_);

@@ -101,15 +101,6 @@ class BasicActorRef {
   uint64_t GetActorId() const { return actor_id_; }
   uint64_t GetActorTypeHash() const { return actor_type_hash_; }
 
-  /**
-   * @brief Get the number of pending messages in the actor's mailbox synchronously.
-   */
-  size_t GetPendingMessageCountLocal() const {
-    CheckNotEmpty();
-    CheckIsValidLocalActorRef();
-    return type_erased_actor_->GetPendingMessageCount();
-  }
-
  protected:
   bool is_empty_ = true;
   uint64_t actor_id_ = 0;
@@ -124,6 +115,24 @@ class BasicActorRef {
                                                       "sliced a remote ActorRef to BasicActorRef.";
   }
 };
+
+// used internally for bootstrapping internal framework actors like MessageBroker
+template <class UserClass>
+struct BasicActorRuntimeInfo {
+  BasicActorRef<UserClass> self_actor_ref;
+  const std::atomic_size_t* pending_message_count = nullptr;
+};
+
+template <class UserClass>
+void NotifyExActorOnSpawned(TypeErasedActor* actor, const BasicActorRef<UserClass>& self_ref) {
+  if constexpr (requires(UserClass& user_class, const BasicActorRuntimeInfo<UserClass>& info) {
+                  user_class.ExActorOnSpawned(info);
+                }) {
+    BasicActorRuntimeInfo<UserClass> runtime_info {.self_actor_ref = self_ref,
+                                                   .pending_message_count = &actor->GetPendingMessageCountRef()};
+    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->ExActorOnSpawned(runtime_info);
+  }
+}
 
 }  // namespace ex_actor::internal
 

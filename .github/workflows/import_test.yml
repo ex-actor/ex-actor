@@ -50,9 +50,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/CPM
-          key: cpm-import-${{ matrix.dir }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/CPM.cmake') }}
+          key: cpm-${{ hashFiles('**/CMakeLists.txt', 'cmake/CPM.cmake') }}
           restore-keys: |
-            cpm-import-${{ matrix.dir }}-
+            cpm-
 
       - name: Setup Bazel environment
         if: matrix.setup_bazel

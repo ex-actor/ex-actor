@@ -46,9 +46,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/CPM
-          key: cpm-doc-test-${{ hashFiles('**/CMakeLists.txt', 'cmake/CPM.cmake') }}
+          key: cpm-${{ hashFiles('**/CMakeLists.txt', 'cmake/CPM.cmake') }}
           restore-keys: |
-            cpm-doc-test-
+            cpm-
 
       - name: Run documentation tests
         run: python3 test/doc_test.py --verbose

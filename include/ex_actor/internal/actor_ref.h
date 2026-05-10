@@ -178,7 +178,7 @@ namespace ex_actor {
 using internal::ActorRef;
 
 /**
- * @brief Passed to OnSpawned hook. Provides access to the actor's self reference and pending message count.
+ * @brief Passed to ExActorOnSpawned hook. Provides access to the actor's self reference and pending message count.
  * The struct is copyable and can be stored as a member variable inside the user class.
  * pending_message_count points to the actor's internal atomic counter; it remains valid for the actor's lifetime.
  */
@@ -190,17 +190,17 @@ struct ActorRuntimeInfo {
 }  // namespace ex_actor
 
 // ==============================
-// OnSpawned hook
+// ExActorOnSpawned hook
 // ==============================
 namespace ex_actor::internal {
 template <class UserClass>
-void NotifyOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref) {
+void NotifyExActorOnSpawned(TypeErasedActor* actor, const ActorRef<UserClass>& self_ref) {
   if constexpr (requires(UserClass& user_class, const ActorRuntimeInfo<UserClass>& info) {
-                  user_class.OnSpawned(info);
+                  user_class.ExActorOnSpawned(info);
                 }) {
     ActorRuntimeInfo<UserClass> runtime_info {.self_actor_ref = self_ref,
                                               .pending_message_count = &actor->GetPendingMessageCountRef()};
-    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->OnSpawned(runtime_info);
+    static_cast<UserClass*>(actor->GetUserClassInstanceAddress())->ExActorOnSpawned(runtime_info);
   }
 }
 };  // namespace ex_actor::internal

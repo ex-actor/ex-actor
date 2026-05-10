@@ -229,7 +229,7 @@ ex::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_co
                                                          this_node_id_, cluster_config);
 
   broker_actor_ref_ = BasicActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
-  NotifyOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
+  NotifyExActorOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);
 
   // Update the backend actor's broker ref so it can forward network requests
   co_await backend_actor_ref_.SendLocal<&ActorRegistryBackend::SetBrokerActorRef>(broker_actor_ref_);

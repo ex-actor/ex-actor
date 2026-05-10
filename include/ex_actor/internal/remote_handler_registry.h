@@ -135,7 +135,7 @@ class RemoteFuncHandlerRegistrar {
     auto this_node_id = context.actor_ref_serde_ctx.this_node_id;
     auto actor_ref = ActorRef<ActorClass>(this_node_id, this_node_id, context.actor_id, actor.get(),
                                           context.actor_ref_serde_ctx.broker_actor_ref);
-    NotifyOnSpawned<ActorClass>(actor.get(), actor_ref);
+    NotifyExActorOnSpawned<ActorClass>(actor.get(), actor_ref);
     auto actor_name = actor->GetActorConfig().actor_name;
     return {
         .actor = std::move(actor),

@@ -196,7 +196,7 @@ TEST(BasicApiTest, ActorCanBePolymorphic) {
 
 class ActorWithRuntimeInfo {
  public:
-  void OnSpawned(const ex_actor::ActorRuntimeInfo<ActorWithRuntimeInfo>& context) { runtime_info_ = context; }
+  void ExActorOnSpawned(const ex_actor::ActorRuntimeInfo<ActorWithRuntimeInfo>& context) { runtime_info_ = context; }
 
   ex_actor::ActorRef<ActorWithRuntimeInfo> GetSelfRef() const { return runtime_info_.self_actor_ref; }
 
@@ -214,7 +214,7 @@ class ActorWithRuntimeInfo {
   ex_actor::ActorRuntimeInfo<ActorWithRuntimeInfo> runtime_info_;
 };
 
-TEST(BasicApiTest, OnSpawnedWithActorRuntimeInfoShouldWork) {
+TEST(BasicApiTest, ExActorOnSpawnedWithActorRuntimeInfoShouldWork) {
   auto coroutine = []() -> stdexec::task<void> {
     auto actor = co_await ex_actor::Spawn<ActorWithRuntimeInfo>();
 

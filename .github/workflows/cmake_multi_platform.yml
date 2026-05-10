@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
+
 jobs:
   build_and_test:
     # os + compiler + cxxflags
@@ -68,6 +71,14 @@ jobs:
         with:
           key: ${{ matrix.toolchain.os }}-${{ matrix.toolchain.compiler.cc }}-${{ matrix.toolchain.cxxflags || 'default' }}
           variant: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
+
+      - name: Set up CPM source cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/CPM.cmake') }}
+          restore-keys: |
+            cpm-${{ runner.os }}-
 
       - name: Set reusable strings
         # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.

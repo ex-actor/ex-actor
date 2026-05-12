@@ -49,13 +49,13 @@ class ActorRegistryBackend {
    * @brief Spawn a local actor with config.
    */
   template <class UserClass, class... Args>
-  ActorRef<UserClass> SpawnWithClass(uint64_t node_id, ActorConfig config, Args... args) {
+  ex::task<ActorRef<UserClass>> SpawnWithClass(uint64_t node_id, ActorConfig config, Args... args) {
     if (node_id != this_node_id_) {
       EXA_THROW << "Spawn<UserClass> can only be used to create local actor, to create remote actor, use "
                    "Spawn<&CreateFn> to provide a fixed signature for remote actor creation. node_id="
                 << node_id << ", this_node_id=" << this_node_id_ << ", actor_type=" << typeid(UserClass).name();
     }
-    return SpawnLocal<UserClass>(node_id, std::move(config), std::move(args)...);
+    co_return co_await SpawnLocal<UserClass>(node_id, std::move(config), std::move(args)...);
   }
 
   /**
@@ -65,7 +65,7 @@ class ActorRegistryBackend {
   ex::task<ActorRef<FnReturnType<kCreateFn>>> SpawnWithCreateFn(uint64_t node_id, ActorConfig config, Args... args) {
     using UserClass = FnReturnType<kCreateFn>;
     if (node_id == this_node_id_) {
-      co_return SpawnLocal<UserClass, kCreateFn>(node_id, std::move(config), std::move(args)...);
+      co_return co_await SpawnLocal<UserClass, kCreateFn>(node_id, std::move(config), std::move(args)...);
     }
 
     EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
@@ -174,20 +174,51 @@ class ActorRegistryBackend {
   }
 
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  ActorRef<UserClass> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
+  ex::task<ActorRef<UserClass>> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
     auto actor_id = GenerateRandomActorId();
-    auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::move(args)...);
-    auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor.get(), broker_actor_ref_);
-    NotifyExActorOnSpawned<UserClass>(actor.get(), handle);
+
+    // Sync prologue: reserve actor_name (race-free duplicate check) before any await suspends and lets
+    // another concurrent Spawn message run on the backend's mailbox.
+    bool name_reserved = false;
     if (config.actor_name.has_value()) {
-      std::string& name = *config.actor_name;
+      const std::string& name = *config.actor_name;
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists, name=" << name;
       actor_name_to_id_[name] = actor_id;
+      name_reserved = true;
     }
+
+    auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config);
+    auto* actor_raw = actor.get();
+
+    std::exception_ptr captured_error;
+    try {
+      // BasicActorRef caches the user-class instance address at construction time, so the handle
+      // can only be built AFTER AsyncConstructUserInstance populates user_class_instance_.
+      // The hook lambda runs in the same actor activation (same env), so it observes the
+      // configured priority/scheduler_index too.
+      co_await (actor->AsyncConstructUserInstance(std::tuple<Args...> {std::move(args)...}) |
+                ex::then([actor_raw, this_node_id = this_node_id_, node_id, actor_id, broker_ref = broker_actor_ref_] {
+                  auto self = ActorRef<UserClass>(this_node_id, node_id, actor_id, actor_raw, broker_ref);
+                  NotifyExActorOnSpawned<UserClass>(actor_raw, self);
+                }));
+    } catch (...) {
+      captured_error = std::current_exception();
+    }
+    if (captured_error) {
+      // The Actor's simple_counting_scope must be join()'d before the actor unique_ptr unwinds;
+      // AsyncDestroy() drains it. This works whether the user instance was constructed or not.
+      co_await actor->AsyncDestroy();
+      if (name_reserved) {
+        actor_name_to_id_.erase(*config.actor_name);
+      }
+      std::rethrow_exception(captured_error);
+    }
+
+    auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor_raw, broker_actor_ref_);
     actor_id_to_actor_[actor_id] = std::move(actor);
     // Workaround: see DeserializeActorRef comment.
     actor_id_to_serialized_ref_[actor_id] = Serialize(rfl::Reflector<ActorRef<UserClass>>::from(handle));
-    return handle;
+    co_return handle;
   }
 
   std::mt19937 random_num_generator_;
@@ -203,7 +234,7 @@ class ActorRegistryBackend {
   void InitRandomNumGenerator();
   uint64_t GenerateRandomActorId();
   ByteBuffer SerializeReply(const NetworkReply& reply);
-  void HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out);
+  ex::task<void> HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out);
   ex::task<ByteBuffer> HandleActorMethodCallRequest(ActorMethodCallRequest msg);
   ex::task<ByteBuffer> HandleActorDestroyRequest(ActorDestroyRequest msg);
 };

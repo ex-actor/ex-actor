@@ -153,34 +153,57 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
 template <class UserClass, auto kCreateFn = nullptr>
 class Actor : public TypeErasedActor {
  public:
-  template <typename... Args>
-  explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args... args)
+  explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config)
       : TypeErasedActor(std::move(actor_config)), scheduler_(std::move(scheduler)) {
     if constexpr (kCreateFn != nullptr) {
       using ReturnType = FnReturnType<kCreateFn>;
       static_assert(
           std::is_same_v<ReturnType, UserClass>,
           "The return type of kCreateFn must match the Actor's UserClass template parameter to avoid slicing.");
-
-      // Use `new` directly so the prvalue returned by kCreateFn is used to
-      // initialize the heap object, benefiting from guaranteed copy elision
-      // (C++17 [dcl.init]/17.6.1) and not requiring UserClass to be movable.
-      user_class_instance_.reset(new UserClass(kCreateFn(std::move(args)...)));
-    } else {
-      user_class_instance_ = std::make_unique<UserClass>(std::move(args)...);
     }
-    cached_user_class_instance_address_ = user_class_instance_.get();
   }
 
+  // Phase B of two-phase construction: schedule construction of the user-class instance on this actor's own
+  // mailbox so it runs with the configured env (priority + scheduler_index), instead of inheriting whatever
+  // env happens to be set on the caller (e.g. the ActorRegistryBackend's mailbox, which always carries
+  // scheduler_index = 0).
   template <typename... Args>
-  static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                                                            ActorConfig actor_config, std::tuple<Args...> arg_tuple) {
-    return std::apply(
-        [scheduler = std::move(scheduler), actor_config = std::move(actor_config)](auto&&... args) mutable {
-          return std::make_unique<Actor<UserClass, kCreateFn>>(std::move(scheduler), std::move(actor_config),
-                                                               std::move(args)...);
-        },
-        std::move(arg_tuple));
+  ex::sender auto AsyncConstructUserInstance(std::tuple<Args...> args) {
+    return ex::schedule(StdExecSchedulerForActorMessageSubmission(this)) |
+           ex::then([this, args = std::move(args)]() mutable {
+             std::apply(
+                 [this](auto&&... a) {
+                   if constexpr (kCreateFn != nullptr) {
+                     // Use `new` directly so the prvalue returned by kCreateFn is used to
+                     // initialize the heap object, benefiting from guaranteed copy elision
+                     // (C++17 [dcl.init]/17.6.1) and not requiring UserClass to be movable.
+                     user_class_instance_.reset(new UserClass(kCreateFn(std::move(a)...)));
+                   } else {
+                     user_class_instance_ = std::make_unique<UserClass>(std::move(a)...);
+                   }
+                 },
+                 std::move(args));
+             cached_user_class_instance_address_ = user_class_instance_.get();
+           });
+  }
+
+  static std::unique_ptr<TypeErasedActor> CreateShell(std::unique_ptr<TypeErasedActorScheduler> scheduler,
+                                                      ActorConfig actor_config) {
+    return std::make_unique<Actor<UserClass, kCreateFn>>(std::move(scheduler), std::move(actor_config));
+  }
+
+  // Synchronously construct the user-class instance. Only intended for bootstrap paths (backend / broker
+  // actors created during ActorRegistry construction) where there is no awaitable execution context yet
+  // and the env routing does not matter (the bootstrap actors run with empty env by design). All other
+  // call sites must use AsyncConstructUserInstance.
+  template <typename... Args>
+  void BootstrapConstructUserInstance(Args&&... args) {
+    if constexpr (kCreateFn != nullptr) {
+      user_class_instance_.reset(new UserClass(kCreateFn(std::forward<Args>(args)...)));
+    } else {
+      user_class_instance_ = std::make_unique<UserClass>(std::forward<Args>(args)...);
+    }
+    cached_user_class_instance_address_ = user_class_instance_.get();
   }
 
   ~Actor() override = default;
@@ -231,7 +254,10 @@ class Actor : public TypeErasedActor {
   }
 
   void PullMailboxAndRun() override {
-    if (user_class_instance_ == nullptr) [[unlikely]] {
+    // Note: user_class_instance_ being null can mean either (a) "not yet constructed" -- the first
+    // mailbox message will perform construction -- or (b) "already destroyed". Distinguish via
+    // pending_to_be_destroyed_, which is only set in the destruction path.
+    if (pending_to_be_destroyed_.load(std::memory_order_acquire) && user_class_instance_ == nullptr) [[unlikely]] {
       // already destroyed
       size_t remaining = pending_message_count_.load(std::memory_order_acquire);
       log::Warn("{} is already destroyed, but triggered again, it has {} messages remaining", Description(), remaining);

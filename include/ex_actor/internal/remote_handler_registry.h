@@ -54,7 +54,8 @@ class RemoteActorRequestHandlerRegistry {
 
   using RemoteActorMethodCallHandler =
       std::function<ex::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
-  using RemoteActorCreationHandler = std::function<ActorCreationResult(RemoteActorCreationHandlerContext context)>;
+  using RemoteActorCreationHandler =
+      std::function<ex::task<ActorCreationResult>(RemoteActorCreationHandlerContext context)>;
 
   void RegisterRemoteActorMethodCallHandler(uint64_t handler_key, RemoteActorMethodCallHandler func) {
     EXA_THROW_CHECK(!remote_actor_method_call_handler_.contains(handler_key))
@@ -125,19 +126,38 @@ class RemoteFuncHandlerRegistrar {
 
  private:
   template <auto kCreateFn>
-  RemoteActorRequestHandlerRegistry::ActorCreationResult DeserializeAndCreateActor(
+  ex::task<RemoteActorRequestHandlerRegistry::ActorCreationResult> DeserializeAndCreateActor(
       RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext context) {
     using ActorClass = Signature<decltype(kCreateFn)>::ReturnType;
     ActorCreationArgs creation_args =
         DeserializeFnArgs<kCreateFn>(context.serialized_args, context.actor_ref_serde_ctx);
-    std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, kCreateFn>::CreateUseArgTuple(
-        std::move(context.scheduler), std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
+    std::unique_ptr<TypeErasedActor> actor =
+        Actor<ActorClass, kCreateFn>::CreateShell(std::move(context.scheduler), std::move(creation_args.actor_config));
+    auto* actor_raw = static_cast<Actor<ActorClass, kCreateFn>*>(actor.get());
     auto this_node_id = context.actor_ref_serde_ctx.this_node_id;
-    auto actor_ref = ActorRef<ActorClass>(this_node_id, this_node_id, context.actor_id, actor.get(),
-                                          context.actor_ref_serde_ctx.broker_actor_ref);
-    NotifyExActorOnSpawned<ActorClass>(actor.get(), actor_ref);
+    auto actor_id = context.actor_id;
+    auto broker_ref = context.actor_ref_serde_ctx.broker_actor_ref;
+    // BasicActorRef caches the user-class instance address at construction time, so the
+    // ActorRef can only be built AFTER AsyncConstructUserInstance populates user_class_instance_.
+    std::exception_ptr captured_error;
+    try {
+      co_await (actor_raw->AsyncConstructUserInstance(std::move(creation_args.args_tuple)) |
+                ex::then([actor_raw, this_node_id, actor_id, broker_ref] {
+                  auto self = ActorRef<ActorClass>(this_node_id, this_node_id, actor_id, actor_raw, broker_ref);
+                  NotifyExActorOnSpawned<ActorClass>(actor_raw, self);
+                }));
+    } catch (...) {
+      captured_error = std::current_exception();
+    }
+    if (captured_error) {
+      // Drain the actor's simple_counting_scope before the unique_ptr unwinds, otherwise
+      // ~Actor terminates.
+      co_await actor->AsyncDestroy();
+      std::rethrow_exception(captured_error);
+    }
+    auto actor_ref = ActorRef<ActorClass>(this_node_id, this_node_id, actor_id, actor_raw, broker_ref);
     auto actor_name = actor->GetActorConfig().actor_name;
-    return {
+    co_return RemoteActorRequestHandlerRegistry::ActorCreationResult {
         .actor = std::move(actor),
         .actor_name = std::move(actor_name),
         // Workaround: see ActorRegistryBackend::DeserializeActorRef comment.

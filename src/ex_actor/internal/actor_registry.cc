@@ -65,7 +65,7 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer reque
 
   if (auto* msg = std::get_if<ActorCreationRequest>(&request.variant)) {
     ByteBuffer reply_out;
-    HandleActorCreationRequest(std::move(*msg), reply_out);
+    co_await HandleActorCreationRequest(std::move(*msg), reply_out);
     co_return reply_out;
   }
 
@@ -106,7 +106,7 @@ uint64_t ActorRegistryBackend::GenerateRandomActorId() {
 
 ByteBuffer ActorRegistryBackend::SerializeReply(const NetworkReply& reply) { return Serialize(reply); }
 
-void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out) {
+ex::task<void> ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out) {
   try {
     auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(msg.handler_key);
     ActorRefSerdeContext info {.this_node_id = this_node_id_,
@@ -118,7 +118,7 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
                                },
                                .broker_actor_ref = broker_actor_ref_};
     uint64_t actor_id = GenerateRandomActorId();
-    auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
+    auto result = co_await handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
         .serialized_args = std::move(msg.serialized_args),
         .scheduler = scheduler_->Clone(),
         .actor_ref_serde_ctx = info,
@@ -213,8 +213,12 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
       scheduler_(scheduler != nullptr ? std::move(scheduler)
                                       : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                             default_work_sharing_thread_pool_.GetScheduler())),
-      backend_actor_(scheduler_->Clone(), ActorConfig {}, scheduler_->Clone(), this_node_id_, broker_actor_ref_),
-      backend_actor_ref_(/*actor_id=*/UINT64_MAX, &backend_actor_) {
+      backend_actor_(scheduler_->Clone(), ActorConfig {}) {
+  // Bootstrap-construct the backend instance synchronously BEFORE building backend_actor_ref_:
+  // BasicActorRef caches the user-class instance address at construction time
+  // (see basic_actor_ref.h), and that address is only set once BootstrapConstructUserInstance runs.
+  backend_actor_.BootstrapConstructUserInstance(scheduler_->Clone(), this_node_id_, broker_actor_ref_);
+  backend_actor_ref_ = BasicActorRef<ActorRegistryBackend>(/*actor_id=*/UINT64_MAX, &backend_actor_);
   log::Info("ActorRegistry created, node_id={:#x}", this_node_id_);
 }
 
@@ -225,8 +229,8 @@ ex::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_co
 
   auto control_plane_scheduler = std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
       control_plane_thread_pool_.GetScheduler());
-  broker_actor_ = std::make_unique<Actor<MessageBroker>>(std::move(control_plane_scheduler), ActorConfig {},
-                                                         this_node_id_, cluster_config);
+  broker_actor_ = std::make_unique<Actor<MessageBroker>>(std::move(control_plane_scheduler), ActorConfig {});
+  broker_actor_->BootstrapConstructUserInstance(this_node_id_, cluster_config);
 
   broker_actor_ref_ = BasicActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
   NotifyExActorOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);

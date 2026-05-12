@@ -40,7 +40,7 @@ namespace ex_actor::internal {
  */
 class ActorRegistryBackend {
  public:
-  explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint64_t this_node_id,
+  explicit ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> user_actor_scheduler, uint64_t this_node_id,
                                 BasicActorRef<MessageBroker> broker_actor_ref);
 
   ex::task<void> AsyncDestroyAllActors();
@@ -176,7 +176,8 @@ class ActorRegistryBackend {
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
   ActorRef<UserClass> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
     auto actor_id = GenerateRandomActorId();
-    auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(scheduler_->Clone(), config, std::move(args)...);
+    auto actor =
+        std::make_unique<Actor<UserClass, kCreateFn>>(user_actor_scheduler_->Clone(), config, std::move(args)...);
     auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor.get(), broker_actor_ref_);
     NotifyExActorOnSpawned<UserClass>(actor.get(), handle);
     if (config.actor_name.has_value()) {
@@ -191,7 +192,7 @@ class ActorRegistryBackend {
   }
 
   std::mt19937 random_num_generator_;
-  std::unique_ptr<TypeErasedActorScheduler> scheduler_;
+  std::unique_ptr<TypeErasedActorScheduler> user_actor_scheduler_;
   uint64_t this_node_id_ = 0;
   BasicActorRef<MessageBroker> broker_actor_ref_;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
@@ -372,8 +373,9 @@ class ActorRegistry {
  private:
   uint64_t this_node_id_;
   WorkSharingThreadPool default_work_sharing_thread_pool_;
-  WorkSharingThreadPool control_plane_thread_pool_;
-  std::unique_ptr<TypeErasedActorScheduler> scheduler_;
+  WorkSharingThreadPool system_actor_thread_pool_;
+  std::unique_ptr<TypeErasedActorScheduler> system_actor_scheduler_;
+  std::unique_ptr<TypeErasedActorScheduler> user_actor_scheduler_;
   std::unique_ptr<Actor<MessageBroker>> broker_actor_;
   BasicActorRef<MessageBroker> broker_actor_ref_;
   Actor<ActorRegistryBackend> backend_actor_;

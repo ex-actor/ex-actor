@@ -26,9 +26,11 @@
 namespace ex_actor::internal {
 
 // ----------------------ActorRegistryBackend--------------------------
-ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> scheduler, uint64_t this_node_id,
-                                           BasicActorRef<MessageBroker> broker_actor_ref)
-    : scheduler_(std::move(scheduler)), this_node_id_(this_node_id), broker_actor_ref_(broker_actor_ref) {
+ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorScheduler> user_actor_scheduler,
+                                           uint64_t this_node_id, BasicActorRef<MessageBroker> broker_actor_ref)
+    : user_actor_scheduler_(std::move(user_actor_scheduler)),
+      this_node_id_(this_node_id),
+      broker_actor_ref_(broker_actor_ref) {
   InitRandomNumGenerator();
 }
 
@@ -120,7 +122,7 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
     uint64_t actor_id = GenerateRandomActorId();
     auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
         .serialized_args = std::move(msg.serialized_args),
-        .scheduler = scheduler_->Clone(),
+        .scheduler = user_actor_scheduler_->Clone(),
         .actor_ref_serde_ctx = info,
         .actor_id = actor_id});
     if (result.actor_name.has_value()) {
@@ -209,11 +211,15 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
         return gen() & 0x7FFF'FFFF'FFFF'FFFF;
       }()),
       default_work_sharing_thread_pool_(thread_pool_size),
-      control_plane_thread_pool_(/*thread_count=*/1),
-      scheduler_(scheduler != nullptr ? std::move(scheduler)
-                                      : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
-                                            default_work_sharing_thread_pool_.GetScheduler())),
-      backend_actor_(scheduler_->Clone(), ActorConfig {}, scheduler_->Clone(), this_node_id_, broker_actor_ref_),
+      system_actor_thread_pool_(/*thread_count=*/2),
+      system_actor_scheduler_(std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
+          system_actor_thread_pool_.GetScheduler())),
+      user_actor_scheduler_(scheduler != nullptr
+                                ? std::move(scheduler)
+                                : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
+                                      default_work_sharing_thread_pool_.GetScheduler())),
+      backend_actor_(system_actor_scheduler_->Clone(), ActorConfig {}, user_actor_scheduler_->Clone(), this_node_id_,
+                     broker_actor_ref_),
       backend_actor_ref_(/*actor_id=*/UINT64_MAX, &backend_actor_) {
   log::Info("ActorRegistry created, node_id={:#x}", this_node_id_);
 }
@@ -223,9 +229,7 @@ ex::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_co
   EXA_THROW_CHECK(broker_actor_ref_.IsEmpty()) << "Already in distributed mode.";
   EXA_THROW_CHECK(!cluster_config.listen_address.empty()) << "listen_address must not be empty";
 
-  auto control_plane_scheduler = std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
-      control_plane_thread_pool_.GetScheduler());
-  broker_actor_ = std::make_unique<Actor<MessageBroker>>(std::move(control_plane_scheduler), ActorConfig {},
+  broker_actor_ = std::make_unique<Actor<MessageBroker>>(system_actor_scheduler_->Clone(), ActorConfig {},
                                                          this_node_id_, cluster_config);
 
   broker_actor_ref_ = BasicActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());

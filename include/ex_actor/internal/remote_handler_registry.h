@@ -39,6 +39,7 @@ class RemoteActorRequestHandlerRegistry {
     TypeErasedActor* actor;
     ByteBuffer serialized_args;
     ActorRefSerdeContext actor_ref_serde_ctx;
+    size_t mailbox_index = 0;
   };
   struct RemoteActorCreationHandlerContext {
     ByteBuffer serialized_args;
@@ -164,11 +165,12 @@ class RemoteFuncHandlerRegistrar {
     auto* adjusted_ptr = static_cast<MethodClass*>(actual_class_ptr);
 
     if constexpr (std::is_void_v<UnwrappedType>) {
-      co_await CallActorMethodUseTuple<kMethod>(context.actor, adjusted_ptr, std::move(call_args.args_tuple));
+      co_await CallActorMethodUseTuple<kMethod>(context.actor, adjusted_ptr, std::move(call_args.args_tuple),
+                                                context.mailbox_index);
       co_return NetworkReply {ActorMethodCallReply {.success = true}};
     } else {
-      auto return_value =
-          co_await CallActorMethodUseTuple<kMethod>(context.actor, adjusted_ptr, std::move(call_args.args_tuple));
+      auto return_value = co_await CallActorMethodUseTuple<kMethod>(
+          context.actor, adjusted_ptr, std::move(call_args.args_tuple), context.mailbox_index);
       co_return NetworkReply {ActorMethodCallReply {
           .success = true,
           .serialized_result = Serialize(ActorMethodReturnValue<UnwrappedType> {std::move(return_value)})}};

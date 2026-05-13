@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <tuple>
 #include <type_traits>

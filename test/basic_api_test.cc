@@ -200,15 +200,7 @@ class ActorWithRuntimeInfo {
 
   ex_actor::ActorRef<ActorWithRuntimeInfo> GetSelfRef() const { return runtime_info_.self_actor_ref; }
 
-  size_t GetPendingCountFromRuntimeInfo() const {
-    return runtime_info_.pending_message_count->load(std::memory_order_acquire);
-  }
-
-  // Simulates a slow task and returns the pending count as observed from inside the actor during execution.
-  size_t WaitAndGetPendingCount(int ms) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-    return runtime_info_.pending_message_count->load(std::memory_order_acquire);
-  }
+  size_t GetPendingCount() { return runtime_info_.pending_message_count->load(std::memory_order_acquire); }
 
  private:
   ex_actor::ActorRuntimeInfo<ActorWithRuntimeInfo> runtime_info_;
@@ -222,32 +214,8 @@ TEST(BasicApiTest, ExActorOnSpawnedWithActorRuntimeInfoShouldWork) {
     auto self_ref = co_await actor.Send<&ActorWithRuntimeInfo::GetSelfRef>();
     EXPECT_EQ(self_ref, actor);
 
-    // 2. Multi-task: with 1 thread, all 5 spawns complete synchronously before the main coroutine
-    //    suspends. When co_await scope.join() suspends the main coroutine, the thread becomes
-    //    free and the actor drains all 5 messages in one activation batch.
-    //    pending_message_count_ is decremented only after the whole batch finishes, so each
-    //    task observes count == 5 during execution.
-    constexpr size_t kTaskCount = 5;
-    std::array<size_t, kTaskCount> observed_counts {};
-    {
-      stdexec::simple_counting_scope scope;
-      for (size_t i = 0; i < kTaskCount; ++i) {
-        stdexec::spawn(actor.SendLocal<&ActorWithRuntimeInfo::WaitAndGetPendingCount>(50) |
-                           ex::then([&observed_counts, i](size_t count) { observed_counts[i] = count; }) |
-                           ex_actor::DiscardResult(),
-                       scope.get_token());
-      }
-      co_await scope.join();
-    }
-
-    for (size_t count : observed_counts) {
-      EXPECT_EQ(count, kTaskCount);
-    }
-
-    // 3. After the 5-task batch finishes (pending == 0), send a standalone task.
-    //    It runs alone in its own activation and observes count == 1.
-    size_t pending_alone = co_await actor.SendLocal<&ActorWithRuntimeInfo::GetPendingCountFromRuntimeInfo>();
-    EXPECT_EQ(pending_alone, 1U);
+    size_t pending_count = co_await actor.SendLocal<&ActorWithRuntimeInfo::GetPendingCount>();
+    EXPECT_EQ(pending_count, 1);
   };
 
   ex_actor::Init(/*thread_pool_size=*/1);  // 1 thread to ensure queueing

@@ -2,6 +2,8 @@
 #include <barrier>
 #include <exception>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 

@@ -18,14 +18,25 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <variant>
+#include <vector>
 
 #include <stdexec/execution.hpp>
 
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 
 namespace ex_actor {
+
+struct UnboundedThreadSafeMailbox {};
+struct UnsafeOneSlotMailbox {};
+using MailboxConfig = std::variant<UnboundedThreadSafeMailbox, UnsafeOneSlotMailbox>;
+
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
+
+  // If empty, one default UnboundedThreadSafeMailbox will be used.
+  // Otherwise, the size of this vector is the number of mailboxes the actor has.
+  std::vector<MailboxConfig> mailbox_configs;
 
   /**
    * @brief Actor's name, should be unique within one node.

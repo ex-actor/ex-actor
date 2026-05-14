@@ -55,9 +55,11 @@ inline constexpr char kDefaultLoggerPattern[] = "[%^%L%$%Y-%m-%d %T.%e%z %P/%t %
 
 spdlog::level::level_enum ToSpdlogLevel(LogLevel level);
 
-std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const LogConfig& config);
+std::shared_ptr<spdlog::logger> CreateLoggerUsingConfig(const LogConfig& config);
 
-std::unique_ptr<spdlog::logger>& GlobalLogger();
+std::shared_ptr<spdlog::logger> GlobalLogger();
+
+void SetGlobalLogger(std::shared_ptr<spdlog::logger> logger);
 
 void InstallFallbackExceptionHandler();
 

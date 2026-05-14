@@ -1,5 +1,8 @@
 #include "ex_actor/internal/logging.h"
 
+#include <atomic>
+#include <memory>
+
 #include <spdlog/spdlog.h>
 
 #include "spdlog/sinks/basic_file_sink.h"
@@ -24,13 +27,20 @@ spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
   EXA_THROW << "Invalid log level: " << level;
 }
 
-std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const ex_actor::LogConfig& config) {
+namespace {
+std::shared_ptr<spdlog::logger>& GlobalLoggerStorage() {
+  static std::shared_ptr<spdlog::logger> global_logger = CreateLoggerUsingConfig({});
+  return global_logger;
+}
+}  // namespace
+
+std::shared_ptr<spdlog::logger> CreateLoggerUsingConfig(const ex_actor::LogConfig& config) {
   constexpr char kLoggerName[] = "ex_actor";
-  std::unique_ptr<spdlog::logger> logger;
+  std::shared_ptr<spdlog::logger> logger;
   if (config.log_file_path.empty()) {
-    logger = std::make_unique<spdlog::logger>(kLoggerName, std::make_unique<spdlog::sinks::stdout_color_sink_mt>());
+    logger = std::make_shared<spdlog::logger>(kLoggerName, std::make_unique<spdlog::sinks::stdout_color_sink_mt>());
   } else {
-    logger = std::make_unique<spdlog::logger>(
+    logger = std::make_shared<spdlog::logger>(
         kLoggerName, std::make_unique<spdlog::sinks::basic_file_sink_mt>(config.log_file_path));
   }
   logger->set_level(ToSpdlogLevel(config.level));
@@ -38,9 +48,12 @@ std::unique_ptr<spdlog::logger> CreateLoggerUsingConfig(const ex_actor::LogConfi
   return logger;
 }
 
-std::unique_ptr<spdlog::logger>& GlobalLogger() {
-  static std::unique_ptr<spdlog::logger> global_logger = CreateLoggerUsingConfig({});
-  return global_logger;
+std::shared_ptr<spdlog::logger> GlobalLogger() {
+  return std::atomic_load_explicit(&GlobalLoggerStorage(), std::memory_order_acquire);
+}
+
+void SetGlobalLogger(std::shared_ptr<spdlog::logger> logger) {
+  std::atomic_store_explicit(&GlobalLoggerStorage(), std::move(logger), std::memory_order_release);
 }
 
 void InstallFallbackExceptionHandler() {

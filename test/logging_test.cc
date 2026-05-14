@@ -1,9 +1,12 @@
 #include "ex_actor/internal/logging.h"
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -143,4 +146,143 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
 
   // Clean up
   CleanupLogFile(log_file);
+}
+
+// Test 4: ConfigureLogging() should be thread-safe with concurrent logging.
+TEST(LoggingTest, ConfigureLoggingConcurrentWithSharedLoggerUsage) {
+  const std::string log_file_1 = "test_log_4_1.txt";
+  const std::string log_file_2 = "test_log_4_2.txt";
+
+  CleanupLogFile(log_file_1);
+  CleanupLogFile(log_file_2);
+
+  ex_actor::ConfigureLogging({
+      .level = ex_actor::LogLevel::kInfo,
+      .log_file_path = log_file_1,
+  });
+
+  std::atomic<bool> stop = false;
+  std::atomic<int> write_count = 0;
+
+  std::thread writer([&]() {
+    while (!stop.load(std::memory_order_relaxed)) {
+      auto logger = ex_actor::internal::GlobalLogger();
+      std::this_thread::yield();
+      logger->info("concurrent log {}", write_count.fetch_add(1, std::memory_order_relaxed));
+    }
+  });
+
+  for (int i = 0; i < 200000; ++i) {
+    ex_actor::ConfigureLogging({
+        .level = ex_actor::LogLevel::kInfo,
+        .log_file_path = (i % 2 == 0) ? log_file_1 : log_file_2,
+    });
+  }
+
+  stop.store(true, std::memory_order_relaxed);
+  writer.join();
+
+  ex_actor::internal::GlobalLogger()->flush();
+
+  // A thread-safe implementation should preserve writer progress.
+  EXPECT_GT(write_count.load(std::memory_order_relaxed), 0);
+
+  CleanupLogFile(log_file_1);
+  CleanupLogFile(log_file_2);
+}
+
+// Test 5: Stronger stress test with multiple writers and multiple reconfiguration threads.
+TEST(LoggingTest, ConfigureLoggingHighContentionStress) {
+  const std::string log_file_1 = "test_log_5_1.txt";
+  const std::string log_file_2 = "test_log_5_2.txt";
+  const std::string log_file_3 = "test_log_5_3.txt";
+
+  CleanupLogFile(log_file_1);
+  CleanupLogFile(log_file_2);
+  CleanupLogFile(log_file_3);
+
+  ex_actor::ConfigureLogging({
+      .level = ex_actor::LogLevel::kInfo,
+      .log_file_path = log_file_1,
+  });
+
+  constexpr int kWriterThreadCount = 6;
+  constexpr int kWriterIterationsPerThread = 100000;
+  constexpr int kConfigThreadCount = 3;
+  constexpr int kConfigIterationsPerThread = 80000;
+
+  std::atomic<bool> start = false;
+  std::atomic<int> total_writes = 0;
+  std::atomic<int> total_reconfigurations = 0;
+
+  std::vector<std::thread> threads;
+  threads.reserve(kWriterThreadCount + kConfigThreadCount);
+
+  for (int writer_id = 0; writer_id < kWriterThreadCount; ++writer_id) {
+    threads.emplace_back([&, writer_id]() {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+
+      for (int i = 0; i < kWriterIterationsPerThread; ++i) {
+        auto logger = ex_actor::internal::GlobalLogger();
+        logger->info("stress writer={} seq={}", writer_id, i);
+        total_writes.fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  for (int config_id = 0; config_id < kConfigThreadCount; ++config_id) {
+    threads.emplace_back([&, config_id]() {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+
+      for (int i = 0; i < kConfigIterationsPerThread; ++i) {
+        const int seq = total_reconfigurations.fetch_add(1, std::memory_order_relaxed);
+        const std::string* target_file = &log_file_1;
+        if ((seq % 3) == 1) {
+          target_file = &log_file_2;
+        } else if ((seq % 3) == 2) {
+          target_file = &log_file_3;
+        }
+        ex_actor::ConfigureLogging({
+            .level = ex_actor::LogLevel::kInfo,
+            .log_file_path = *target_file,
+        });
+        if ((i % 4096) == 0) {
+          ex_actor::internal::GlobalLogger()->flush();
+        }
+      }
+
+      if (config_id == 0) {
+        ex_actor::ConfigureLogging({
+            .level = ex_actor::LogLevel::kInfo,
+            .log_file_path = log_file_1,
+        });
+      }
+    });
+  }
+
+  start.store(true, std::memory_order_release);
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  ex_actor::internal::GlobalLogger()->flush();
+
+  EXPECT_EQ(total_writes.load(std::memory_order_relaxed), kWriterThreadCount * kWriterIterationsPerThread);
+  EXPECT_EQ(total_reconfigurations.load(std::memory_order_relaxed), kConfigThreadCount * kConfigIterationsPerThread);
+
+  const std::string log_1_contents = ReadFile(log_file_1);
+  const std::string log_2_contents = ReadFile(log_file_2);
+  const std::string log_3_contents = ReadFile(log_file_3);
+
+  EXPECT_TRUE(!log_1_contents.empty() || !log_2_contents.empty() || !log_3_contents.empty())
+      << "At least one stress log file should contain log lines.";
+
+  CleanupLogFile(log_file_1);
+  CleanupLogFile(log_file_2);
+  CleanupLogFile(log_file_3);
 }

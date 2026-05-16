@@ -45,8 +45,7 @@ stdexec::task<void> MainCoroutine(int argc, char** argv) {
       /*timeout_ms=*/5000);
   EXA_THROW_CHECK(condition_met) << "Cannot find peer node with name " << peer_node_name;
 
-  auto it = std::ranges::find_if(cluster_state.nodes,
-                                 [&](const auto& n) { return n.node_name == peer_node_name; });
+  auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.node_name == peer_node_name; });
   EXA_THROW_CHECK(it != cluster_state.nodes.end()) << "Cannot find peer node with name " << peer_node_name;
   auto remote_node_id = it->node_id;
 

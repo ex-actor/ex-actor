@@ -361,6 +361,85 @@ TEST(MailboxTest, ShouldActivateHookPerMailboxGating) {
   ex_actor::Shutdown();
 }
 
+// ===========================
+// Bounded Thread-Safe Mailbox Tests
+// ===========================
+
+TEST(MailboxTest, BoundedRingMailboxBasic) {
+  auto coroutine = []() -> stdexec::task<void> {
+    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*box_size=*/16}}};
+    auto actor = co_await ex_actor::Spawn<BoundedQueueActor>().WithConfig(config);
+
+    co_await actor.SendLocal<&BoundedQueueActor::Increment>();
+    co_await actor.SendLocal<&BoundedQueueActor::Increment>();
+    co_await actor.SendLocal<&BoundedQueueActor::Increment>();
+
+    int count = co_await actor.SendLocal<&BoundedQueueActor::GetCount>();
+    EXPECT_EQ(count, 3);
+  };
+  ex_actor::Init(/*thread_pool_size=*/4);
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
+
+TEST(MailboxTest, BoundedRingMailboxWithReturnValue) {
+  auto coroutine = []() -> stdexec::task<void> {
+    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*box_size=*/16}}};
+    auto actor = co_await ex_actor::Spawn<BoundedQueueActor>().WithConfig(config);
+
+    int result = co_await actor.Send<&BoundedQueueActor::Add>(10);
+    EXPECT_EQ(result, 10);
+
+    result = co_await actor.Send<&BoundedQueueActor::Add>(20);
+    EXPECT_EQ(result, 30);
+  };
+  ex_actor::Init(/*thread_pool_size=*/4);
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
+
+TEST(MailboxTest, BoundedRingMailboxMultipleMailboxes) {
+  auto coroutine = []() -> stdexec::task<void> {
+    ex_actor::ActorConfig config {.mailbox_configs = {
+                                      ex_actor::BoundedRingMailbox {/*box_size=*/16},
+                                      ex_actor::BoundedRingMailbox {/*box_size=*/16},
+                                  }};
+    auto actor = co_await ex_actor::Spawn<MultiMailboxActor>().WithConfig(config);
+
+    co_await actor.Mailbox(0).SendLocal<&MultiMailboxActor::Append>("bounded_mb0");
+    co_await actor.Mailbox(1).SendLocal<&MultiMailboxActor::Append>("bounded_mb1");
+
+    auto log = co_await actor.SendLocal<&MultiMailboxActor::GetLog>();
+    EXPECT_EQ(log.size(), 2U);
+    EXPECT_EQ(log[0], "bounded_mb0");
+    EXPECT_EQ(log[1], "bounded_mb1");
+  };
+  ex_actor::Init(/*thread_pool_size=*/4);
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
+
+TEST(MailboxTest, BoundedRingMailboxMixedWithUnbounded) {
+  auto coroutine = []() -> stdexec::task<void> {
+    ex_actor::ActorConfig config {.mailbox_configs = {
+                                      ex_actor::UnboundedThreadSafeMailbox {},
+                                      ex_actor::BoundedRingMailbox {/*box_size=*/16},
+                                  }};
+    auto actor = co_await ex_actor::Spawn<MultiMailboxActor>().WithConfig(config);
+
+    co_await actor.Mailbox(0).SendLocal<&MultiMailboxActor::Append>("unbounded_mb0");
+    co_await actor.Mailbox(1).SendLocal<&MultiMailboxActor::Append>("bounded_mb1");
+
+    auto log = co_await actor.SendLocal<&MultiMailboxActor::GetLog>();
+    EXPECT_EQ(log.size(), 2U);
+    EXPECT_EQ(log[0], "unbounded_mb0");
+    EXPECT_EQ(log[1], "bounded_mb1");
+  };
+  ex_actor::Init(/*thread_pool_size=*/4);
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
+
 TEST(MailboxTest, NestedActorDelegatesToChildMailboxes) {
   auto coroutine = []() -> stdexec::task<void> {
     ex_actor::ActorConfig child_config {

@@ -181,11 +181,13 @@ class MailboxSet {
     }
     for (const auto& cfg : configs) {
       std::visit(
-          [&]<class T>(const T&) {
+          [&]<class T>(const T& mailbox_cfg) {
             if constexpr (std::is_same_v<T, UnboundedThreadSafeMailbox>) {
               mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<ActorMessage*>>);
             } else if constexpr (std::is_same_v<T, UnsafeOneSlotMailbox>) {
               mailboxes_.EmplaceBack(std::in_place_type<OneSlotUnsafeQueue<ActorMessage*>>);
+            } else if constexpr (std::is_same_v<T, BoundedRingMailbox>) {
+              mailboxes_.EmplaceBack(std::in_place_type<BoundedMpscQueue<ActorMessage*>>, mailbox_cfg.box_size);
             }
           },
           cfg);
@@ -210,7 +212,8 @@ class MailboxSet {
  private:
   // The MPSC queue's move/copy are deleted, which makes the variant non-movable. That's fine
   // here because FixedCapacityBuffer constructs elements in place and never relocates them.
-  using MailboxStorage = std::variant<LinearizableUnboundedMpscQueue<ActorMessage*>, OneSlotUnsafeQueue<ActorMessage*>>;
+  using MailboxStorage = std::variant<LinearizableUnboundedMpscQueue<ActorMessage*>, OneSlotUnsafeQueue<ActorMessage*>,
+                                      BoundedMpscQueue<ActorMessage*>>;
 
   FixedCapacityBuffer<MailboxStorage> mailboxes_;
 };

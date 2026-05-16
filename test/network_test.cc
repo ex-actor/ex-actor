@@ -279,10 +279,9 @@ TEST(MessageBrokerTest, NodeNameFromGossipAppearsOnPeerNodeInfo) {
   auto config = MakeConfig("tcp://127.0.0.1:7266");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = 99999,
-                           .node_id = 1,
-                           .address = "tcp://127.0.0.1:7267",
-                           .node_name = "worker-1"}});
+  DispatchGossip(
+      broker,
+      {{.last_seen_timestamp_ms = 99999, .node_id = 1, .address = "tcp://127.0.0.1:7267", .node_name = "worker-1"}});
 
   auto [result] = stdexec::sync_wait(broker.WaitClusterState(
                                          [](const ex_actor::ClusterState& state) {
@@ -305,10 +304,9 @@ TEST(MessageBrokerTest, GossipWithConflictingNodeNameThrows) {
   auto config = MakeConfig("tcp://127.0.0.1:7268");
   ex_actor::internal::MessageBroker broker(/*this_node_id=*/0, config);
 
-  DispatchGossip(broker, {{.last_seen_timestamp_ms = 100,
-                           .node_id = 1,
-                           .address = "tcp://127.0.0.1:7269",
-                           .node_name = "worker-1"}});
+  DispatchGossip(
+      broker,
+      {{.last_seen_timestamp_ms = 100, .node_id = 1, .address = "tcp://127.0.0.1:7269", .node_name = "worker-1"}});
 
   EXPECT_THAT(
       [&]() {

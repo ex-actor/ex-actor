@@ -29,7 +29,11 @@ namespace ex_actor {
 
 struct UnboundedThreadSafeMailbox {};
 struct UnsafeOneSlotMailbox {};
-using MailboxConfig = std::variant<UnboundedThreadSafeMailbox, UnsafeOneSlotMailbox>;
+struct BoundedRingMailbox {
+  // Actual capacity will be rounded up to the next power of 2 by BoundedMpscQueue.
+  size_t box_size;
+};
+using MailboxConfig = std::variant<UnboundedThreadSafeMailbox, UnsafeOneSlotMailbox, BoundedRingMailbox>;
 
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;

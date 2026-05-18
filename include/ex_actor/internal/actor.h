@@ -179,18 +179,18 @@ class MailboxSet {
  public:
   explicit MailboxSet(const std::vector<MailboxConfig>& configs) : mailboxes_(configs.empty() ? 1 : configs.size()) {
     if (configs.empty()) {
-      // Per ActorConfig::mailbox_configs contract: empty means one default UnboundedThreadSafeMailbox.
+      // Per ActorConfig::mailbox_configs contract: empty means one default UnboundedMailbox.
       mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<ActorMessage*>>);
       return;
     }
     for (const auto& cfg : configs) {
       std::visit(
           [&]<class T>(const T& mailbox_cfg) {
-            if constexpr (std::is_same_v<T, UnboundedThreadSafeMailbox>) {
+            if constexpr (std::is_same_v<T, UnboundedMailbox>) {
               mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<ActorMessage*>>);
             } else if constexpr (std::is_same_v<T, UnsafeOneSlotMailbox>) {
               mailboxes_.EmplaceBack(std::in_place_type<OneSlotUnsafeQueue<ActorMessage*>>);
-            } else if constexpr (std::is_same_v<T, BoundedRingMailbox>) {
+            } else if constexpr (std::is_same_v<T, BoundedMailbox>) {
               mailboxes_.EmplaceBack(std::in_place_type<BoundedMpscQueue<ActorMessage*>>, mailbox_cfg.capacity);
             }
           },

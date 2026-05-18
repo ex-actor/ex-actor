@@ -31,7 +31,7 @@ struct UnboundedThreadSafeMailbox {};
 struct UnsafeOneSlotMailbox {};
 struct BoundedRingMailbox {
   // Actual capacity will be rounded up to the next power of 2 by BoundedMpscQueue.
-  size_t box_size;
+  size_t capacity;
 };
 using MailboxConfig = std::variant<UnboundedThreadSafeMailbox, UnsafeOneSlotMailbox, BoundedRingMailbox>;
 

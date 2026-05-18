@@ -368,7 +368,7 @@ TEST(MailboxTest, ShouldActivateHookPerMailboxGating) {
 
 TEST(MailboxTest, BoundedRingMailboxBasic) {
   auto coroutine = []() -> stdexec::task<void> {
-    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*box_size=*/16}}};
+    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*capacity=*/16}}};
     auto actor = co_await ex_actor::Spawn<BoundedQueueActor>().WithConfig(config);
 
     co_await actor.SendLocal<&BoundedQueueActor::Increment>();
@@ -385,7 +385,7 @@ TEST(MailboxTest, BoundedRingMailboxBasic) {
 
 TEST(MailboxTest, BoundedRingMailboxWithReturnValue) {
   auto coroutine = []() -> stdexec::task<void> {
-    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*box_size=*/16}}};
+    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*capacity=*/16}}};
     auto actor = co_await ex_actor::Spawn<BoundedQueueActor>().WithConfig(config);
 
     int result = co_await actor.Send<&BoundedQueueActor::Add>(10);
@@ -402,8 +402,8 @@ TEST(MailboxTest, BoundedRingMailboxWithReturnValue) {
 TEST(MailboxTest, BoundedRingMailboxMultipleMailboxes) {
   auto coroutine = []() -> stdexec::task<void> {
     ex_actor::ActorConfig config {.mailbox_configs = {
-                                      ex_actor::BoundedRingMailbox {/*box_size=*/16},
-                                      ex_actor::BoundedRingMailbox {/*box_size=*/16},
+                                      ex_actor::BoundedRingMailbox {/*capacity=*/16},
+                                      ex_actor::BoundedRingMailbox {/*capacity=*/16},
                                   }};
     auto actor = co_await ex_actor::Spawn<MultiMailboxActor>().WithConfig(config);
 
@@ -424,7 +424,7 @@ TEST(MailboxTest, BoundedRingMailboxMixedWithUnbounded) {
   auto coroutine = []() -> stdexec::task<void> {
     ex_actor::ActorConfig config {.mailbox_configs = {
                                       ex_actor::UnboundedThreadSafeMailbox {},
-                                      ex_actor::BoundedRingMailbox {/*box_size=*/16},
+                                      ex_actor::BoundedRingMailbox {/*capacity=*/16},
                                   }};
     auto actor = co_await ex_actor::Spawn<MultiMailboxActor>().WithConfig(config);
 
@@ -501,8 +501,8 @@ TEST(MailboxTest, UnsafeOneSlotMailboxFullQueueThrows) {
 TEST(MailboxTest, BoundedRingMailboxFullQueueThrows) {
   BlockingActor::State state;
   auto coroutine = [&state]() -> stdexec::task<void> {
-    // box_size=2 → actual capacity=2 (bit_ceil(2)=2).
-    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*box_size=*/2}}};
+    // capacity=2 → actual capacity=2 (bit_ceil(2)=2).
+    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*capacity=*/2}}};
     auto actor = co_await ex_actor::Spawn<BlockingActor>(&state).WithConfig(config);
 
     // Actor picks up BlockUntilReleased and spins — queue is now empty and actor is busy.

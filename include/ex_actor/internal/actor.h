@@ -191,7 +191,7 @@ class MailboxSet {
             } else if constexpr (std::is_same_v<T, UnsafeOneSlotMailbox>) {
               mailboxes_.EmplaceBack(std::in_place_type<OneSlotUnsafeQueue<ActorMessage*>>);
             } else if constexpr (std::is_same_v<T, BoundedRingMailbox>) {
-              mailboxes_.EmplaceBack(std::in_place_type<BoundedMpscQueue<ActorMessage*>>, mailbox_cfg.box_size);
+              mailboxes_.EmplaceBack(std::in_place_type<BoundedMpscQueue<ActorMessage*>>, mailbox_cfg.capacity);
             }
           },
           cfg);

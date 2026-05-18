@@ -398,10 +398,12 @@ class BoundedMpscQueue {
   BoundedMpscQueue& operator=(const BoundedMpscQueue&) = delete;
 
   // Thread-safe: immutable after construction.
-  [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
+  [[nodiscard]] std::size_t Capacity() const noexcept { return capacity_; }
 
   // Only safe to call from the consumer thread.
-  [[nodiscard]] std::size_t size() const noexcept {
+  // No underflow risk: the consumer owns dequeue_pos_ and enqueue_pos_ >= dequeue_pos_ is
+  // invariant from the consumer's perspective.
+  [[nodiscard]] std::size_t Size() const noexcept {
     return enqueue_pos_.load(std::memory_order::acquire) - dequeue_pos_;
   }
 
@@ -445,16 +447,18 @@ class BoundedMpscQueue {
     cell_t* cell = &buffer_[dequeue_pos_ & mask_];
     std::size_t seq = cell->sequence.load(std::memory_order::acquire);
     auto diff = static_cast<std::ptrdiff_t>(seq) - static_cast<std::ptrdiff_t>(dequeue_pos_ + 1);
-    if (diff != 0) [[unlikely]] {
+    if (diff < 0) [[unlikely]] {
       return false;  // queue empty
     }
+    // diff > 0 should never happen with a single consumer.
+    EXA_THROW_CHECK(diff == 0) << "BoundedMpscQueue: unexpected sequence state in Pop, diff=" << diff;
     data = std::move(cell->data);
     cell->sequence.store(dequeue_pos_ + capacity_, std::memory_order::release);
     ++dequeue_pos_;
     return true;
   }
 
-  struct cell_t {
+  struct alignas(kCacheLineSize) cell_t {
     std::atomic<std::size_t> sequence;
     T data;
   };

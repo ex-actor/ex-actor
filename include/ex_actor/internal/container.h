@@ -364,7 +364,7 @@ class OneSlotUnsafeQueue {
 // push() is thread-safe for concurrent producers.
 // pop() / try_pop() must be called by exactly one consumer thread.
 template <typename T>
-  requires std::is_nothrow_move_assignable_v<T> || std::is_copy_assignable_v<T>
+  requires std::is_nothrow_move_assignable_v<T>
 class BoundedMpscQueue {
  public:
 // GCC warns that hardware_destructive_interference_size may vary with -mtune;
@@ -403,29 +403,6 @@ class BoundedMpscQueue {
 
   // Thread-safe: multiple producers may call concurrently.
   // Returns false if the queue is full.
-  template <typename U>
-    requires std::convertible_to<U, T>
-  bool push(U&& data) {
-    std::size_t pos = enqueue_pos_.load(std::memory_order::relaxed);
-    cell_t* cell;
-    for (;;) {
-      cell = &buffer_[pos & mask_];
-      std::size_t seq = cell->sequence.load(std::memory_order::acquire);
-      auto diff = static_cast<std::ptrdiff_t>(seq) - static_cast<std::ptrdiff_t>(pos);
-      if (diff == 0) {
-        if (enqueue_pos_.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed)) [[likely]] {
-          break;
-        }
-      } else if (diff < 0) {
-        return false;  // queue full
-      } else {
-        pos = enqueue_pos_.load(std::memory_order::relaxed);
-      }
-    }
-    cell->data = std::forward<U>(data);
-    cell->sequence.store(pos + 1, std::memory_order::release);
-    return true;
-  }
   bool Push(T value) { return push(std::move(value)); }
 
   // Single consumer only. Returns false if the queue is empty.
@@ -452,6 +429,30 @@ class BoundedMpscQueue {
   }
 
  private:
+  template <typename U>
+    requires std::convertible_to<U, T> && std::is_nothrow_assignable_v<T&, U&&>
+  bool push(U&& data) {
+    std::size_t pos = enqueue_pos_.load(std::memory_order::relaxed);
+    cell_t* cell;
+    for (;;) {
+      cell = &buffer_[pos & mask_];
+      std::size_t seq = cell->sequence.load(std::memory_order::acquire);
+      auto diff = static_cast<std::ptrdiff_t>(seq) - static_cast<std::ptrdiff_t>(pos);
+      if (diff == 0) {
+        if (enqueue_pos_.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed)) [[likely]] {
+          break;
+        }
+      } else if (diff < 0) {
+        return false;  // queue full
+      } else {
+        pos = enqueue_pos_.load(std::memory_order::relaxed);
+      }
+    }
+    cell->data = std::forward<U>(data);
+    cell->sequence.store(pos + 1, std::memory_order::release);
+    return true;
+  }
+
   struct cell_t {
     std::atomic<std::size_t> sequence;
     T data;

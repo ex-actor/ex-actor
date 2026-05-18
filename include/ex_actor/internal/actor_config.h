@@ -27,14 +27,18 @@
 
 namespace ex_actor {
 
-struct UnboundedThreadSafeMailbox {};
+struct UnboundedMailbox {};
+struct BoundedMailbox {
+  // Actual capacity will be rounded up to the next power of 2 by BoundedMpscQueue.
+  size_t capacity;
+};
 struct UnsafeOneSlotMailbox {};
-using MailboxConfig = std::variant<UnboundedThreadSafeMailbox, UnsafeOneSlotMailbox>;
+using MailboxConfig = std::variant<UnboundedMailbox, BoundedMailbox, UnsafeOneSlotMailbox>;
 
 struct ActorConfig {
   size_t max_message_executed_per_activation = 100;
 
-  // If empty, one default UnboundedThreadSafeMailbox will be used.
+  // If empty, one default UnboundedMailbox will be used.
   // Otherwise, the size of this vector is the number of mailboxes the actor has.
   std::vector<MailboxConfig> mailbox_configs;
 

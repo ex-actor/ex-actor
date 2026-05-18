@@ -131,7 +131,11 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
     void start() noexcept {
       // According to the standard, the operation state will be alive until the task is executed,
       // so it's safe to push `this`.
-      actor->PushMessage(this, mailbox_index);
+      try {
+        actor->PushMessage(this, mailbox_index);
+      } catch (...) {
+        receiver.set_error(std::current_exception());
+      }
     }
   };
 
@@ -175,17 +179,19 @@ class MailboxSet {
  public:
   explicit MailboxSet(const std::vector<MailboxConfig>& configs) : mailboxes_(configs.empty() ? 1 : configs.size()) {
     if (configs.empty()) {
-      // Per ActorConfig::mailbox_configs contract: empty means one default UnboundedThreadSafeMailbox.
+      // Per ActorConfig::mailbox_configs contract: empty means one default UnboundedMailbox.
       mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<ActorMessage*>>);
       return;
     }
     for (const auto& cfg : configs) {
       std::visit(
-          [&]<class T>(const T&) {
-            if constexpr (std::is_same_v<T, UnboundedThreadSafeMailbox>) {
+          [&]<class T>(const T& mailbox_cfg) {
+            if constexpr (std::is_same_v<T, UnboundedMailbox>) {
               mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<ActorMessage*>>);
             } else if constexpr (std::is_same_v<T, UnsafeOneSlotMailbox>) {
               mailboxes_.EmplaceBack(std::in_place_type<OneSlotUnsafeQueue<ActorMessage*>>);
+            } else if constexpr (std::is_same_v<T, BoundedMailbox>) {
+              mailboxes_.EmplaceBack(std::in_place_type<BoundedMpscQueue<ActorMessage*>>, mailbox_cfg.capacity);
             }
           },
           cfg);
@@ -210,7 +216,8 @@ class MailboxSet {
  private:
   // The MPSC queue's move/copy are deleted, which makes the variant non-movable. That's fine
   // here because FixedCapacityBuffer constructs elements in place and never relocates them.
-  using MailboxStorage = std::variant<LinearizableUnboundedMpscQueue<ActorMessage*>, OneSlotUnsafeQueue<ActorMessage*>>;
+  using MailboxStorage = std::variant<LinearizableUnboundedMpscQueue<ActorMessage*>, OneSlotUnsafeQueue<ActorMessage*>,
+                                      BoundedMpscQueue<ActorMessage*>>;
 
   FixedCapacityBuffer<MailboxStorage> mailboxes_;
 };

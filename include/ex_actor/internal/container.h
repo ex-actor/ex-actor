@@ -14,13 +14,18 @@
 
 #pragma once
 
+#include <atomic>
+#include <bit>
+#include <concepts>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <optional>
 #include <queue>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -355,6 +360,120 @@ class OneSlotUnsafeQueue {
   bool has_value_ = false;
 };
 
+// Multiple Producer Single Consumer bounded ring buffer.
+// Push() is thread-safe for concurrent producers.
+// Pop() / TryPop() must be called by exactly one consumer thread.
+// This implementation is inspired by Dmitry Vyukov's MPMC bounded queue adapted here as a
+// single-consumer variant with C++20 idioms.
+// (https://github.com/craflin/LockFreeQueue/blob/master/mpmc_bounded_queue.h)
+template <typename T>
+  requires std::is_nothrow_move_assignable_v<T>
+class BoundedMpscQueue {
+ public:
+// GCC warns that hardware_destructive_interference_size may vary with -mtune;
+// for an internal-use type this is acceptable — silence the warning locally.
+#if defined(__cpp_lib_hardware_interference_size)
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winterference-size"
+#endif
+  static constexpr std::size_t kCacheLineSize = std::hardware_destructive_interference_size;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+#else
+  static constexpr std::size_t kCacheLineSize = 64;
+#endif
+
+  explicit BoundedMpscQueue(std::size_t capacity)
+      : capacity_(std::bit_ceil(std::max(capacity, std::size_t {2}))),
+        mask_(capacity_ - 1),
+        buffer_(std::make_unique<cell_t[]>(capacity_)) {
+    for (std::size_t i = 0; i < capacity_; ++i) buffer_[i].sequence.store(i, std::memory_order::relaxed);
+    enqueue_pos_.store(0, std::memory_order::relaxed);
+    dequeue_pos_ = 0;
+  }
+
+  BoundedMpscQueue(const BoundedMpscQueue&) = delete;
+  BoundedMpscQueue& operator=(const BoundedMpscQueue&) = delete;
+
+  // Thread-safe: immutable after construction.
+  [[nodiscard]] std::size_t Capacity() const noexcept { return capacity_; }
+
+  // Only safe to call from the consumer thread.
+  // No underflow risk: the consumer owns dequeue_pos_ and enqueue_pos_ >= dequeue_pos_ is
+  // invariant from the consumer's perspective.
+  [[nodiscard]] std::size_t Size() const noexcept {
+    return enqueue_pos_.load(std::memory_order::acquire) - dequeue_pos_;
+  }
+
+  // Returns false if the queue is full.
+  template <typename U>
+    requires std::convertible_to<U, T> && std::is_nothrow_assignable_v<T&, U&&>
+  bool Push(U&& data) {
+    std::size_t pos = enqueue_pos_.load(std::memory_order::relaxed);
+    cell_t* cell;
+    for (;;) {
+      cell = &buffer_[pos & mask_];
+      std::size_t seq = cell->sequence.load(std::memory_order::acquire);
+      auto diff = static_cast<std::ptrdiff_t>(seq) - static_cast<std::ptrdiff_t>(pos);
+      if (diff == 0) {
+        if (enqueue_pos_.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed)) [[likely]] {
+          break;
+        }
+      } else if (diff < 0) {
+        return false;  // queue full
+      } else {
+        pos = enqueue_pos_.load(std::memory_order::relaxed);
+      }
+    }
+    cell->data = std::forward<U>(data);
+    cell->sequence.store(pos + 1, std::memory_order::release);
+    return true;
+  }
+
+  // Convenience wrapper returning std::optional.
+  [[nodiscard]] std::optional<T> TryPop() {
+    T data;
+    if (Pop(data)) {
+      return std::optional<T> {std::move(data)};
+    }
+    return std::nullopt;
+  }
+
+ private:
+  // Single consumer only. Returns false if the queue is empty.
+  bool Pop(T& data) {
+    cell_t* cell = &buffer_[dequeue_pos_ & mask_];
+    std::size_t seq = cell->sequence.load(std::memory_order::acquire);
+    auto diff = static_cast<std::ptrdiff_t>(seq) - static_cast<std::ptrdiff_t>(dequeue_pos_ + 1);
+    if (diff < 0) [[unlikely]] {
+      return false;  // queue empty
+    }
+    // diff > 0 should never happen with a single consumer.
+    EXA_THROW_CHECK(diff == 0) << "BoundedMpscQueue: unexpected sequence state in Pop, diff=" << diff;
+    data = std::move(cell->data);
+    cell->sequence.store(dequeue_pos_ + capacity_, std::memory_order::release);
+    ++dequeue_pos_;
+    return true;
+  }
+
+  struct alignas(kCacheLineSize) cell_t {
+    std::atomic<std::size_t> sequence;
+    T data;
+  };
+
+  // Read-only after construction — shared freely across threads.
+  std::size_t const capacity_;
+  std::size_t const mask_;
+  std::unique_ptr<cell_t[]> const buffer_;
+
+  // Written by producers; read by producers and (rarely) consumer.
+  alignas(kCacheLineSize) std::atomic<std::size_t> enqueue_pos_;
+
+  // Written and read exclusively by the single consumer thread.
+  alignas(kCacheLineSize) std::size_t dequeue_pos_;
+};
 template <class T>
 class UnboundedBlockingPriorityQueue {
  public:

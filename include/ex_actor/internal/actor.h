@@ -131,7 +131,11 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
     void start() noexcept {
       // According to the standard, the operation state will be alive until the task is executed,
       // so it's safe to push `this`.
-      actor->PushMessage(this, mailbox_index);
+      try {
+        actor->PushMessage(this, mailbox_index);
+      } catch (...) {
+        receiver.set_error(std::current_exception());
+      }
     }
   };
 

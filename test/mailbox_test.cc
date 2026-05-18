@@ -1,5 +1,6 @@
 #include <atomic>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -434,6 +435,102 @@ TEST(MailboxTest, BoundedRingMailboxMixedWithUnbounded) {
     EXPECT_EQ(log.size(), 2U);
     EXPECT_EQ(log[0], "unbounded_mb0");
     EXPECT_EQ(log[1], "bounded_mb1");
+  };
+  ex_actor::Init(/*thread_pool_size=*/4);
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
+
+// Actor that blocks until released, used to keep the actor thread busy so the queue fills up.
+class BlockingActor {
+ public:
+  struct State {
+    std::atomic<bool> blocking {true};
+    std::atomic<bool> is_blocking {false};
+  };
+
+  explicit BlockingActor(State* state) : state_(state) {}
+
+  void BlockUntilReleased() {
+    state_->is_blocking.store(true, std::memory_order_release);
+    while (state_->blocking.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  }
+  void Noop() {}
+
+ private:
+  State* state_;
+};
+
+TEST(MailboxTest, UnsafeOneSlotMailboxFullQueueThrows) {
+  BlockingActor::State state;
+  auto coroutine = [&state]() -> stdexec::task<void> {
+    // UnsafeOneSlotMailbox has exactly 1 slot.
+    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::UnsafeOneSlotMailbox {}}};
+    auto actor = co_await ex_actor::Spawn<BlockingActor>(&state).WithConfig(config);
+
+    stdexec::simple_counting_scope scope;
+    stdexec::spawn(actor.SendLocal<&BlockingActor::BlockUntilReleased>() | ex_actor::DiscardResult(),
+                   scope.get_token());
+
+    while (!state.is_blocking.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+
+    // Fill the single slot.
+    stdexec::spawn(actor.SendLocal<&BlockingActor::Noop>() | ex_actor::DiscardResult(), scope.get_token());
+
+    // Queue is full — co_await propagates the error through set_error into a thrown exception.
+    bool threw = false;
+    try {
+      co_await actor.SendLocal<&BlockingActor::Noop>();
+    } catch (const std::exception&) {
+      threw = true;
+    }
+    EXPECT_TRUE(threw);
+
+    state.blocking.store(false, std::memory_order_release);
+    co_await scope.join();
+  };
+  ex_actor::Init(/*thread_pool_size=*/4);
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
+
+TEST(MailboxTest, BoundedRingMailboxFullQueueThrows) {
+  BlockingActor::State state;
+  auto coroutine = [&state]() -> stdexec::task<void> {
+    // box_size=2 → actual capacity=2 (bit_ceil(2)=2).
+    ex_actor::ActorConfig config {.mailbox_configs = {ex_actor::BoundedRingMailbox {/*box_size=*/2}}};
+    auto actor = co_await ex_actor::Spawn<BlockingActor>(&state).WithConfig(config);
+
+    // Actor picks up BlockUntilReleased and spins — queue is now empty and actor is busy.
+    stdexec::simple_counting_scope scope;
+    stdexec::spawn(actor.SendLocal<&BlockingActor::BlockUntilReleased>() | ex_actor::DiscardResult(),
+                   scope.get_token());
+
+    // Wait until the actor has confirmed it entered the blocking loop.
+    while (!state.is_blocking.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+
+    // Fill the queue to capacity (2 slots).
+    stdexec::spawn(actor.SendLocal<&BlockingActor::Noop>() | ex_actor::DiscardResult(), scope.get_token());
+    stdexec::spawn(actor.SendLocal<&BlockingActor::Noop>() | ex_actor::DiscardResult(), scope.get_token());
+
+    // Queue is full — co_await propagates the error through set_error into a thrown exception.
+    bool threw = false;
+    try {
+      co_await actor.SendLocal<&BlockingActor::Noop>();
+    } catch (const std::exception&) {
+      threw = true;
+    }
+    EXPECT_TRUE(threw);
+
+    // Unblock the actor so the scope can drain and join cleanly.
+    state.blocking.store(false, std::memory_order_release);
+    co_await scope.join();
   };
   ex_actor::Init(/*thread_pool_size=*/4);
   ex::sync_wait(coroutine());

@@ -361,8 +361,11 @@ class OneSlotUnsafeQueue {
 };
 
 // Multiple Producer Single Consumer bounded ring buffer.
-// push() is thread-safe for concurrent producers.
-// pop() / try_pop() must be called by exactly one consumer thread.
+// Push() is thread-safe for concurrent producers.
+// Pop() / TryPop() must be called by exactly one consumer thread.
+// This implementation is inspired by Dmitry Vyukov's MPMC bounded queue adapted here as a
+// single-consumer variant with C++20 idioms.
+// (https://github.com/craflin/LockFreeQueue/blob/master/mpmc_bounded_queue.h)
 template <typename T>
   requires std::is_nothrow_move_assignable_v<T>
 class BoundedMpscQueue {
@@ -394,6 +397,7 @@ class BoundedMpscQueue {
   BoundedMpscQueue(const BoundedMpscQueue&) = delete;
   BoundedMpscQueue& operator=(const BoundedMpscQueue&) = delete;
 
+  // Thread-safe: immutable after construction.
   [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
 
   // Only safe to call from the consumer thread.
@@ -401,37 +405,10 @@ class BoundedMpscQueue {
     return enqueue_pos_.load(std::memory_order::acquire) - dequeue_pos_;
   }
 
-  // Thread-safe: multiple producers may call concurrently.
   // Returns false if the queue is full.
-  bool Push(T value) { return push(std::move(value)); }
-
-  // Single consumer only. Returns false if the queue is empty.
-  bool pop(T& data) {
-    cell_t* cell = &buffer_[dequeue_pos_ & mask_];
-    std::size_t seq = cell->sequence.load(std::memory_order::acquire);
-    auto diff = static_cast<std::ptrdiff_t>(seq) - static_cast<std::ptrdiff_t>(dequeue_pos_ + 1);
-    if (diff != 0) [[unlikely]] {
-      return false;  // queue empty
-    }
-    data = std::move(cell->data);
-    cell->sequence.store(dequeue_pos_ + capacity_, std::memory_order::release);
-    ++dequeue_pos_;
-    return true;
-  }
-
-  // Convenience wrapper returning std::optional.
-  [[nodiscard]] std::optional<T> TryPop() {
-    T data;
-    if (pop(data)) {
-      return std::optional<T> {std::move(data)};
-    }
-    return std::nullopt;
-  }
-
- private:
   template <typename U>
     requires std::convertible_to<U, T> && std::is_nothrow_assignable_v<T&, U&&>
-  bool push(U&& data) {
+  bool Push(U&& data) {
     std::size_t pos = enqueue_pos_.load(std::memory_order::relaxed);
     cell_t* cell;
     for (;;) {
@@ -450,6 +427,30 @@ class BoundedMpscQueue {
     }
     cell->data = std::forward<U>(data);
     cell->sequence.store(pos + 1, std::memory_order::release);
+    return true;
+  }
+
+  // Convenience wrapper returning std::optional.
+  [[nodiscard]] std::optional<T> TryPop() {
+    T data;
+    if (Pop(data)) {
+      return std::optional<T> {std::move(data)};
+    }
+    return std::nullopt;
+  }
+
+ private:
+  // Single consumer only. Returns false if the queue is empty.
+  bool Pop(T& data) {
+    cell_t* cell = &buffer_[dequeue_pos_ & mask_];
+    std::size_t seq = cell->sequence.load(std::memory_order::acquire);
+    auto diff = static_cast<std::ptrdiff_t>(seq) - static_cast<std::ptrdiff_t>(dequeue_pos_ + 1);
+    if (diff != 0) [[unlikely]] {
+      return false;  // queue empty
+    }
+    data = std::move(cell->data);
+    cell->sequence.store(dequeue_pos_ + capacity_, std::memory_order::release);
+    ++dequeue_pos_;
     return true;
   }
 

@@ -1,0 +1,72 @@
+name: Coverage
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Test coverage
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 lcov
+
+      - name: Set CPM_SOURCE_CACHE
+        run: echo "CPM_SOURCE_CACHE=$HOME/.cache/CPM" >> "$GITHUB_ENV"
+
+      - name: Set up CPM source cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/CPM
+          key: cpm-coverage-${{ hashFiles('**/CMakeLists.txt', 'cmake/CPM.cmake') }}
+          restore-keys: |
+            cpm-coverage-
+            cpm-
+
+      - name: Configure CMake
+        run: >
+          cmake
+          -S ${{ github.workspace }}
+          -B ${{ github.workspace }}/build
+          -DCMAKE_CXX_COMPILER=g++-14
+          -DCMAKE_C_COMPILER=gcc-14
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="--coverage"
+          -DCMAKE_C_FLAGS="--coverage"
+          -G "Ninja Multi-Config"
+
+      - name: Build
+        run: cmake --build ${{ github.workspace }}/build --config Debug
+
+      - name: Test
+        working-directory: ${{ github.workspace }}/build
+        run: ctest --build-config Debug --output-on-failure
+
+      - name: Collect coverage
+        run: |
+          lcov --capture --directory build --output-file coverage.info \
+            --gcov-tool gcov-14
+          lcov --remove coverage.info \
+            '/usr/*' \
+            '*/build/_deps/*' \
+            '*/test/*' \
+            --output-file coverage.info
+          lcov --list coverage.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.info
+          fail_ci_if_error: false

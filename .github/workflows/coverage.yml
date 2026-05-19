@@ -23,6 +23,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-14 g++-14 lcov
 
+      - name: Set up compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: coverage-gcc-14
+
       - name: Set CPM_SOURCE_CACHE
         run: echo "CPM_SOURCE_CACHE=$HOME/.cache/CPM" >> "$GITHUB_ENV"
 
@@ -42,6 +47,8 @@ jobs:
           -B ${{ github.workspace }}/build
           -DCMAKE_CXX_COMPILER=g++-14
           -DCMAKE_C_COMPILER=gcc-14
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_CXX_FLAGS="--coverage"
           -DCMAKE_C_FLAGS="--coverage"

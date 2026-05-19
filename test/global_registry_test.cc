@@ -43,14 +43,13 @@ TEST(GlobalRegistryTest, WaitOsExitSignalCompletesOnSIGINT) {
   ex_actor::Init(/*thread_pool_size=*/2);
 
   auto coroutine = []() -> stdexec::task<void> {
-    // Send SIGINT from a background thread after a short delay
     std::thread signal_thread([] {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       std::raise(SIGINT);
     });
-    signal_thread.detach();
 
     co_await ex_actor::WaitOsExitSignal();
+    signal_thread.join();
   };
 
   ex::sync_wait(coroutine());
@@ -65,9 +64,9 @@ TEST(GlobalRegistryTest, WaitOsExitSignalCompletesOnSIGTERM) {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       std::raise(SIGTERM);
     });
-    signal_thread.detach();
 
     co_await ex_actor::WaitOsExitSignal();
+    signal_thread.join();
   };
 
   ex::sync_wait(coroutine());
@@ -77,8 +76,8 @@ TEST(GlobalRegistryTest, WaitOsExitSignalCompletesOnSIGTERM) {
 TEST(GlobalRegistryTest, WaitOsExitSignalRestoresOriginalHandler) {
   ex_actor::Init(/*thread_pool_size=*/2);
 
-  // Install a custom handler before calling WaitOsExitSignal
-  static volatile sig_atomic_t custom_handler_called = 0;
+  static volatile sig_atomic_t custom_handler_called;
+  custom_handler_called = 0;
   auto custom_handler = [](int) { custom_handler_called = 1; };
   std::signal(SIGINT, custom_handler);
 
@@ -87,9 +86,9 @@ TEST(GlobalRegistryTest, WaitOsExitSignalRestoresOriginalHandler) {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       std::raise(SIGINT);
     });
-    signal_thread.detach();
 
     co_await ex_actor::WaitOsExitSignal();
+    signal_thread.join();
   };
 
   ex::sync_wait(coroutine());
@@ -106,7 +105,8 @@ TEST(GlobalRegistryTest, WaitOsExitSignalRestoresOriginalHandler) {
 TEST(GlobalRegistryTest, WaitOsExitSignalInvokesPreviousHandler) {
   ex_actor::Init(/*thread_pool_size=*/2);
 
-  static volatile sig_atomic_t prev_handler_invoked = 0;
+  static volatile sig_atomic_t prev_handler_invoked;
+  prev_handler_invoked = 0;
   auto prev_handler = [](int) { prev_handler_invoked = 1; };
   std::signal(SIGINT, prev_handler);
 
@@ -115,9 +115,9 @@ TEST(GlobalRegistryTest, WaitOsExitSignalInvokesPreviousHandler) {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       std::raise(SIGINT);
     });
-    signal_thread.detach();
 
     co_await ex_actor::WaitOsExitSignal();
+    signal_thread.join();
   };
 
   ex::sync_wait(coroutine());

@@ -57,12 +57,14 @@ jobs:
       - name: Collect coverage
         run: |
           lcov --capture --directory build --output-file coverage.info \
-            --gcov-tool gcov-14
+            --gcov-tool gcov-14 \
+            --ignore-errors mismatch,gcov,source
           lcov --remove coverage.info \
             '/usr/*' \
             '*/build/_deps/*' \
             '*/test/*' \
-            --output-file coverage.info
+            --output-file coverage.info \
+            --ignore-errors mismatch
           lcov --list coverage.info
 
       - name: Upload to Codecov

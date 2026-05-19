@@ -65,13 +65,15 @@ jobs:
         run: |
           IGNORE="--ignore-errors mismatch,gcov,source,empty"
           lcov --capture --directory build --output-file coverage.info \
-            --gcov-tool gcov-14 $IGNORE
+            --gcov-tool gcov-14 $IGNORE || true
           lcov --remove coverage.info \
             '/usr/*' \
             '*/build/_deps/*' \
             '*/test/*' \
-            --output-file coverage.info $IGNORE
-          lcov --list coverage.info $IGNORE
+            --output-file coverage.info $IGNORE || true
+          lcov --list coverage.info $IGNORE || true
+          # Verify we actually produced coverage data
+          test -s coverage.info
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5

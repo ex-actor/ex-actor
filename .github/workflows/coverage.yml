@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-14 g++-14 lcov
+          sudo apt-get install -y gcc-14 g++-14 gcovr
 
       - name: Set up compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -63,20 +63,16 @@ jobs:
 
       - name: Collect coverage
         run: |
-          IGNORE="--ignore-errors mismatch,gcov,source,empty"
-          lcov --capture --directory build --output-file coverage.info \
-            --gcov-tool gcov-14 $IGNORE || true
-          lcov --remove coverage.info \
-            '/usr/*' \
-            '*/build/_deps/*' \
-            '*/test/*' \
-            --output-file coverage.info $IGNORE || true
-          lcov --list coverage.info $IGNORE || true
-          # Verify we actually produced coverage data
-          test -s coverage.info
+          gcovr --root ${{ github.workspace }} build \
+            --gcov-executable gcov-14 \
+            --exclude '/usr/.*' \
+            --exclude '.*/build/_deps/.*' \
+            --exclude '.*/test/.*' \
+            --xml coverage.xml \
+            --print-summary
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: coverage.info
+          files: coverage.xml
           fail_ci_if_error: false

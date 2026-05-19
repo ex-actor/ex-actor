@@ -65,10 +65,8 @@ jobs:
         run: |
           gcovr --root ${{ github.workspace }} build \
             --gcov-executable gcov-14 \
-            --exclude '/usr/.*' \
-            --exclude '(^|.*/)build/_deps/' \
-            --exclude '(^|.*/)test/' \
-            --exclude '(^|.*/)include/ex_actor/3rd_lib/' \
+            --filter 'src/' \
+            --filter 'include/ex_actor/(?!3rd_lib/)' \
             --xml coverage.xml \
             --print-summary
 

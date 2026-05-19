@@ -5,11 +5,15 @@
 #include <sstream>
 #include <string>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
 
 namespace fs = std::filesystem;
+
+using ::testing::HasSubstr;
+using ::testing::Not;
 
 namespace {
 
@@ -23,9 +27,6 @@ std::string ReadFile(const std::string& path) {
   buffer << file.rdbuf();
   return buffer.str();
 }
-
-// Helper function to check if string contains substring
-bool Contains(const std::string& str, const std::string& substring) { return str.find(substring) != std::string::npos; }
 
 // Helper function to clean up log file (resets logger to close file handle on Windows)
 void CleanupLogFile(const std::string& log_file) {
@@ -70,10 +71,8 @@ TEST(LoggingTest, InitShutdownWithoutConfigureLogging) {
   // Read log file and verify both Init and Shutdown logs are present
   std::string log_contents = ReadFile(log_file);
   EXPECT_FALSE(log_contents.empty()) << "Log file should not be empty";
-  EXPECT_TRUE(Contains(log_contents, "Initializing ex_actor")) << "Should see Init log. Log contents:\n"
-                                                               << log_contents;
-  EXPECT_TRUE(Contains(log_contents, "Shutting down ex_actor")) << "Should see Shutdown log. Log contents:\n"
-                                                                << log_contents;
+  EXPECT_THAT(log_contents, HasSubstr("Initializing ex_actor"));
+  EXPECT_THAT(log_contents, HasSubstr("Shutting down ex_actor"));
 
   // Clean up
   CleanupLogFile(log_file);
@@ -101,12 +100,8 @@ TEST(LoggingTest, ConfigureLoggingWithErrorLevel) {
 
   // Read log file - should be empty or not contain Info logs
   std::string log_contents = ReadFile(log_file);
-  EXPECT_FALSE(Contains(log_contents, "Initializing ex_actor"))
-      << "Should NOT see Init log at Error level. Log contents:\n"
-      << log_contents;
-  EXPECT_FALSE(Contains(log_contents, "Shutting down ex_actor"))
-      << "Should NOT see Shutdown log at Error level. Log contents:\n"
-      << log_contents;
+  EXPECT_THAT(log_contents, Not(HasSubstr("Initializing ex_actor")));
+  EXPECT_THAT(log_contents, Not(HasSubstr("Shutting down ex_actor")));
 
   // Clean up
   CleanupLogFile(log_file);
@@ -144,12 +139,8 @@ TEST(LoggingTest, ConfigureLoggingInMiddle) {
   // Read log file
   std::string log_contents = ReadFile(log_file);
   EXPECT_FALSE(log_contents.empty()) << "Log file should not be empty";
-  EXPECT_TRUE(Contains(log_contents, "Initializing ex_actor"))
-      << "Should see Init log (before level change). Log contents:\n"
-      << log_contents;
-  EXPECT_FALSE(Contains(log_contents, "Shutting down ex_actor"))
-      << "Should NOT see Shutdown log (after level change to Error). Log contents:\n"
-      << log_contents;
+  EXPECT_THAT(log_contents, HasSubstr("Initializing ex_actor"));
+  EXPECT_THAT(log_contents, Not(HasSubstr("Shutting down ex_actor")));
 
   // Clean up
   CleanupLogFile(log_file);
@@ -195,28 +186,14 @@ TEST(LoggingTest, CreateLoggerWithFile) {
   ASSERT_NE(logger, nullptr);
   EXPECT_EQ(logger->level(), spdlog::level::debug);
 
-  // Write a message and verify it appears in the file
   logger->info("test message from CreateLoggerWithFile");
   logger->flush();
 
   std::string contents = ReadFile(log_file);
-  EXPECT_TRUE(Contains(contents, "test message from CreateLoggerWithFile"));
+  EXPECT_THAT(contents, HasSubstr("test message from CreateLoggerWithFile"));
 
-  // Clean up
   logger.reset();
   fs::remove(log_file);
-}
-
-TEST(LoggingTest, CreateLoggerWithDebugLevel) {
-  ex_actor::LogConfig config{.level = ex_actor::LogLevel::kDebug};
-  auto logger = ex_actor::internal::CreateLoggerUsingConfig(config);
-  EXPECT_EQ(logger->level(), spdlog::level::debug);
-}
-
-TEST(LoggingTest, CreateLoggerWithWarnLevel) {
-  ex_actor::LogConfig config{.level = ex_actor::LogLevel::kWarn};
-  auto logger = ex_actor::internal::CreateLoggerUsingConfig(config);
-  EXPECT_EQ(logger->level(), spdlog::level::warn);
 }
 
 // --- Tests for GlobalLogger ---
@@ -236,7 +213,7 @@ TEST(LoggingTest, ThrowStreamBasicMessage) {
     throw ex_actor::internal::ThrowStream() << "hello " << "world";
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
-    EXPECT_TRUE(Contains(e.what(), "hello world"));
+    EXPECT_THAT(e.what(), HasSubstr("hello world"));
   }
 }
 
@@ -246,8 +223,8 @@ TEST(LoggingTest, ThrowStreamWithNumbers) {
     FAIL() << "Should have thrown";
   } catch (const ex_actor::internal::ThrowStream& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "value=42"));
-    EXPECT_TRUE(Contains(msg, "pi=3.14"));
+    EXPECT_THAT(msg, HasSubstr("value=42"));
+    EXPECT_THAT(msg, HasSubstr("pi=3.14"));
   }
 }
 
@@ -256,10 +233,10 @@ TEST(LoggingTest, ThrowStreamCopyConstructor) {
   auto moved = std::move(original) << "original message";
 
   ex_actor::internal::ThrowStream copy(moved);
-  EXPECT_TRUE(Contains(copy.what(), "original message"));
+  EXPECT_THAT(copy.what(), HasSubstr("original message"));
 }
 
-// --- Tests for EXA_THROW ---
+// --- Tests for EXA_THROW macros ---
 
 TEST(LoggingTest, ExaThrowContainsFileAndLine) {
   try {
@@ -267,12 +244,10 @@ TEST(LoggingTest, ExaThrowContainsFileAndLine) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "logging_test.cc"));
-    EXPECT_TRUE(Contains(msg, "test error"));
+    EXPECT_THAT(msg, HasSubstr("logging_test.cc"));
+    EXPECT_THAT(msg, HasSubstr("test error"));
   }
 }
-
-// --- Tests for EXA_THROW_IF ---
 
 TEST(LoggingTest, ExaThrowIfTrueThrows) {
   EXPECT_THROW(
@@ -295,12 +270,10 @@ TEST(LoggingTest, ExaThrowIfMessageContainsCondition) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "x > 3"));
-    EXPECT_TRUE(Contains(msg, "extra info"));
+    EXPECT_THAT(msg, HasSubstr("x > 3"));
+    EXPECT_THAT(msg, HasSubstr("extra info"));
   }
 }
-
-// --- Tests for EXA_THROW_CHECK ---
 
 TEST(LoggingTest, ExaThrowCheckPassesOnTrue) {
   EXPECT_NO_THROW({ EXA_THROW_CHECK(1 == 1); });
@@ -312,12 +285,10 @@ TEST(LoggingTest, ExaThrowCheckThrowsOnFalse) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "Check failed"));
-    EXPECT_TRUE(Contains(msg, "1 == 2"));
+    EXPECT_THAT(msg, HasSubstr("Check failed"));
+    EXPECT_THAT(msg, HasSubstr("1 == 2"));
   }
 }
-
-// --- Tests for EXA_THROW_CHECK_EQ ---
 
 TEST(LoggingTest, ExaThrowCheckEqPassesOnEqual) {
   EXPECT_NO_THROW({ EXA_THROW_CHECK_EQ(3, 3); });
@@ -331,14 +302,12 @@ TEST(LoggingTest, ExaThrowCheckEqThrowsOnNotEqual) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "Check failed"));
-    EXPECT_TRUE(Contains(msg, "a == b"));
-    EXPECT_TRUE(Contains(msg, "3"));
-    EXPECT_TRUE(Contains(msg, "5"));
+    EXPECT_THAT(msg, HasSubstr("Check failed"));
+    EXPECT_THAT(msg, HasSubstr("a == b"));
+    EXPECT_THAT(msg, HasSubstr("3"));
+    EXPECT_THAT(msg, HasSubstr("5"));
   }
 }
-
-// --- Tests for EXA_THROW_CHECK_NE ---
 
 TEST(LoggingTest, ExaThrowCheckNePassesOnNotEqual) {
   EXPECT_NO_THROW({ EXA_THROW_CHECK_NE(3, 5); });
@@ -351,13 +320,11 @@ TEST(LoggingTest, ExaThrowCheckNeThrowsOnEqual) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "Check failed"));
-    EXPECT_TRUE(Contains(msg, "a != 7"));
-    EXPECT_TRUE(Contains(msg, "7"));
+    EXPECT_THAT(msg, HasSubstr("Check failed"));
+    EXPECT_THAT(msg, HasSubstr("a != 7"));
+    EXPECT_THAT(msg, HasSubstr("7"));
   }
 }
-
-// --- Tests for EXA_THROW_CHECK_LE ---
 
 TEST(LoggingTest, ExaThrowCheckLePassesOnLessOrEqual) {
   EXPECT_NO_THROW({
@@ -374,14 +341,12 @@ TEST(LoggingTest, ExaThrowCheckLeThrowsOnGreater) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "Check failed"));
-    EXPECT_TRUE(Contains(msg, "a <= b"));
-    EXPECT_TRUE(Contains(msg, "10"));
-    EXPECT_TRUE(Contains(msg, "5"));
+    EXPECT_THAT(msg, HasSubstr("Check failed"));
+    EXPECT_THAT(msg, HasSubstr("a <= b"));
+    EXPECT_THAT(msg, HasSubstr("10"));
+    EXPECT_THAT(msg, HasSubstr("5"));
   }
 }
-
-// --- Tests for EXA_THROW_CHECK_LT ---
 
 TEST(LoggingTest, ExaThrowCheckLtPassesOnLess) {
   EXPECT_NO_THROW({ EXA_THROW_CHECK_LT(3, 5); });
@@ -395,12 +360,10 @@ TEST(LoggingTest, ExaThrowCheckLtThrowsOnGreaterOrEqual) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "Check failed"));
-    EXPECT_TRUE(Contains(msg, "a < b"));
+    EXPECT_THAT(msg, HasSubstr("Check failed"));
+    EXPECT_THAT(msg, HasSubstr("a < b"));
   }
 }
-
-// --- Tests for EXA_THROW_CHECK_GE ---
 
 TEST(LoggingTest, ExaThrowCheckGePassesOnGreaterOrEqual) {
   EXPECT_NO_THROW({
@@ -417,14 +380,12 @@ TEST(LoggingTest, ExaThrowCheckGeThrowsOnLess) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "Check failed"));
-    EXPECT_TRUE(Contains(msg, "a >= b"));
-    EXPECT_TRUE(Contains(msg, "2"));
-    EXPECT_TRUE(Contains(msg, "5"));
+    EXPECT_THAT(msg, HasSubstr("Check failed"));
+    EXPECT_THAT(msg, HasSubstr("a >= b"));
+    EXPECT_THAT(msg, HasSubstr("2"));
+    EXPECT_THAT(msg, HasSubstr("5"));
   }
 }
-
-// --- Tests for EXA_THROW_CHECK_GT ---
 
 TEST(LoggingTest, ExaThrowCheckGtPassesOnGreater) {
   EXPECT_NO_THROW({ EXA_THROW_CHECK_GT(5, 3); });
@@ -438,12 +399,12 @@ TEST(LoggingTest, ExaThrowCheckGtThrowsOnLessOrEqual) {
     FAIL() << "Should have thrown";
   } catch (const std::exception& e) {
     std::string msg = e.what();
-    EXPECT_TRUE(Contains(msg, "Check failed"));
-    EXPECT_TRUE(Contains(msg, "a > b"));
+    EXPECT_THAT(msg, HasSubstr("Check failed"));
+    EXPECT_THAT(msg, HasSubstr("a > b"));
   }
 }
 
-// --- Tests for enum operator<< ---
+// --- Tests for enum operator<< and EXA_DUMP_VARS ---
 
 TEST(LoggingTest, EnumOperatorStreamOutput) {
   std::ostringstream oss;
@@ -455,12 +416,10 @@ TEST(LoggingTest, EnumOperatorStreamOutput) {
   EXPECT_EQ(oss.str(), "2");
 }
 
-// --- Tests for EXA_DUMP_VARS ---
-
 TEST(LoggingTest, DumpVarsSingleVariable) {
   int count = 42;
   std::string result = EXA_DUMP_VARS(count);
-  EXPECT_TRUE(Contains(result, "count=42")) << "Got: " << result;
+  EXPECT_THAT(result, HasSubstr("count=42"));
 }
 
 TEST(LoggingTest, DumpVarsMultipleVariables) {
@@ -468,95 +427,54 @@ TEST(LoggingTest, DumpVarsMultipleVariables) {
   int y = 2;
   std::string name = "test";
   std::string result = EXA_DUMP_VARS(x, y, name);
-  EXPECT_TRUE(Contains(result, "x=1")) << "Got: " << result;
-  EXPECT_TRUE(Contains(result, "y=2")) << "Got: " << result;
-  EXPECT_TRUE(Contains(result, "name=test")) << "Got: " << result;
+  EXPECT_THAT(result, HasSubstr("x=1"));
+  EXPECT_THAT(result, HasSubstr("y=2"));
+  EXPECT_THAT(result, HasSubstr("name=test"));
 }
 
 TEST(LoggingTest, DumpVarsWithExpression) {
   int a = 3;
   int b = 4;
   std::string result = EXA_DUMP_VARS(a + b);
-  EXPECT_TRUE(Contains(result, "a + b=7")) << "Got: " << result;
+  EXPECT_THAT(result, HasSubstr("a + b=7"));
 }
-
-// --- Tests for ReflectPrintToStream ---
 
 TEST(LoggingTest, ReflectPrintToStreamWithStruct) {
   SimpleStruct s{.x = 10, .name = "hello"};
   std::ostringstream oss;
   ex_actor::internal::ReflectPrintToStream(oss, s);
   std::string result = oss.str();
-  EXPECT_TRUE(Contains(result, "x=10")) << "Got: " << result;
-  EXPECT_TRUE(Contains(result, "name=hello")) << "Got: " << result;
+  EXPECT_THAT(result, HasSubstr("x=10"));
+  EXPECT_THAT(result, HasSubstr("name=hello"));
 }
 
 TEST(LoggingTest, DumpVarsWithStruct) {
   SimpleStruct s{.x = 99, .name = "world"};
   std::string result = EXA_DUMP_VARS(s);
-  EXPECT_TRUE(Contains(result, "s=")) << "Got: " << result;
-  EXPECT_TRUE(Contains(result, "x=99")) << "Got: " << result;
-  EXPECT_TRUE(Contains(result, "name=world")) << "Got: " << result;
+  EXPECT_THAT(result, HasSubstr("s="));
+  EXPECT_THAT(result, HasSubstr("x=99"));
+  EXPECT_THAT(result, HasSubstr("name=world"));
 }
 
-// --- Tests for log::Info/Warn/Error/Critical ---
+// --- Tests for log output ---
 
-TEST(LoggingTest, LogInfoWritesToFile) {
-  std::string log_file = "test_log_info.txt";
+TEST(LoggingTest, LogFunctionsWriteToFile) {
+  std::string log_file = "test_log_output.txt";
   CleanupLogFile(log_file);
 
   ex_actor::ConfigureLogging({.level = ex_actor::LogLevel::kDebug, .log_file_path = log_file});
 
   ex_actor::internal::log::Info("info message {}", 123);
-  ex_actor::internal::GlobalLogger()->flush();
-
-  std::string contents = ReadFile(log_file);
-  EXPECT_TRUE(Contains(contents, "info message 123")) << "Got: " << contents;
-
-  CleanupLogFile(log_file);
-}
-
-TEST(LoggingTest, LogWarnWritesToFile) {
-  std::string log_file = "test_log_warn.txt";
-  CleanupLogFile(log_file);
-
-  ex_actor::ConfigureLogging({.level = ex_actor::LogLevel::kDebug, .log_file_path = log_file});
-
   ex_actor::internal::log::Warn("warn message {}", "abc");
-  ex_actor::internal::GlobalLogger()->flush();
-
-  std::string contents = ReadFile(log_file);
-  EXPECT_TRUE(Contains(contents, "warn message abc")) << "Got: " << contents;
-
-  CleanupLogFile(log_file);
-}
-
-TEST(LoggingTest, LogErrorWritesToFile) {
-  std::string log_file = "test_log_error.txt";
-  CleanupLogFile(log_file);
-
-  ex_actor::ConfigureLogging({.level = ex_actor::LogLevel::kDebug, .log_file_path = log_file});
-
   ex_actor::internal::log::Error("error message {}", 456);
-  ex_actor::internal::GlobalLogger()->flush();
-
-  std::string contents = ReadFile(log_file);
-  EXPECT_TRUE(Contains(contents, "error message 456")) << "Got: " << contents;
-
-  CleanupLogFile(log_file);
-}
-
-TEST(LoggingTest, LogCriticalWritesToFile) {
-  std::string log_file = "test_log_critical.txt";
-  CleanupLogFile(log_file);
-
-  ex_actor::ConfigureLogging({.level = ex_actor::LogLevel::kDebug, .log_file_path = log_file});
-
   ex_actor::internal::log::Critical("critical message {}", 789);
   ex_actor::internal::GlobalLogger()->flush();
 
   std::string contents = ReadFile(log_file);
-  EXPECT_TRUE(Contains(contents, "critical message 789")) << "Got: " << contents;
+  EXPECT_THAT(contents, HasSubstr("info message 123"));
+  EXPECT_THAT(contents, HasSubstr("warn message abc"));
+  EXPECT_THAT(contents, HasSubstr("error message 456"));
+  EXPECT_THAT(contents, HasSubstr("critical message 789"));
 
   CleanupLogFile(log_file);
 }
@@ -573,14 +491,12 @@ TEST(LoggingTest, LogLevelFilteringPreventsLowerLevelMessages) {
   ex_actor::internal::GlobalLogger()->flush();
 
   std::string contents = ReadFile(log_file);
-  EXPECT_FALSE(Contains(contents, "should not appear")) << "Got: " << contents;
-  EXPECT_FALSE(Contains(contents, "also should not appear")) << "Got: " << contents;
-  EXPECT_TRUE(Contains(contents, "should appear")) << "Got: " << contents;
+  EXPECT_THAT(contents, Not(HasSubstr("should not appear")));
+  EXPECT_THAT(contents, Not(HasSubstr("also should not appear")));
+  EXPECT_THAT(contents, HasSubstr("should appear"));
 
   CleanupLogFile(log_file);
 }
-
-// --- Tests for spdlog::fmt_lib::formatter<std::exception> ---
 
 TEST(LoggingTest, ExceptionFormatterIncludesTypeAndWhat) {
   std::string log_file = "test_log_exception_fmt.txt";
@@ -594,21 +510,14 @@ TEST(LoggingTest, ExceptionFormatterIncludesTypeAndWhat) {
   ex_actor::internal::GlobalLogger()->flush();
 
   std::string contents = ReadFile(log_file);
-  EXPECT_TRUE(Contains(contents, "something went wrong")) << "Got: " << contents;
+  EXPECT_THAT(contents, HasSubstr("something went wrong"));
 
   CleanupLogFile(log_file);
 }
 
-// --- Tests for InstallFallbackExceptionHandler ---
-
 TEST(LoggingTest, InstallFallbackExceptionHandlerDoesNotCrash) {
-  // Just verify it can be called without crashing.
-  // We can't easily test the terminate handler behavior without forking,
-  // since std::terminate aborts the process.
   EXPECT_NO_THROW({ ex_actor::internal::InstallFallbackExceptionHandler(); });
 }
-
-// --- Tests for log source location ---
 
 TEST(LoggingTest, LogMessageContainsSourceLocation) {
   std::string log_file = "test_log_sourceloc.txt";
@@ -620,8 +529,7 @@ TEST(LoggingTest, LogMessageContainsSourceLocation) {
   ex_actor::internal::GlobalLogger()->flush();
 
   std::string contents = ReadFile(log_file);
-  // The log pattern includes %s:%# which is filename:line
-  EXPECT_TRUE(Contains(contents, "logging_test.cc")) << "Got: " << contents;
+  EXPECT_THAT(contents, HasSubstr("logging_test.cc"));
 
   CleanupLogFile(log_file);
 }

@@ -9,7 +9,7 @@
 [![Generic badge](https://img.shields.io/badge/clang-16+-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
 [![Generic badge](https://img.shields.io/badge/MSVC-14.50+-blue.svg)](https://ex-actor.github.io/ex-actor/installation/)
 [![Build and test](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml/badge.svg)](https://github.com/ex-actor/ex-actor/actions/workflows/cmake_multi_platform.yml)
-[![codecov](https://codecov.io/gh/ex-actor/ex-actor/branch/main/graph/badge.svg)](https://codecov.io/gh/ex-actor/ex-actor)
+[![codecov](https://codecov.io/gh/ex-actor/ex-actor/graph/badge.svg)](https://codecov.io/gh/ex-actor/ex-actor)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ex-actor/ex-actor)
 
 ![image](assets/ex_actor_banner.jpg)

@@ -21,3 +21,4 @@ race:__exception_ptr
 # which TSAN does not recognize as happens-before. Practically safe but not
 # formally correct for signal handlers.
 race:ShutdownSignalHandler
+signal:ShutdownSignalHandler

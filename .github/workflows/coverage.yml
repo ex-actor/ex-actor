@@ -63,16 +63,15 @@ jobs:
 
       - name: Collect coverage
         run: |
+          IGNORE="--ignore-errors mismatch,gcov,source,empty"
           lcov --capture --directory build --output-file coverage.info \
-            --gcov-tool gcov-14 \
-            --ignore-errors mismatch,gcov,source
+            --gcov-tool gcov-14 $IGNORE
           lcov --remove coverage.info \
             '/usr/*' \
             '*/build/_deps/*' \
             '*/test/*' \
-            --output-file coverage.info \
-            --ignore-errors mismatch
-          lcov --list coverage.info
+            --output-file coverage.info $IGNORE
+          lcov --list coverage.info $IGNORE
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5

@@ -15,3 +15,10 @@ race:zmq::
 # don't show up as named frames in the TSAN stack, so this is the most precise
 # pattern available without over-suppressing unrelated stdexec logic.
 race:__exception_ptr
+
+# Signal handler race: ShutdownSignalHandler reads the global signal_semaphore
+# pointer that WaitOsExitSignal writes. The only synchronization is a sleep,
+# which TSAN does not recognize as happens-before. Practically safe but not
+# formally correct for signal handlers.
+race:ShutdownSignalHandler
+signal:ShutdownSignalHandler

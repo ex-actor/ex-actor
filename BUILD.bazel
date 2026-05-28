@@ -16,7 +16,6 @@ cc_library(
     deps = [
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/capnp:capnpc",
-        "@cppzmq",
         "@libzmq",
         "@reflect-cpp",
         "@spdlog",

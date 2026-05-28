@@ -27,6 +27,8 @@ class MessageBrokerTestHelper {
 };
 }  // namespace ex_actor::internal
 
+namespace zmq = ::ex_actor::embedded_3rd::zmq;
+
 namespace {
 
 ByteBuffer MakeBytes(const std::string& str) {

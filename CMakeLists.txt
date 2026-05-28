@@ -66,7 +66,7 @@ CPMAddPackage(
   OPTIONS "REFLECTCPP_INSTALL ON"
 )
 
-# libzmq + cppzmq for message passing in distributed mode
+# libzmq for message passing in distributed mode (cppzmq headers bundled in 3rd_lib)
 CPMAddPackage(
   NAME libzmq
   GITHUB_REPOSITORY zeromq/libzmq
@@ -77,12 +77,6 @@ CPMAddPackage(
   OPTIONS "WITH_TLS OFF"
   OPTIONS "WITH_LIBSODIUM OFF"
   OPTIONS "WITH_GSSAPI OFF"
-)
-CPMAddPackage(
-  NAME cppzmq
-  GITHUB_REPOSITORY zeromq/cppzmq
-  GIT_TAG v4.11.0
-  OPTIONS "CPPZMQ_BUILD_TESTS OFF"
 )
 
 CPMAddPackage(
@@ -110,7 +104,7 @@ target_link_libraries(
   PUBLIC
   STDEXEC::stdexec
   reflectcpp::reflectcpp
-  cppzmq-static
+  libzmq-static
   spdlog::spdlog
 )
 # Link libatomic for 128-bit atomic operations (required by MPSC_queue's Tagged_ptr)

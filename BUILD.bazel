@@ -10,7 +10,10 @@ filegroup(
 cc_library(
     name = "ex_actor",
     srcs = glob(["src/**/*.cc"]),
-    hdrs = glob(["include/**/*.h"]),
+    hdrs = glob([
+        "include/**/*.h",
+        "include/**/*.hpp",
+    ]),
     includes = ["include"],
     linkopts = ["-latomic"],
     deps = [

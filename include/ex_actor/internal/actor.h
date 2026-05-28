@@ -29,6 +29,41 @@
 #include "ex_actor/internal/scheduler.h"
 #include "ex_actor/internal/util.h"
 
+namespace ex_actor::internal {
+
+template <typename Sig>
+class MoveOnlyFunction;
+
+template <typename R, typename... Args>
+class MoveOnlyFunction<R(Args...)> {
+  struct Concept {
+    virtual ~Concept() = default;
+    virtual R Invoke(Args...) = 0;
+  };
+  template <typename F>
+  struct Model : Concept {
+    F fn;
+    explicit Model(F f) : fn(std::move(f)) {}
+    R Invoke(Args... args) override { return fn(std::forward<Args>(args)...); }
+  };
+  std::unique_ptr<Concept> impl_;
+
+ public:
+  MoveOnlyFunction() = default;
+  template <typename F>
+    requires(!std::is_same_v<std::decay_t<F>, MoveOnlyFunction>)
+  // NOLINTNEXTLINE(google-explicit-constructor)
+  MoveOnlyFunction(F&& f) : impl_(std::make_unique<Model<std::decay_t<F>>>(std::forward<F>(f))) {}
+  MoveOnlyFunction(MoveOnlyFunction&&) noexcept = default;
+  MoveOnlyFunction& operator=(MoveOnlyFunction&&) noexcept = default;
+  MoveOnlyFunction(const MoveOnlyFunction&) = delete;
+  MoveOnlyFunction& operator=(const MoveOnlyFunction&) = delete;
+  R operator()(Args... args) { return impl_->Invoke(std::forward<Args>(args)...); }
+  explicit operator bool() const { return impl_ != nullptr; }
+};
+
+}  // namespace ex_actor::internal
+
 namespace ex_actor {
 
 // Passed to the optional user-defined hook `bool ExActorShouldActivate(MailboxPushEvent)`.
@@ -69,7 +104,8 @@ class TypeErasedActor {
 class TypeErasedActorScheduler {
  public:
   virtual ~TypeErasedActorScheduler() = default;
-  virtual void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) = 0;
+  virtual void Schedule(MoveOnlyFunction<void()> fn, const ActorConfig& config,
+                        ex::simple_counting_scope::token scope_token) = 0;
   virtual std::unique_ptr<TypeErasedActorScheduler> Clone() const = 0;
 
   virtual const void* GetUnderlyingSchedulerPtr() const = 0;
@@ -79,11 +115,11 @@ template <ex::scheduler Scheduler>
 class AnyStdExecScheduler : public TypeErasedActorScheduler {
  public:
   explicit AnyStdExecScheduler(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
-  void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) override {
-    const auto& actor_config = actor->GetActorConfig();
-    auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, actor_config.priority}) |
-                  ex::write_env(ex::prop {ex_actor::get_scheduler_index, actor_config.scheduler_index}) |
-                  ex::then([actor] { actor->PullMailboxAndRun(); });
+  void Schedule(MoveOnlyFunction<void()> fn, const ActorConfig& config,
+                ex::simple_counting_scope::token scope_token) override {
+    auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, config.priority}) |
+                  ex::write_env(ex::prop {ex_actor::get_scheduler_index, config.scheduler_index}) |
+                  ex::then([fn = std::move(fn)]() mutable { fn(); });
     ex::spawn(std::move(sender) | DiscardResult(), scope_token);
   }
 
@@ -227,36 +263,37 @@ class MailboxSet {
 template <class UserClass, auto kCreateFn = nullptr>
 class Actor : public TypeErasedActor {
  public:
-  template <typename... Args>
-  explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args... args)
+  explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config)
       : TypeErasedActor(std::move(actor_config)),
         scheduler_(std::move(scheduler)),
-        mailbox_set_(actor_config_.mailbox_configs) {
-    if constexpr (kCreateFn != nullptr) {
-      using ReturnType = FnReturnType<kCreateFn>;
-      static_assert(
-          std::is_same_v<ReturnType, UserClass>,
-          "The return type of kCreateFn must match the Actor's UserClass template parameter to avoid slicing.");
-
-      // Use `new` directly so the prvalue returned by kCreateFn is used to
-      // initialize the heap object, benefiting from guaranteed copy elision
-      // (C++17 [dcl.init]/17.6.1) and not requiring UserClass to be movable.
-      user_class_instance_.reset(new UserClass(kCreateFn(std::move(args)...)));
-    } else {
-      user_class_instance_ = std::make_unique<UserClass>(std::move(args)...);
-    }
-    cached_user_class_instance_address_ = user_class_instance_.get();
-  }
+        mailbox_set_(actor_config_.mailbox_configs) {}
 
   template <typename... Args>
-  static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                                                            ActorConfig actor_config, std::tuple<Args...> arg_tuple) {
-    return std::apply(
-        [scheduler = std::move(scheduler), actor_config = std::move(actor_config)](auto&&... args) mutable {
-          return std::make_unique<Actor<UserClass, kCreateFn>>(std::move(scheduler), std::move(actor_config),
-                                                               std::move(args)...);
+  ex::task<void> InitUserClassInstance(Args... args) {
+    std::exception_ptr init_exception;
+    ex::simple_counting_scope init_scope;
+    scheduler_->Schedule(
+        [this, &init_exception, ...args = std::move(args)]() mutable {
+          try {
+            if constexpr (kCreateFn != nullptr) {
+              using ReturnType = FnReturnType<kCreateFn>;
+              static_assert(
+                  std::is_same_v<ReturnType, UserClass>,
+                  "The return type of kCreateFn must match the Actor's UserClass template parameter to avoid slicing.");
+              user_class_instance_.reset(new UserClass(kCreateFn(std::move(args)...)));
+            } else {
+              user_class_instance_ = std::make_unique<UserClass>(std::move(args)...);
+            }
+            cached_user_class_instance_address_ = user_class_instance_.get();
+          } catch (...) {
+            init_exception = std::current_exception();
+          }
         },
-        std::move(arg_tuple));
+        actor_config_, init_scope.get_token());
+    co_await init_scope.join();
+    if (init_exception) {
+      std::rethrow_exception(init_exception);
+    }
   }
 
   ~Actor() override = default;
@@ -324,7 +361,7 @@ class Actor : public TypeErasedActor {
     if (!changed) {
       return;
     }
-    scheduler_->Schedule(this, async_scope_.get_token());
+    scheduler_->Schedule([this] { PullMailboxAndRun(); }, actor_config_, async_scope_.get_token());
   }
 
   void PullMailboxAndRun() override {

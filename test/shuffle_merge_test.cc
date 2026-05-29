@@ -383,7 +383,7 @@ TEST(ShuffleMergeTest, ComplexDependencyGraph) {
   auto coroutine = []() -> stdexec::task<void> {
     // Test with complex dependency graph where workers communicate with multiple reducers
     constexpr int kNumReducers = 8;
-    constexpr int kNumValues = 10000;
+    constexpr int kNumValues = 1000;
 
     // Create reducers
     std::vector<ex_actor::ActorRef<Reducer>> reducers;

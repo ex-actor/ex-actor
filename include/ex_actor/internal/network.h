@@ -28,14 +28,15 @@
 #include <unordered_map>
 #include <vector>
 
-#include <zmq.hpp>
-
+#include "ex_actor/3rd_lib/cppzmq/zmq.hpp"
 #include "ex_actor/internal/basic_actor_ref.h"
 #include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/message.h"
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {
+
+namespace zmq = ::ex_actor::embedded_3rd::zmq;
 
 struct NetworkConfig {
   /// How long (ms) should we consider a node dead if we haven't received any messages from it

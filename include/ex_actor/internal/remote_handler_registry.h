@@ -55,7 +55,8 @@ class RemoteActorRequestHandlerRegistry {
 
   using RemoteActorMethodCallHandler =
       std::function<ex::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
-  using RemoteActorCreationHandler = std::function<ex::task<ActorCreationResult>(RemoteActorCreationHandlerContext context)>;
+  using RemoteActorCreationHandler =
+      std::function<ex::task<ActorCreationResult>(RemoteActorCreationHandlerContext context)>;
 
   void RegisterRemoteActorMethodCallHandler(uint64_t handler_key, RemoteActorMethodCallHandler func) {
     EXA_THROW_CHECK(!remote_actor_method_call_handler_.contains(handler_key))
@@ -133,10 +134,9 @@ class RemoteFuncHandlerRegistrar {
         DeserializeFnArgs<kCreateFn>(context.serialized_args, context.actor_ref_serde_ctx);
 
     auto actor = std::make_unique<Actor<ActorClass, kCreateFn>>(std::move(context.scheduler),
-                                                                 std::move(creation_args.actor_config));
-    co_await std::apply(
-        [&actor](auto&&... args) { return actor->InitUserClassInstance(std::move(args)...); },
-        std::move(creation_args.args_tuple));
+                                                                std::move(creation_args.actor_config));
+    co_await std::apply([&actor](auto&&... args) { return actor->InitUserClassInstance(std::move(args)...); },
+                        std::move(creation_args.args_tuple));
 
     auto this_node_id = context.actor_ref_serde_ctx.this_node_id;
     auto actor_ref = ActorRef<ActorClass>(this_node_id, this_node_id, context.actor_id, actor.get(),

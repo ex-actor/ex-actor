@@ -239,7 +239,7 @@ class Actor : public TypeErasedActor {
     std::exception_ptr init_exception;
     ex::simple_counting_scope init_scope;
     scheduler_->Schedule(
-        [this, &init_exception, ...args = std::move(args)]() mutable {
+        [this, &init_exception, ... args = std::move(args)]() mutable {
           try {
             if constexpr (kCreateFn != nullptr) {
               using ReturnType = FnReturnType<kCreateFn>;

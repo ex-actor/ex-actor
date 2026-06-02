@@ -21,15 +21,14 @@ TEST(AsyncInitTest, ConstructorRunsOnCorrectSchedulerWithEnv) {
 
   // Get the thread ID that runs on each pool.
   auto get_tid = ex::schedule(scheduler_union.GetScheduler()) | ex::then([] { return std::this_thread::get_id(); });
-  auto [tid_pool1] = ex::sync_wait(get_tid | ex::write_env(ex::prop{ex_actor::get_scheduler_index, 0})).value();
-  auto [tid_pool2] = ex::sync_wait(get_tid | ex::write_env(ex::prop{ex_actor::get_scheduler_index, 1})).value();
+  auto [tid_pool1] = ex::sync_wait(get_tid | ex::write_env(ex::prop {ex_actor::get_scheduler_index, 0})).value();
+  auto [tid_pool2] = ex::sync_wait(get_tid | ex::write_env(ex::prop {ex_actor::get_scheduler_index, 1})).value();
   ASSERT_NE(tid_pool1, tid_pool2);
 
   ex_actor::Init(scheduler_union.GetScheduler());
   auto coroutine = [&]() -> stdexec::task<void> {
     std::thread::id ctor_thread;
-    auto actor = co_await ex_actor::Spawn<ConstructorThreadRecorder>(&ctor_thread)
-                     .WithConfig({.scheduler_index = 1});
+    auto actor = co_await ex_actor::Spawn<ConstructorThreadRecorder>(&ctor_thread).WithConfig({.scheduler_index = 1});
     // Constructor should have run on thread pool 2, not thread pool 1.
     EXPECT_EQ(ctor_thread, tid_pool2);
     EXPECT_NE(ctor_thread, tid_pool1);
@@ -99,9 +98,8 @@ TEST(AsyncInitTest, ConstructorsRunInParallel) {
     constexpr int kNumActors = 4;
 
     for (int i = 0; i < kNumActors; ++i) {
-      stdexec::spawn(
-          ex_actor::Spawn<SlowActor>(&concurrent_count, &max_concurrent) | ex_actor::DiscardResult(),
-          scope.get_token());
+      stdexec::spawn(ex_actor::Spawn<SlowActor>(&concurrent_count, &max_concurrent) | ex_actor::DiscardResult(),
+                     scope.get_token());
     }
     co_await scope.join();
 

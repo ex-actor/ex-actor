@@ -218,8 +218,7 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
                                 ? std::move(scheduler)
                                 : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                       default_work_sharing_thread_pool_.GetScheduler())),
-      backend_actor_(system_actor_scheduler_->Clone(), ActorConfig {}),
-      backend_actor_ref_() {
+      backend_actor_(system_actor_scheduler_->Clone(), ActorConfig {}) {
   ex::sync_wait(backend_actor_.InitUserClassInstance(user_actor_scheduler_->Clone(), this_node_id_, broker_actor_ref_));
   backend_actor_ref_ = BasicActorRef<ActorRegistryBackend>(/*actor_id=*/UINT64_MAX, &backend_actor_);
   log::Info("ActorRegistry created, node_id={:#x}", this_node_id_);

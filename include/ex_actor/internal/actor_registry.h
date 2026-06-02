@@ -188,7 +188,9 @@ class ActorRegistryBackend {
     try {
       co_await actor_ptr->InitUserClassInstance(std::move(args)...);
     } catch (...) {
-      actor_name_to_id_.erase(name);
+      if (config.actor_name.has_value()) {
+        actor_name_to_id_.erase(*config.actor_name);
+      }
       throw;
     }
 

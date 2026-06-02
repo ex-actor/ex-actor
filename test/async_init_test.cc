@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -48,6 +49,45 @@ struct SlowActor {
   }
   void Noop() {}
 };
+
+struct ThrowingActor {
+  explicit ThrowingActor() { throw std::runtime_error("ctor failed"); }
+  void Noop() {}
+};
+
+struct TrivialActor {
+  void Noop() {}
+};
+
+// Regression test for commit 4b95ee8: when a named actor's constructor throws
+// during InitUserClassInstance, the registry must roll back the name->id
+// mapping so the name can be reused.
+TEST(AsyncInitTest, NameRegistrationRolledBackWhenConstructorThrows) {
+  constexpr const char* kName = "rollback_name";
+  ex_actor::Init(/*thread_pool_size=*/1);
+  auto coroutine = [kName]() -> stdexec::task<void> {
+    bool threw = false;
+    try {
+      co_await ex_actor::Spawn<ThrowingActor>().WithConfig({.actor_name = kName});
+    } catch (const std::exception&) {
+      threw = true;
+    }
+    EXPECT_TRUE(threw);
+
+    // The name mapping should have been erased on failure.
+    auto looked_up = co_await ex_actor::GetActorRefByName<ThrowingActor>(kName);
+    EXPECT_FALSE(looked_up.has_value());
+
+    // The name is free again, so spawning a different actor with the same name
+    // must succeed instead of failing the duplicate-name check.
+    auto actor = co_await ex_actor::Spawn<TrivialActor>().WithConfig({.actor_name = kName});
+    EXPECT_FALSE(actor.IsEmpty());
+    auto looked_up_again = co_await ex_actor::GetActorRefByName<TrivialActor>(kName);
+    EXPECT_TRUE(looked_up_again.has_value());
+  };
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
 
 TEST(AsyncInitTest, ConstructorsRunInParallel) {
   ex_actor::Init(/*thread_pool_size=*/4);

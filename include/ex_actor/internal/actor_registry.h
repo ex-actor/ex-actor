@@ -184,10 +184,15 @@ class ActorRegistryBackend {
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists, name=" << name;
       actor_name_to_id_[name] = actor_id;
     }
+
+    try {
+      co_await actor_ptr->InitUserClassInstance(std::move(args)...);
+    } catch (...) {
+      actor_name_to_id_.erase(name);
+      throw;
+    }
+
     actor_id_to_actor_[actor_id] = std::move(actor);
-
-    co_await actor_ptr->InitUserClassInstance(std::move(args)...);
-
     auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor_ptr, broker_actor_ref_);
     NotifyExActorOnSpawned<UserClass>(actor_ptr, handle);
     // Workaround: see DeserializeActorRef comment.

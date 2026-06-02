@@ -1,0 +1,870 @@
+//
+// Copyright 2017 The Abseil Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// -----------------------------------------------------------------------------
+// File: config.h
+// -----------------------------------------------------------------------------
+//
+// This header file defines a set of macros for checking the presence of
+// important compiler and platform features. Such macros can be used to
+// produce portable code by parameterizing compilation based on the presence or
+// lack of a given feature.
+//
+// We define a "feature" as some interface we wish to program to: for example,
+// a library function or system call. A value of `1` indicates support for
+// that feature; any other value indicates the feature support is undefined.
+//
+// Example:
+//
+// Suppose a programmer wants to write a program that uses the 'mmap()' system
+// call. The Abseil macro for that feature (`EX_ACTOR_ABSL_HAVE_MMAP`) allows you to
+// selectively include the `mmap.h` header and bracket code using that feature
+// in the macro:
+//
+//   #include "ex_actor/3rd_lib/absl/base/config.h"
+//
+//   #ifdef EX_ACTOR_ABSL_HAVE_MMAP
+//   #include "sys/mman.h"
+//   #endif  //EX_ACTOR_ABSL_HAVE_MMAP
+//
+//   ...
+//   #ifdef EX_ACTOR_ABSL_HAVE_MMAP
+//   void *ptr = mmap(...);
+//   ...
+//   #endif  // EX_ACTOR_ABSL_HAVE_MMAP
+
+#ifndef EX_ACTOR_ABSL_BASE_CONFIG_H_
+#define EX_ACTOR_ABSL_BASE_CONFIG_H_
+
+// Included for the __GLIBC__ macro (or similar macros on other systems).
+#include <limits.h>
+
+#ifdef __cplusplus
+// Included for __GLIBCXX__, _LIBCPP_VERSION
+#include <cstddef>
+#endif  // __cplusplus
+
+// EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG
+//
+// MSVC does not set the value of __cplusplus correctly, but instead uses
+// _MSVC_LANG as a stand-in.
+// https://docs.microsoft.com/en-us/cpp/preprocessor/predefined-macros
+//
+// However, there are reports that MSVC even sets _MSVC_LANG incorrectly at
+// times, for example:
+// https://github.com/microsoft/vscode-cpptools/issues/1770
+// https://reviews.llvm.org/D70996
+//
+// For this reason, this symbol is considered INTERNAL and code outside of
+// Abseil must not use it.
+#if defined(_MSVC_LANG)
+#define EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG _MSVC_LANG
+#elif defined(__cplusplus)
+#define EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG __cplusplus
+#endif
+
+#if defined(EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG) && \
+    EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG >= 202002L
+// Include library feature test macros.
+#include <version>
+#endif
+
+#if defined(__APPLE__)
+// Included for TARGET_OS_IPHONE, __IPHONE_OS_VERSION_MIN_REQUIRED,
+// __IPHONE_8_0.
+#include <Availability.h>
+#include <TargetConditionals.h>
+#endif
+
+#include "ex_actor/3rd_lib/absl/base/options.h"
+#include "ex_actor/3rd_lib/absl/base/policy_checks.h"
+
+// Abseil long-term support (LTS) releases will define
+// `EX_ACTOR_ABSL_LTS_RELEASE_VERSION` to the integer representing the date string of the
+// LTS release version, and will define `EX_ACTOR_ABSL_LTS_RELEASE_PATCH_LEVEL` to the
+// integer representing the patch-level for that release.
+//
+// For example, for LTS release version "20300401.2", this would give us
+// EX_ACTOR_ABSL_LTS_RELEASE_VERSION == 20300401 && EX_ACTOR_ABSL_LTS_RELEASE_PATCH_LEVEL == 2
+//
+// These symbols will not be defined in non-LTS code.
+//
+// Abseil recommends that clients live-at-head. Therefore, if you are using
+// these symbols to assert a minimum version requirement, we recommend you do it
+// as
+//
+// #if defined(EX_ACTOR_ABSL_LTS_RELEASE_VERSION) && EX_ACTOR_ABSL_LTS_RELEASE_VERSION < 20300401
+// #error Project foo requires Abseil LTS version >= 20300401
+// #endif
+//
+// The `defined(EX_ACTOR_ABSL_LTS_RELEASE_VERSION)` part of the check excludes
+// live-at-head clients from the minimum version assertion.
+//
+// See https://abseil.io/about/releases for more information on Abseil release
+// management.
+//
+// LTS releases can be obtained from
+// https://github.com/abseil/abseil-cpp/releases.
+#undef EX_ACTOR_ABSL_LTS_RELEASE_VERSION
+#undef EX_ACTOR_ABSL_LTS_RELEASE_PATCH_LEVEL
+
+// Helper macro to convert a CPP variable to a string literal.
+#define EX_ACTOR_ABSL_INTERNAL_DO_TOKEN_STR(x) #x
+#define EX_ACTOR_ABSL_INTERNAL_TOKEN_STR(x) EX_ACTOR_ABSL_INTERNAL_DO_TOKEN_STR(x)
+
+// -----------------------------------------------------------------------------
+// Abseil namespace annotations
+// -----------------------------------------------------------------------------
+
+// EX_ACTOR_ABSL_NAMESPACE_BEGIN/EX_ACTOR_ABSL_NAMESPACE_END
+//
+// An annotation placed at the beginning/end of each `namespace ex_actor::embedded_3rd::absl` scope.
+// This is used to inject an inline namespace.
+//
+// The proper way to write Abseil code in the `absl` namespace is:
+//
+// namespace ex_actor::embedded_3rd::absl {
+// EX_ACTOR_ABSL_NAMESPACE_BEGIN
+//
+// void Foo();  // ex_actor::embedded_3rd::absl::Foo().
+//
+// EX_ACTOR_ABSL_NAMESPACE_END
+// }  // namespace ex_actor::embedded_3rd::absl
+//
+// Users of Abseil should not use these macros, because users of Abseil should
+// not write `namespace ex_actor::embedded_3rd::absl {` in their own code for any reason.  (Abseil does
+// not support forward declarations of its own types, nor does it support
+// user-provided specialization of Abseil templates.  Code that violates these
+// rules may be broken without warning.)
+#if !defined(EX_ACTOR_ABSL_OPTION_USE_INLINE_NAMESPACE) || \
+    !defined(EX_ACTOR_ABSL_OPTION_INLINE_NAMESPACE_NAME)
+#error options.h is misconfigured.
+#endif
+
+// Check that EX_ACTOR_ABSL_OPTION_INLINE_NAMESPACE_NAME is neither "head" nor ""
+#if defined(__cplusplus) && EX_ACTOR_ABSL_OPTION_USE_INLINE_NAMESPACE == 1
+
+#define EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR \
+  EX_ACTOR_ABSL_INTERNAL_TOKEN_STR(EX_ACTOR_ABSL_OPTION_INLINE_NAMESPACE_NAME)
+
+static_assert(EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[0] != '\0',
+              "options.h misconfigured: EX_ACTOR_ABSL_OPTION_INLINE_NAMESPACE_NAME must "
+              "not be empty.");
+static_assert(EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[0] != 'h' ||
+                  EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[1] != 'e' ||
+                  EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[2] != 'a' ||
+                  EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[3] != 'd' ||
+                  EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[4] != '\0',
+              "options.h misconfigured: EX_ACTOR_ABSL_OPTION_INLINE_NAMESPACE_NAME must "
+              "be changed to a new, unique identifier name.");
+
+#endif
+
+#if EX_ACTOR_ABSL_OPTION_USE_INLINE_NAMESPACE == 0
+#define EX_ACTOR_ABSL_NAMESPACE_BEGIN
+#define EX_ACTOR_ABSL_NAMESPACE_END
+#define EX_ACTOR_ABSL_INTERNAL_C_SYMBOL(x) x
+#elif EX_ACTOR_ABSL_OPTION_USE_INLINE_NAMESPACE == 1
+#define EX_ACTOR_ABSL_NAMESPACE_BEGIN \
+  inline namespace EX_ACTOR_ABSL_OPTION_INLINE_NAMESPACE_NAME {
+#define EX_ACTOR_ABSL_NAMESPACE_END }
+#define EX_ACTOR_ABSL_INTERNAL_C_SYMBOL_HELPER_2(x, v) x##_##v
+#define EX_ACTOR_ABSL_INTERNAL_C_SYMBOL_HELPER_1(x, v) \
+  EX_ACTOR_ABSL_INTERNAL_C_SYMBOL_HELPER_2(x, v)
+#define EX_ACTOR_ABSL_INTERNAL_C_SYMBOL(x) \
+  EX_ACTOR_ABSL_INTERNAL_C_SYMBOL_HELPER_1(x, EX_ACTOR_ABSL_OPTION_INLINE_NAMESPACE_NAME)
+#else
+#error options.h is misconfigured.
+#endif
+
+// -----------------------------------------------------------------------------
+// Compiler Feature Checks
+// -----------------------------------------------------------------------------
+
+// EX_ACTOR_ABSL_HAVE_BUILTIN()
+//
+// Checks whether the compiler supports a Clang Feature Checking Macro, and if
+// so, checks whether it supports the provided builtin function "x" where x
+// is one of the functions noted in
+// https://clang.llvm.org/docs/LanguageExtensions.html
+//
+// Note: Use this macro to avoid an extra level of #ifdef __has_builtin check.
+// http://releases.llvm.org/3.3/tools/clang/docs/LanguageExtensions.html
+#ifdef __has_builtin
+#define EX_ACTOR_ABSL_HAVE_BUILTIN(x) __has_builtin(x)
+#else
+#define EX_ACTOR_ABSL_HAVE_BUILTIN(x) 0
+#endif
+
+#ifdef __has_feature
+#define EX_ACTOR_ABSL_HAVE_FEATURE(f) __has_feature(f)
+#else
+#define EX_ACTOR_ABSL_HAVE_FEATURE(f) 0
+#endif
+
+// Portable check for GCC minimum version:
+// https://gcc.gnu.org/onlinedocs/cpp/Common-Predefined-Macros.html
+#if defined(__GNUC__) && defined(__GNUC_MINOR__)
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_MIN_GNUC_VERSION(x, y) \
+  (__GNUC__ > (x) || __GNUC__ == (x) && __GNUC_MINOR__ >= (y))
+#else
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_MIN_GNUC_VERSION(x, y) 0
+#endif
+
+#if defined(__clang__) && defined(__clang_major__) && defined(__clang_minor__)
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_MIN_CLANG_VERSION(x, y) \
+  (__clang_major__ > (x) || __clang_major__ == (x) && __clang_minor__ >= (y))
+#else
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_MIN_CLANG_VERSION(x, y) 0
+#endif
+
+// EX_ACTOR_ABSL_HAVE_TLS is defined to 1 when __thread should be supported.
+// We assume __thread is supported on Linux when compiled with Clang or
+// compiled against libstdc++ with _GLIBCXX_HAVE_TLS defined.
+#ifdef EX_ACTOR_ABSL_HAVE_TLS
+#error EX_ACTOR_ABSL_HAVE_TLS cannot be directly set
+#elif (defined(__linux__)) && (defined(__clang__) || defined(_GLIBCXX_HAVE_TLS))
+#define EX_ACTOR_ABSL_HAVE_TLS 1
+#elif defined(__INTEL_LLVM_COMPILER)
+#define EX_ACTOR_ABSL_HAVE_TLS 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_DESTRUCTIBLE
+//
+// Checks whether `std::is_trivially_destructible<T>` is supported.
+#ifdef EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_DESTRUCTIBLE
+#error EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_DESTRUCTIBLE cannot be directly set
+#define EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_DESTRUCTIBLE 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_CONSTRUCTIBLE
+//
+// Checks whether `std::is_trivially_default_constructible<T>` and
+// `std::is_trivially_copy_constructible<T>` are supported.
+#ifdef EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_CONSTRUCTIBLE
+#error EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_CONSTRUCTIBLE cannot be directly set
+#else
+#define EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_CONSTRUCTIBLE 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_ASSIGNABLE
+//
+// Checks whether `std::is_trivially_copy_assignable<T>` is supported.
+#ifdef EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_ASSIGNABLE
+#error EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_ASSIGNABLE cannot be directly set
+#else
+#define EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_ASSIGNABLE 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_COPYABLE
+//
+// Checks whether `std::is_trivially_copyable<T>` is supported.
+#ifdef EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_COPYABLE
+#error EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_COPYABLE cannot be directly set
+#define EX_ACTOR_ABSL_HAVE_STD_IS_TRIVIALLY_COPYABLE 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_THREAD_LOCAL
+//
+// Checks whether the `thread_local` storage duration specifier is supported.
+#ifdef EX_ACTOR_ABSL_HAVE_THREAD_LOCAL
+#error EX_ACTOR_ABSL_HAVE_THREAD_LOCAL cannot be directly set
+#elif !defined(__XTENSA__)
+#define EX_ACTOR_ABSL_HAVE_THREAD_LOCAL 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_INTRINSIC_INT128
+//
+// Checks whether the __int128 compiler extension for a 128-bit integral type is
+// supported.
+//
+// Note: __SIZEOF_INT128__ is defined by Clang and GCC when __int128 is
+// supported, but we avoid using it in certain cases:
+// * On Clang:
+//   * Building using Clang for Windows, where the Clang runtime library has
+//     128-bit support only on LP64 architectures, but Windows is LLP64.
+// * On Nvidia's nvcc:
+//   * nvcc also defines __GNUC__ and __SIZEOF_INT128__, but not all versions
+//     actually support __int128.
+#ifdef EX_ACTOR_ABSL_HAVE_INTRINSIC_INT128
+#error EX_ACTOR_ABSL_HAVE_INTRINSIC_INT128 cannot be directly set
+#elif defined(__SIZEOF_INT128__)
+#if (defined(__clang__) && !defined(_WIN32)) ||           \
+    (defined(__CUDACC__) && __CUDACC_VER_MAJOR__ >= 9) || \
+    (defined(__GNUC__) && !defined(__clang__) && !defined(__CUDACC__))
+#define EX_ACTOR_ABSL_HAVE_INTRINSIC_INT128 1
+#elif defined(__CUDACC__)
+// __CUDACC_VER__ is a full version number before CUDA 9, and is defined to a
+// string explaining that it has been removed starting with CUDA 9. We use
+// nested #ifs because there is no short-circuiting in the preprocessor.
+// NOTE: `__CUDACC__` could be undefined while `__CUDACC_VER__` is defined.
+#if __CUDACC_VER__ >= 70000
+#define EX_ACTOR_ABSL_HAVE_INTRINSIC_INT128 1
+#endif  // __CUDACC_VER__ >= 70000
+#endif  // defined(__CUDACC__)
+#endif  // EX_ACTOR_ABSL_HAVE_INTRINSIC_INT128
+
+// EX_ACTOR_ABSL_HAVE_EXCEPTIONS
+//
+// Checks whether the compiler both supports and enables exceptions. Many
+// compilers support a "no exceptions" mode that disables exceptions.
+//
+// Generally, when EX_ACTOR_ABSL_HAVE_EXCEPTIONS is not defined:
+//
+// * Code using `throw` and `try` may not compile.
+// * The `noexcept` specifier will still compile and behave as normal.
+// * The `noexcept` operator may still return `false`.
+//
+// For further details, consult the compiler's documentation.
+#ifdef EX_ACTOR_ABSL_HAVE_EXCEPTIONS
+#error EX_ACTOR_ABSL_HAVE_EXCEPTIONS cannot be directly set.
+#elif EX_ACTOR_ABSL_INTERNAL_HAVE_MIN_CLANG_VERSION(3, 6)
+// Clang >= 3.6
+#if EX_ACTOR_ABSL_HAVE_FEATURE(cxx_exceptions)
+#define EX_ACTOR_ABSL_HAVE_EXCEPTIONS 1
+#endif  // EX_ACTOR_ABSL_HAVE_FEATURE(cxx_exceptions)
+#elif defined(__clang__)
+// Clang < 3.6
+// http://releases.llvm.org/3.6.0/tools/clang/docs/ReleaseNotes.html#the-exceptions-macro
+#if defined(__EXCEPTIONS) && EX_ACTOR_ABSL_HAVE_FEATURE(cxx_exceptions)
+#define EX_ACTOR_ABSL_HAVE_EXCEPTIONS 1
+#endif  // defined(__EXCEPTIONS) && EX_ACTOR_ABSL_HAVE_FEATURE(cxx_exceptions)
+// Handle remaining special cases and default to exceptions being supported.
+#elif !(defined(__GNUC__) && !defined(__cpp_exceptions)) && \
+    !(defined(_MSC_VER) && !defined(_CPPUNWIND))
+#define EX_ACTOR_ABSL_HAVE_EXCEPTIONS 1
+#endif
+
+// -----------------------------------------------------------------------------
+// Platform Feature Checks
+// -----------------------------------------------------------------------------
+
+// Currently supported operating systems and associated preprocessor
+// symbols:
+//
+//   Linux and Linux-derived           __linux__
+//   Android                           __ANDROID__ (implies __linux__)
+//   Linux (non-Android)               __linux__ && !__ANDROID__
+//   Darwin (macOS and iOS)            __APPLE__
+//   Akaros (http://akaros.org)        __ros__
+//   Windows                           _WIN32
+//   AsmJS                             __asmjs__
+//   WebAssembly (Emscripten)          __EMSCRIPTEN__
+//   Fuchsia                           __Fuchsia__
+//   WebAssembly (WASI)                _WASI_EMULATED_MMAN (implies __wasi__)
+//
+// Note that since Android defines both __ANDROID__ and __linux__, one
+// may probe for either Linux or Android by simply testing for __linux__.
+
+// EX_ACTOR_ABSL_HAVE_MMAP
+//
+// Checks whether the platform has an mmap(2) implementation as defined in
+// POSIX.1-2001.
+#ifdef EX_ACTOR_ABSL_HAVE_MMAP
+#error EX_ACTOR_ABSL_HAVE_MMAP cannot be directly set
+#elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) || \
+    defined(_AIX) || defined(__ros__) || defined(__asmjs__) ||            \
+    defined(__EMSCRIPTEN__) || defined(__Fuchsia__) || defined(__sun) ||  \
+    defined(__myriad2__) || defined(__HAIKU__) || defined(__OpenBSD__) || \
+    defined(__NetBSD__) || defined(__QNX__) || defined(__VXWORKS__) ||    \
+    defined(__hexagon__) || defined(__XTENSA__) ||                        \
+    defined(_WASI_EMULATED_MMAN)
+#define EX_ACTOR_ABSL_HAVE_MMAP 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_PTHREAD_GETSCHEDPARAM
+//
+// Checks whether the platform implements the pthread_(get|set)schedparam(3)
+// functions as defined in POSIX.1-2001.
+#ifdef EX_ACTOR_ABSL_HAVE_PTHREAD_GETSCHEDPARAM
+#error EX_ACTOR_ABSL_HAVE_PTHREAD_GETSCHEDPARAM cannot be directly set
+#elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) || \
+    defined(_AIX) || defined(__ros__) || defined(__OpenBSD__) ||          \
+    defined(__NetBSD__) || defined(__VXWORKS__)
+#define EX_ACTOR_ABSL_HAVE_PTHREAD_GETSCHEDPARAM 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_SCHED_GETCPU
+//
+// Checks whether sched_getcpu is available.
+#ifdef EX_ACTOR_ABSL_HAVE_SCHED_GETCPU
+#error EX_ACTOR_ABSL_HAVE_SCHED_GETCPU cannot be directly set
+#elif defined(__linux__)
+#define EX_ACTOR_ABSL_HAVE_SCHED_GETCPU 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_SCHED_YIELD
+//
+// Checks whether the platform implements sched_yield(2) as defined in
+// POSIX.1-2001.
+#ifdef EX_ACTOR_ABSL_HAVE_SCHED_YIELD
+#error EX_ACTOR_ABSL_HAVE_SCHED_YIELD cannot be directly set
+#elif defined(__linux__) || defined(__ros__) || defined(__native_client__) || \
+    defined(__VXWORKS__)
+#define EX_ACTOR_ABSL_HAVE_SCHED_YIELD 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_SEMAPHORE_H
+//
+// Checks whether the platform supports the <semaphore.h> header and sem_init(3)
+// family of functions as standardized in POSIX.1-2001.
+//
+// Note: While Apple provides <semaphore.h> for both iOS and macOS, it is
+// explicitly deprecated and will cause build failures if enabled for those
+// platforms.  We side-step the issue by not defining it here for Apple
+// platforms.
+#ifdef EX_ACTOR_ABSL_HAVE_SEMAPHORE_H
+#error EX_ACTOR_ABSL_HAVE_SEMAPHORE_H cannot be directly set
+#elif defined(__linux__) || defined(__ros__) || defined(__VXWORKS__)
+#define EX_ACTOR_ABSL_HAVE_SEMAPHORE_H 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_ALARM
+//
+// Checks whether the platform supports the <signal.h> header and alarm(2)
+// function as standardized in POSIX.1-2001.
+#ifdef EX_ACTOR_ABSL_HAVE_ALARM
+#error EX_ACTOR_ABSL_HAVE_ALARM cannot be directly set
+#elif defined(__GOOGLE_GRTE_VERSION__)
+// feature tests for Google's GRTE
+#define EX_ACTOR_ABSL_HAVE_ALARM 1
+#elif defined(__GLIBC__)
+// feature test for glibc
+#define EX_ACTOR_ABSL_HAVE_ALARM 1
+#elif defined(_MSC_VER)
+// feature tests for Microsoft's library
+#elif defined(__MINGW32__)
+// mingw32 doesn't provide alarm(2):
+// https://osdn.net/projects/mingw/scm/git/mingw-org-wsl/blobs/5.2-trunk/mingwrt/include/unistd.h
+// mingw-w64 provides a no-op implementation:
+// https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-crt/misc/alarm.c
+#elif defined(__EMSCRIPTEN__)
+// emscripten doesn't support signals
+#elif defined(__wasi__)
+// WASI doesn't support signals
+#elif defined(__Fuchsia__)
+// Signals don't exist on fuchsia.
+#elif defined(__hexagon__)
+#else
+// other standard libraries
+#define EX_ACTOR_ABSL_HAVE_ALARM 1
+#endif
+
+// EX_ACTOR_ABSL_IS_LITTLE_ENDIAN
+// EX_ACTOR_ABSL_IS_BIG_ENDIAN
+//
+// Checks the endianness of the platform.
+//
+// Prefer using `std::endian` in C++20, or `ex_actor::embedded_3rd::absl::endian` from
+// absl/numeric/bits.h prior to C++20.
+//
+// Notes: uses the built in endian macros provided by GCC (since 4.6) and
+// Clang (since 3.2); see
+// https://gcc.gnu.org/onlinedocs/cpp/Common-Predefined-Macros.html.
+// Otherwise, if _WIN32, assume little endian. Otherwise, bail with an error.
+#if defined(EX_ACTOR_ABSL_IS_BIG_ENDIAN)
+#error "EX_ACTOR_ABSL_IS_BIG_ENDIAN cannot be directly set."
+#endif
+#if defined(EX_ACTOR_ABSL_IS_LITTLE_ENDIAN)
+#error "EX_ACTOR_ABSL_IS_LITTLE_ENDIAN cannot be directly set."
+#endif
+
+#if (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
+     __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define EX_ACTOR_ABSL_IS_LITTLE_ENDIAN 1
+#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
+    __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define EX_ACTOR_ABSL_IS_BIG_ENDIAN 1
+#elif defined(_WIN32)
+#define EX_ACTOR_ABSL_IS_LITTLE_ENDIAN 1
+#else
+#error "absl endian detection needs to be set up for your compiler"
+#endif
+
+// Deprecated macros for polyfill detection.
+#define EX_ACTOR_ABSL_HAVE_STD_ANY 1
+#define EX_ACTOR_ABSL_USES_STD_ANY 1
+#define EX_ACTOR_ABSL_HAVE_STD_OPTIONAL 1
+#define EX_ACTOR_ABSL_USES_STD_OPTIONAL 1
+#define EX_ACTOR_ABSL_HAVE_STD_STRING_VIEW 1
+#define EX_ACTOR_ABSL_USES_STD_STRING_VIEW 1
+#define EX_ACTOR_ABSL_HAVE_STD_VARIANT 1
+#define EX_ACTOR_ABSL_USES_STD_VARIANT 1
+
+// EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION
+//
+// Checks whether C++20 std::source_location is available.
+#ifdef EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION
+#error "EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION cannot be directly set."
+#elif (defined(__cpp_lib_source_location) &&    \
+       __cpp_lib_source_location >= 201907L) || \
+    (defined(EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG) &&   \
+     EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG >= 202002L)
+#ifdef __has_include
+#if __has_include(<source_location>)
+#define EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION 1
+#endif
+#else
+// No __has_include support, so just assume C++ language version is correct.
+#define EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION 1
+#endif
+#endif
+
+// EX_ACTOR_ABSL_USES_STD_SOURCE_LOCATION
+//
+// Indicates whether ex_actor::embedded_3rd::absl::SourceLocation is an alias for std::source_location.
+#if !defined(EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION)
+#error options.h is misconfigured.
+#elif EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION == 0 || \
+    (EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION == 2 &&  \
+     !defined(EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION))
+#undef EX_ACTOR_ABSL_USES_STD_SOURCE_LOCATION
+#elif EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION == 1 || \
+    (EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION == 2 &&  \
+     defined(EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION))
+#define EX_ACTOR_ABSL_USES_STD_SOURCE_LOCATION 1
+#else
+#error options.h is misconfigured.
+#endif
+
+// EX_ACTOR_ABSL_HAVE_STD_ORDERING
+//
+// Checks whether C++20 std::{partial,weak,strong}_ordering are available.
+//
+// __cpp_lib_three_way_comparison is missing on libc++
+// (https://github.com/llvm/llvm-project/issues/73953) so treat it as defined
+// when building in C++20 mode.
+#ifdef EX_ACTOR_ABSL_HAVE_STD_ORDERING
+#error "EX_ACTOR_ABSL_HAVE_STD_ORDERING cannot be directly set."
+#elif (defined(__cpp_lib_three_way_comparison) &&    \
+       __cpp_lib_three_way_comparison >= 201907L) || \
+    (defined(EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG) &&        \
+     EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG >= 202002L)
+#define EX_ACTOR_ABSL_HAVE_STD_ORDERING 1
+#endif
+
+// EX_ACTOR_ABSL_USES_STD_ORDERING
+//
+// Indicates whether ex_actor::embedded_3rd::absl::{partial,weak,strong}_ordering are aliases for the
+// std:: ordering types.
+#if !defined(EX_ACTOR_ABSL_OPTION_USE_STD_ORDERING)
+#error options.h is misconfigured.
+#elif EX_ACTOR_ABSL_OPTION_USE_STD_ORDERING == 0 || \
+    (EX_ACTOR_ABSL_OPTION_USE_STD_ORDERING == 2 && !defined(EX_ACTOR_ABSL_HAVE_STD_ORDERING))
+#undef EX_ACTOR_ABSL_USES_STD_ORDERING
+#elif EX_ACTOR_ABSL_OPTION_USE_STD_ORDERING == 1 || \
+    (EX_ACTOR_ABSL_OPTION_USE_STD_ORDERING == 2 && defined(EX_ACTOR_ABSL_HAVE_STD_ORDERING))
+#define EX_ACTOR_ABSL_USES_STD_ORDERING 1
+#else
+#error options.h is misconfigured.
+#endif
+
+// EX_ACTOR_ABSL_INTERNAL_MANGLED_NS
+// EX_ACTOR_ABSL_INTERNAL_MANGLED_BACKREFERENCE
+//
+// Internal macros for building up mangled names in our internal fork of CCTZ.
+// This implementation detail is only needed and provided for the MSVC build.
+//
+// These macros both expand to string literals.  EX_ACTOR_ABSL_INTERNAL_MANGLED_NS is
+// the mangled spelling of the `absl` namespace, and
+// EX_ACTOR_ABSL_INTERNAL_MANGLED_BACKREFERENCE is a back-reference integer representing
+// the proper count to skip past the CCTZ fork namespace names.  (This number
+// is one larger when there is an inline namespace name to skip.)
+#if defined(_MSC_VER)
+#if EX_ACTOR_ABSL_OPTION_USE_INLINE_NAMESPACE == 0
+#define EX_ACTOR_ABSL_INTERNAL_MANGLED_NS "absl"
+#define EX_ACTOR_ABSL_INTERNAL_MANGLED_BACKREFERENCE "5"
+#else
+#define EX_ACTOR_ABSL_INTERNAL_MANGLED_NS \
+  EX_ACTOR_ABSL_INTERNAL_TOKEN_STR(EX_ACTOR_ABSL_OPTION_INLINE_NAMESPACE_NAME) "@absl"
+#define EX_ACTOR_ABSL_INTERNAL_MANGLED_BACKREFERENCE "6"
+#endif
+#endif
+
+// EX_ACTOR_ABSL_DLL
+//
+// When building Abseil as a DLL, this macro expands to `__declspec(dllexport)`
+// so we can annotate symbols appropriately as being exported. When used in
+// headers consuming a DLL, this macro expands to `__declspec(dllimport)` so
+// that consumers know the symbol is defined inside the DLL. In all other cases,
+// the macro expands to nothing.
+#if defined(_MSC_VER)
+#if defined(EX_ACTOR_ABSL_BUILD_DLL)
+#define EX_ACTOR_ABSL_DLL __declspec(dllexport)
+#elif defined(EX_ACTOR_ABSL_CONSUME_DLL)
+#define EX_ACTOR_ABSL_DLL __declspec(dllimport)
+#else
+#define EX_ACTOR_ABSL_DLL
+#endif
+#else
+#define EX_ACTOR_ABSL_DLL
+#endif  // defined(_MSC_VER)
+
+#if defined(_MSC_VER)
+#if defined(EX_ACTOR_ABSL_BUILD_TEST_DLL)
+#define EX_ACTOR_ABSL_TEST_DLL __declspec(dllexport)
+#elif defined(EX_ACTOR_ABSL_CONSUME_TEST_DLL)
+#define EX_ACTOR_ABSL_TEST_DLL __declspec(dllimport)
+#else
+#define EX_ACTOR_ABSL_TEST_DLL
+#endif
+#else
+#define EX_ACTOR_ABSL_TEST_DLL
+#endif  // defined(_MSC_VER)
+
+// EX_ACTOR_ABSL_HAVE_MEMORY_SANITIZER
+//
+// MemorySanitizer (MSan) is a detector of uninitialized reads. It consists of
+// a compiler instrumentation module and a run-time library.
+#ifdef EX_ACTOR_ABSL_HAVE_MEMORY_SANITIZER
+#error "EX_ACTOR_ABSL_HAVE_MEMORY_SANITIZER cannot be directly set."
+#elif !defined(__native_client__) && EX_ACTOR_ABSL_HAVE_FEATURE(memory_sanitizer)
+#define EX_ACTOR_ABSL_HAVE_MEMORY_SANITIZER 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_THREAD_SANITIZER
+//
+// ThreadSanitizer (TSan) is a fast data race detector.
+#ifdef EX_ACTOR_ABSL_HAVE_THREAD_SANITIZER
+#error "EX_ACTOR_ABSL_HAVE_THREAD_SANITIZER cannot be directly set."
+#elif defined(__SANITIZE_THREAD__)
+#define EX_ACTOR_ABSL_HAVE_THREAD_SANITIZER 1
+#elif EX_ACTOR_ABSL_HAVE_FEATURE(thread_sanitizer)
+#define EX_ACTOR_ABSL_HAVE_THREAD_SANITIZER 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_ADDRESS_SANITIZER
+//
+// AddressSanitizer (ASan) is a fast memory error detector.
+#ifdef EX_ACTOR_ABSL_HAVE_ADDRESS_SANITIZER
+#error "EX_ACTOR_ABSL_HAVE_ADDRESS_SANITIZER cannot be directly set."
+#elif defined(__SANITIZE_ADDRESS__)
+#define EX_ACTOR_ABSL_HAVE_ADDRESS_SANITIZER 1
+#elif EX_ACTOR_ABSL_HAVE_FEATURE(address_sanitizer)
+#define EX_ACTOR_ABSL_HAVE_ADDRESS_SANITIZER 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_HWADDRESS_SANITIZER
+//
+// Hardware-Assisted AddressSanitizer (or HWASAN) is even faster than asan
+// memory error detector which can use CPU features like ARM TBI, Intel LAM or
+// AMD UAI.
+#ifdef EX_ACTOR_ABSL_HAVE_HWADDRESS_SANITIZER
+#error "EX_ACTOR_ABSL_HAVE_HWADDRESS_SANITIZER cannot be directly set."
+#elif defined(__SANITIZE_HWADDRESS__)
+#define EX_ACTOR_ABSL_HAVE_HWADDRESS_SANITIZER 1
+#elif EX_ACTOR_ABSL_HAVE_FEATURE(hwaddress_sanitizer)
+#define EX_ACTOR_ABSL_HAVE_HWADDRESS_SANITIZER 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_DATAFLOW_SANITIZER
+//
+// Dataflow Sanitizer (or DFSAN) is a generalised dynamic data flow analysis.
+#ifdef EX_ACTOR_ABSL_HAVE_DATAFLOW_SANITIZER
+#error "EX_ACTOR_ABSL_HAVE_DATAFLOW_SANITIZER cannot be directly set."
+#elif defined(DATAFLOW_SANITIZER)
+// GCC provides no method for detecting the presence of the standalone
+// DataFlowSanitizer (-fsanitize=dataflow), so GCC users of -fsanitize=dataflow
+// should also use -DDATAFLOW_SANITIZER.
+#define EX_ACTOR_ABSL_HAVE_DATAFLOW_SANITIZER 1
+#elif EX_ACTOR_ABSL_HAVE_FEATURE(dataflow_sanitizer)
+#define EX_ACTOR_ABSL_HAVE_DATAFLOW_SANITIZER 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER
+//
+// LeakSanitizer (or lsan) is a detector of memory leaks.
+// https://clang.llvm.org/docs/LeakSanitizer.html
+// https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer
+//
+// The macro EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER can be used to detect at compile-time
+// whether the LeakSanitizer is potentially available. However, just because the
+// LeakSanitizer is available does not mean it is active. Use the
+// always-available run-time interface in //absl/debugging/leak_check.h for
+// interacting with LeakSanitizer.
+#ifdef EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER
+#error "EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER cannot be directly set."
+#elif defined(LEAK_SANITIZER)
+// GCC provides no method for detecting the presence of the standalone
+// LeakSanitizer (-fsanitize=leak), so GCC users of -fsanitize=leak should also
+// use -DLEAK_SANITIZER.
+#define EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER 1
+// Clang standalone LeakSanitizer (-fsanitize=leak)
+#elif EX_ACTOR_ABSL_HAVE_FEATURE(leak_sanitizer)
+#define EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER 1
+#elif defined(EX_ACTOR_ABSL_HAVE_ADDRESS_SANITIZER) && !defined(_WIN32)
+// GCC or Clang using the LeakSanitizer integrated into AddressSanitizer.
+#define EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_CLASS_TEMPLATE_ARGUMENT_DEDUCTION
+//
+// Deprecated: always defined to 1.
+// Class template argument deduction is a language feature added in C++17,
+// which means all versions of C++ supported by Abseil have it.
+#ifdef EX_ACTOR_ABSL_HAVE_CLASS_TEMPLATE_ARGUMENT_DEDUCTION
+#error "EX_ACTOR_ABSL_HAVE_CLASS_TEMPLATE_ARGUMENT_DEDUCTION cannot be directly set."
+#else
+#define EX_ACTOR_ABSL_HAVE_CLASS_TEMPLATE_ARGUMENT_DEDUCTION 1
+#endif
+
+// `EX_ACTOR_ABSL_INTERNAL_HAS_RTTI` determines whether abseil is being compiled with
+// RTTI support.
+#ifdef EX_ACTOR_ABSL_INTERNAL_HAS_RTTI
+#error EX_ACTOR_ABSL_INTERNAL_HAS_RTTI cannot be directly set
+#elif EX_ACTOR_ABSL_HAVE_FEATURE(cxx_rtti)
+#define EX_ACTOR_ABSL_INTERNAL_HAS_RTTI 1
+#elif defined(__GNUC__) && defined(__GXX_RTTI)
+#define EX_ACTOR_ABSL_INTERNAL_HAS_RTTI 1
+#elif defined(_MSC_VER) && defined(_CPPRTTI)
+#define EX_ACTOR_ABSL_INTERNAL_HAS_RTTI 1
+#elif !defined(__GNUC__) && !defined(_MSC_VER)
+// Unknown compiler, default to RTTI
+#define EX_ACTOR_ABSL_INTERNAL_HAS_RTTI 1
+#endif
+
+// `EX_ACTOR_ABSL_INTERNAL_HAS_CXA_DEMANGLE` determines whether `abi::__cxa_demangle` is
+// available.
+#ifdef EX_ACTOR_ABSL_INTERNAL_HAS_CXA_DEMANGLE
+#error EX_ACTOR_ABSL_INTERNAL_HAS_CXA_DEMANGLE cannot be directly set
+#elif defined(OS_ANDROID) && (defined(__i386__) || defined(__x86_64__))
+#undef EX_ACTOR_ABSL_INTERNAL_HAS_CXA_DEMANGLE
+#elif defined(__GNUC__)
+#define EX_ACTOR_ABSL_INTERNAL_HAS_CXA_DEMANGLE 1
+#elif defined(__clang__) && !defined(_MSC_VER)
+#define EX_ACTOR_ABSL_INTERNAL_HAS_CXA_DEMANGLE 1
+#endif
+
+// EX_ACTOR_ABSL_INTERNAL_HAVE_SSE is used for compile-time detection of SSE support.
+// See https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html for an overview of
+// which architectures support the various x86 instruction sets.
+#ifdef EX_ACTOR_ABSL_INTERNAL_HAVE_SSE
+#error EX_ACTOR_ABSL_INTERNAL_HAVE_SSE cannot be directly set
+#elif defined(__SSE__)
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_SSE 1
+#elif (defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)) && \
+    !defined(_M_ARM64EC)
+// MSVC only defines _M_IX86_FP for x86 32-bit code, and _M_IX86_FP >= 1
+// indicates that at least SSE was targeted with the /arch:SSE option.
+// All x86-64 processors support SSE, so support can be assumed.
+// https://docs.microsoft.com/en-us/cpp/preprocessor/predefined-macros
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_SSE 1
+#endif
+
+// EX_ACTOR_ABSL_INTERNAL_HAVE_SSE2 is used for compile-time detection of SSE2 support.
+// See https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html for an overview of
+// which architectures support the various x86 instruction sets.
+#ifdef EX_ACTOR_ABSL_INTERNAL_HAVE_SSE2
+#error EX_ACTOR_ABSL_INTERNAL_HAVE_SSE2 cannot be directly set
+#elif defined(__SSE2__)
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_SSE2 1
+#elif (defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)) && \
+    !defined(_M_ARM64EC)
+// MSVC only defines _M_IX86_FP for x86 32-bit code, and _M_IX86_FP >= 2
+// indicates that at least SSE2 was targeted with the /arch:SSE2 option.
+// All x86-64 processors support SSE2, so support can be assumed.
+// https://docs.microsoft.com/en-us/cpp/preprocessor/predefined-macros
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_SSE2 1
+#endif
+
+// EX_ACTOR_ABSL_INTERNAL_HAVE_SSSE3 is used for compile-time detection of SSSE3 support.
+// See https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html for an overview of
+// which architectures support the various x86 instruction sets.
+//
+// MSVC does not have a mode that targets SSSE3 at compile-time. To use SSSE3
+// with MSVC requires either assuming that the code will only every run on CPUs
+// that support SSSE3, otherwise __cpuid() can be used to detect support at
+// runtime and fallback to a non-SSSE3 implementation when SSSE3 is unsupported
+// by the CPU.
+#ifdef EX_ACTOR_ABSL_INTERNAL_HAVE_SSSE3
+#error EX_ACTOR_ABSL_INTERNAL_HAVE_SSSE3 cannot be directly set
+#elif defined(__SSSE3__)
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_SSSE3 1
+#endif
+
+// EX_ACTOR_ABSL_INTERNAL_HAVE_ARM_NEON is used for compile-time detection of NEON (ARM
+// SIMD).
+//
+// If __CUDA_ARCH__ is defined, then we are compiling CUDA code in device mode.
+// In device mode, NEON intrinsics are not available, regardless of host
+// platform.
+// https://llvm.org/docs/CompileCudaWithLLVM.html#detecting-clang-vs-nvcc-from-code
+#ifdef EX_ACTOR_ABSL_INTERNAL_HAVE_ARM_NEON
+#error EX_ACTOR_ABSL_INTERNAL_HAVE_ARM_NEON cannot be directly set
+#elif defined(__ARM_NEON) && !(defined(__NVCC__) && defined(__CUDACC__))
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_ARM_NEON 1
+#endif
+
+#if EX_ACTOR_ABSL_HAVE_BUILTIN(__builtin_LINE) && EX_ACTOR_ABSL_HAVE_BUILTIN(__builtin_FILE)
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_BUILTIN_LINE_FILE 1
+#elif defined(__GNUC__) && !defined(__clang__) && 5 <= __GNUC__ && __GNUC__ < 10
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_BUILTIN_LINE_FILE 1
+#elif defined(_MSC_VER) && _MSC_VER >= 1926
+#define EX_ACTOR_ABSL_INTERNAL_HAVE_BUILTIN_LINE_FILE 1
+#endif
+
+// EX_ACTOR_ABSL_HAVE_CONSTANT_EVALUATED is used for compile-time detection of
+// constant evaluation support through `ex_actor::embedded_3rd::absl::is_constant_evaluated`.
+#ifdef EX_ACTOR_ABSL_HAVE_CONSTANT_EVALUATED
+#error EX_ACTOR_ABSL_HAVE_CONSTANT_EVALUATED cannot be directly set
+#endif
+#ifdef __cpp_lib_is_constant_evaluated
+#define EX_ACTOR_ABSL_HAVE_CONSTANT_EVALUATED 1
+#elif EX_ACTOR_ABSL_HAVE_BUILTIN(__builtin_is_constant_evaluated)
+#define EX_ACTOR_ABSL_HAVE_CONSTANT_EVALUATED 1
+#endif
+
+// EX_ACTOR_ABSL_INTERNAL_CONSTEXPR_SINCE_CXXYY is used to conditionally define constexpr
+// for different C++ versions.
+//
+// These macros are an implementation detail and will be unconditionally removed
+// once the minimum supported C++ version catches up to a given version.
+//
+// For this reason, this symbol is considered INTERNAL and code outside of
+// Abseil must not use it.
+#if defined(EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG) && \
+    EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG >= 201703L
+#define EX_ACTOR_ABSL_INTERNAL_CONSTEXPR_SINCE_CXX17 constexpr
+#else
+#define EX_ACTOR_ABSL_INTERNAL_CONSTEXPR_SINCE_CXX17
+#endif
+#if defined(EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG) && \
+    EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG >= 202002L
+#define EX_ACTOR_ABSL_INTERNAL_CONSTEXPR_SINCE_CXX20 constexpr
+#else
+#define EX_ACTOR_ABSL_INTERNAL_CONSTEXPR_SINCE_CXX20
+#endif
+
+// EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION combines Emscripten's three version macros
+// into an integer that can be compared against.
+#ifdef EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION
+#error EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION cannot be directly set
+#endif
+#ifdef __EMSCRIPTEN__
+#include <emscripten/version.h>
+#ifdef __EMSCRIPTEN_MAJOR__
+#if __EMSCRIPTEN_MINOR__ >= 1000
+#error __EMSCRIPTEN_MINOR__ is too big to fit in EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION
+#endif
+#if __EMSCRIPTEN_TINY__ >= 1000
+#error __EMSCRIPTEN_TINY__ is too big to fit in EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION
+#endif
+#define EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION                              \
+  ((__EMSCRIPTEN_MAJOR__) * 1000000 + (__EMSCRIPTEN_MINOR__) * 1000 + \
+   (__EMSCRIPTEN_TINY__))
+#endif
+#endif
+
+#endif  // EX_ACTOR_ABSL_BASE_CONFIG_H_

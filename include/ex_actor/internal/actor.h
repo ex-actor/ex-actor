@@ -23,46 +23,12 @@
 #include <rfl/apply.hpp>
 #include <stdexec/execution.hpp>
 
+#include "ex_actor/3rd_lib/absl/functional/any_invocable.h"
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/container.h"
 #include "ex_actor/internal/reflect.h"
 #include "ex_actor/internal/scheduler.h"
 #include "ex_actor/internal/util.h"
-
-namespace ex_actor::internal {
-
-template <typename Sig>
-class MoveOnlyFunction;
-
-template <typename R, typename... Args>
-class MoveOnlyFunction<R(Args...)> {
-  struct Concept {
-    virtual ~Concept() = default;
-    virtual R Invoke(Args...) = 0;
-  };
-  template <typename F>
-  struct Model : Concept {
-    F fn;
-    explicit Model(F f) : fn(std::move(f)) {}
-    R Invoke(Args... args) override { return fn(std::forward<Args>(args)...); }
-  };
-  std::unique_ptr<Concept> impl_;
-
- public:
-  MoveOnlyFunction() = default;
-  template <typename F>
-    requires(!std::is_same_v<std::decay_t<F>, MoveOnlyFunction>)
-  // NOLINTNEXTLINE(google-explicit-constructor)
-  MoveOnlyFunction(F&& f) : impl_(std::make_unique<Model<std::decay_t<F>>>(std::forward<F>(f))) {}
-  MoveOnlyFunction(MoveOnlyFunction&&) noexcept = default;
-  MoveOnlyFunction& operator=(MoveOnlyFunction&&) noexcept = default;
-  MoveOnlyFunction(const MoveOnlyFunction&) = delete;
-  MoveOnlyFunction& operator=(const MoveOnlyFunction&) = delete;
-  R operator()(Args... args) { return impl_->Invoke(std::forward<Args>(args)...); }
-  explicit operator bool() const { return impl_ != nullptr; }
-};
-
-}  // namespace ex_actor::internal
 
 namespace ex_actor {
 
@@ -104,7 +70,7 @@ class TypeErasedActor {
 class TypeErasedActorScheduler {
  public:
   virtual ~TypeErasedActorScheduler() = default;
-  virtual void Schedule(MoveOnlyFunction<void()> fn, const ActorConfig& config,
+  virtual void Schedule(::ex_actor::embedded_3rd::absl::AnyInvocable<void()> fn, const ActorConfig& config,
                         ex::simple_counting_scope::token scope_token) = 0;
   virtual std::unique_ptr<TypeErasedActorScheduler> Clone() const = 0;
 
@@ -115,7 +81,7 @@ template <ex::scheduler Scheduler>
 class AnyStdExecScheduler : public TypeErasedActorScheduler {
  public:
   explicit AnyStdExecScheduler(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
-  void Schedule(MoveOnlyFunction<void()> fn, const ActorConfig& config,
+  void Schedule(::ex_actor::embedded_3rd::absl::AnyInvocable<void()> fn, const ActorConfig& config,
                 ex::simple_counting_scope::token scope_token) override {
     auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, config.priority}) |
                   ex::write_env(ex::prop {ex_actor::get_scheduler_index, config.scheduler_index}) |

@@ -20,16 +20,16 @@
 // nullability of pointers. These annotations allow you to designate pointers in
 // one of three classification states:
 //
-//  * "Non-null" (for pointers annotated `EX_ACTOR_absl_nonnull`), indicating that it is
+//  * "Non-null" (for pointers annotated `absl_nonnull`), indicating that it is
 //    invalid for the given pointer to ever be null.
-//  * "Nullable" (for pointers annotated `EX_ACTOR_absl_nullable`), indicating that it is
+//  * "Nullable" (for pointers annotated `absl_nullable`), indicating that it is
 //    valid for the given pointer to be null.
-//  * "Unknown" (for pointers annotated `EX_ACTOR_absl_nullability_unknown`), indicating
+//  * "Unknown" (for pointers annotated `absl_nullability_unknown`), indicating
 //    that the given pointer has not yet been classified as either nullable or
 //    non-null. This is the default state of unannotated pointers.
 //
 // NOTE: Unannotated pointers implicitly bear the annotation
-// `EX_ACTOR_absl_nullability_unknown`; you should rarely, if ever, see this annotation
+// `absl_nullability_unknown`; you should rarely, if ever, see this annotation
 // used in the codebase explicitly.
 //
 // -----------------------------------------------------------------------------
@@ -75,29 +75,29 @@
 // Example:
 //
 // // A const non-null pointer to an `Employee`.
-// Employee* EX_ACTOR_absl_nonnull const e;
+// Employee* absl_nonnull const e;
 //
 // // A non-null pointer to a const `Employee`.
-// const Employee* EX_ACTOR_absl_nonnull e;
+// const Employee* absl_nonnull e;
 //
 // // A non-null pointer to a const nullable pointer to an `Employee`.
-// Employee* EX_ACTOR_absl_nullable const* EX_ACTOR_absl_nonnull e;
+// Employee* absl_nullable const* absl_nonnull e;
 //
 // // A non-null function pointer.
-// void (*EX_ACTOR_absl_nonnull func)(int, double);
+// void (*absl_nonnull func)(int, double);
 //
 // // A non-null array of `Employee`s as a parameter.
-// void func(Employee employees[EX_ACTOR_absl_nonnull]);
+// void func(Employee employees[absl_nonnull]);
 //
 // // A non-null std::unique_ptr to an `Employee`.
 // // As with `const`, it is possible to place the annotation on either side of
 // // a named type not ending in `*`, but placing it before the type it
 // // describes is preferred, unless inconsistent with surrounding code.
-// EX_ACTOR_absl_nonnull std::unique_ptr<Employee> employee;
+// absl_nonnull std::unique_ptr<Employee> employee;
 //
-// // Invalid annotation usage - this attempts to declare a pointer to a
+// // Invalid annotation usage – this attempts to declare a pointer to a
 // // nullable `Employee`, which is meaningless.
-// EX_ACTOR_absl_nullable Employee* e;
+// absl_nullable Employee* e;
 //
 // -----------------------------------------------------------------------------
 // Using Nullability Annotations
@@ -124,20 +124,20 @@
 // Example:
 //
 // // PaySalary() requires the passed pointer to an `Employee` to be non-null.
-// void PaySalary(Employee* EX_ACTOR_absl_nonnull e) {
+// void PaySalary(Employee* absl_nonnull e) {
 //   pay(e->salary);  // OK to dereference
 // }
 //
 // // CompleteTransaction() guarantees the returned pointer to an `Account` to
 // // be non-null.
-// Account* EX_ACTOR_absl_nonnull CompleteTransaction(double fee) {
+// Account* absl_nonnull balance CompleteTransaction(double fee) {
 // ...
 // }
 //
 // // Note that specifying a nullability annotation does not prevent someone
 // // from violating the contract:
 //
-// Employee* EX_ACTOR_absl_nullable find(Map& employees, std::string_view name);
+// Employee* absl_nullable find(Map& employees, std::string_view name);
 //
 // void g(Map& employees) {
 //   Employee *e = find(employees, "Pat");
@@ -177,10 +177,9 @@
 // These nullability annotations are primarily a human readable signal about the
 // intended contract of the pointer. They are not *types* and do not currently
 // provide any correctness guarantees. For example, a pointer annotated as
-// `EX_ACTOR_absl_nonnull` is *not guaranteed* to be non-null, and the compiler won't
-// alert or prevent assignment of a `T* EX_ACTOR_absl_nullable` to a `T* EX_ACTOR_absl_nonnull`.
+// `absl_nonnull` is *not guaranteed* to be non-null, and the compiler won't
+// alert or prevent assignment of a `T* absl_nullable` to a `T* absl_nonnull`.
 // ===========================================================================
-// SKIP_ABSL_INLINE_NAMESPACE_CHECK
 #ifndef EX_ACTOR_ABSL_BASE_NULLABILITY_H_
 #define EX_ACTOR_ABSL_BASE_NULLABILITY_H_
 
@@ -201,14 +200,14 @@
 //     EX_ACTOR_ABSL_POINTERS_DEFAULT_NONNULL
 //
 //     void FillMessage(Message *m);                  // implicitly non-null
-//     T* EX_ACTOR_absl_nullable GetNullablePtr();           // explicitly nullable
-//     T* EX_ACTOR_absl_nullability_unknown GetUnknownPtr();  // explicitly unknown
+//     T* absl_nullable GetNullablePtr();           // explicitly nullable
+//     T* absl_nullability_unknown GetUnknownPtr();  // explicitly unknown
 //
-// The macro can be safely used in header files - it will not affect any files
+// The macro can be safely used in header files – it will not affect any files
 // that include it.
 //
-// In files with the macro, plain `T*` syntax means `T* EX_ACTOR_absl_nonnull`, and the
-// exceptions (`EX_ACTOR_absl_nullable` and `EX_ACTOR_absl_nullability_unknown`) must be marked
+// In files with the macro, plain `T*` syntax means `T* absl_nonnull`, and the
+// exceptions (`absl_nullable` and `absl_nullability_unknown`) must be marked
 // explicitly. The same holds, correspondingly, for smart pointer types.
 //
 // For comparison, without the macro, all unannotated pointers would default to
@@ -216,8 +215,8 @@
 //
 //     #include "ex_actor/3rd_lib/absl/base/nullability.h"
 //
-//     void FillMessage(Message* EX_ACTOR_absl_nonnull m);  // explicitly non-null
-//     T* EX_ACTOR_absl_nullable GetNullablePtr();          // explicitly nullable
+//     void FillMessage(Message* absl_nonnull m);  // explicitly non-null
+//     T* absl_nullable GetNullablePtr();          // explicitly nullable
 //     T* GetUnknownPtr();                           // implicitly unknown
 //
 // No-op except for being a human readable signal.
@@ -225,7 +224,7 @@
 
 #if defined(__clang__) && !defined(__OBJC__) && \
     EX_ACTOR_ABSL_HAVE_FEATURE(nullability_on_classes)
-// EX_ACTOR_absl_nonnull (default with `EX_ACTOR_ABSL_POINTERS_DEFAULT_NONNULL`)
+// absl_nonnull (default with `EX_ACTOR_ABSL_POINTERS_DEFAULT_NONNULL`)
 //
 // The indicated pointer is never null. It is the responsibility of the provider
 // of this pointer across an API boundary to ensure that the pointer is never
@@ -235,12 +234,12 @@
 // Example:
 //
 // // `employee` is designated as not null.
-// void PaySalary(Employee* EX_ACTOR_absl_nonnull employee) {
+// void PaySalary(Employee* absl_nonnull employee) {
 //   pay(*employee);  // OK to dereference
 // }
-#define EX_ACTOR_absl_nonnull _Nonnull
+#define absl_nonnull _Nonnull
 
-// EX_ACTOR_absl_nullable
+// absl_nullable
 //
 // The indicated pointer may, by design, be either null or non-null. Consumers
 // of this pointer across an API boundary should perform a `nullptr` check
@@ -249,14 +248,14 @@
 // Example:
 //
 // // `employee` may  be null.
-// void PaySalary(Employee* EX_ACTOR_absl_nullable employee) {
+// void PaySalary(Employee* absl_nullable employee) {
 //   if (employee != nullptr) {
 //     Pay(*employee);  // OK to dereference
 //   }
 // }
-#define EX_ACTOR_absl_nullable _Nullable
+#define absl_nullable _Nullable
 
-// EX_ACTOR_absl_nullability_unknown  (default without `EX_ACTOR_ABSL_POINTERS_DEFAULT_NONNULL`)
+// absl_nullability_unknown  (default without `EX_ACTOR_ABSL_POINTERS_DEFAULT_NONNULL`)
 //
 // The indicated pointer has not yet been determined to be definitively
 // "non-null" or "nullable." Providers of such pointers across API boundaries
@@ -264,8 +263,8 @@
 // Consumers of these pointers across an API boundary should treat such pointers
 // with the same caution they treat currently unannotated pointers. Most
 // existing code will have "unknown"  pointers, which should eventually be
-// migrated into one of the above two nullability states: `EX_ACTOR_absl_nonnull` or
-//  `EX_ACTOR_absl_nullable`.
+// migrated into one of the above two nullability states: `absl_nonnull` or
+//  `absl_nullable`.
 //
 // NOTE: For files that do not specify `EX_ACTOR_ABSL_POINTERS_DEFAULT_NONNULL`,
 // because this annotation is the global default state, unannotated pointers are
@@ -275,7 +274,7 @@
 // Example:
 //
 // // `employee`s nullability state is unknown.
-// void PaySalary(Employee* EX_ACTOR_absl_nullability_unknown employee) {
+// void PaySalary(Employee* absl_nullability_unknown employee) {
 //   Pay(*employee); // Potentially dangerous. API provider should investigate.
 // }
 //
@@ -286,14 +285,14 @@
 // void PaySalary(Employee* employee) {
 //   Pay(*employee); // Potentially dangerous. API provider should investigate.
 // }
-#define EX_ACTOR_absl_nullability_unknown _Null_unspecified
+#define absl_nullability_unknown _Null_unspecified
 #else
 // No-op for non-Clang compilers or Objective-C.
-#define EX_ACTOR_absl_nonnull
+#define absl_nonnull
 // No-op for non-Clang compilers or Objective-C.
-#define EX_ACTOR_absl_nullable
+#define absl_nullable
 // No-op for non-Clang compilers or Objective-C.
-#define EX_ACTOR_absl_nullability_unknown
+#define absl_nullability_unknown
 #endif
 
 // EX_ACTOR_ABSL_NULLABILITY_COMPATIBLE

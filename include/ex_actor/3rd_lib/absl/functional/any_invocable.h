@@ -191,7 +191,7 @@ class EX_ACTOR_ABSL_NULLABILITY_COMPATIBLE EX_ACTOR_ABSL_ATTRIBUTE_OWNER AnyInvo
   // Upon construction, `*this` is only empty if `f` is a function pointer or
   // member pointer type and is null, or if `f` is an `AnyInvocable` that is
   // empty.
-  template <class F, typename = std::enable_if_t<
+  template <class F, typename = ex_actor::embedded_3rd::absl::enable_if_t<
                          internal_any_invocable::CanConvert<Sig, F>::value>>
   AnyInvocable(F&& f)  // NOLINT
       : Impl(internal_any_invocable::ConversionConstruct(),
@@ -203,27 +203,28 @@ class EX_ACTOR_ABSL_NULLABILITY_COMPATIBLE EX_ACTOR_ABSL_ATTRIBUTE_OWNER AnyInvo
   // Example:
   //
   //   AnyInvocable<int(int)> func(
-  //       std::in_place_type<PossiblyImmovableType>, arg1, arg2);
+  //       ex_actor::embedded_3rd::absl::in_place_type<PossiblyImmovableType>, arg1, arg2);
   //
   template <class T, class... Args,
-            typename = std::enable_if_t<
+            typename = ex_actor::embedded_3rd::absl::enable_if_t<
                 internal_any_invocable::CanEmplace<Sig, T, Args...>::value>>
-  explicit AnyInvocable(std::in_place_type_t<T>, Args&&... args)
-      : Impl(std::in_place_type<std::decay_t<T>>, std::forward<Args>(args)...) {
-    static_assert(std::is_same<T, std::decay_t<T>>::value,
+  explicit AnyInvocable(ex_actor::embedded_3rd::absl::in_place_type_t<T>, Args&&... args)
+      : Impl(ex_actor::embedded_3rd::absl::in_place_type<ex_actor::embedded_3rd::absl::decay_t<T>>,
+             std::forward<Args>(args)...) {
+    static_assert(std::is_same<T, ex_actor::embedded_3rd::absl::decay_t<T>>::value,
                   "The explicit template argument of in_place_type is required "
                   "to be an unqualified object type.");
   }
 
   // Overload of the above constructor to support list-initialization.
   template <class T, class U, class... Args,
-            typename = std::enable_if_t<internal_any_invocable::CanEmplace<
+            typename = ex_actor::embedded_3rd::absl::enable_if_t<internal_any_invocable::CanEmplace<
                 Sig, T, std::initializer_list<U>&, Args...>::value>>
-  explicit AnyInvocable(std::in_place_type_t<T>, std::initializer_list<U> ilist,
-                        Args&&... args)
-      : Impl(std::in_place_type<std::decay_t<T>>, ilist,
+  explicit AnyInvocable(ex_actor::embedded_3rd::absl::in_place_type_t<T>,
+                        std::initializer_list<U> ilist, Args&&... args)
+      : Impl(ex_actor::embedded_3rd::absl::in_place_type<ex_actor::embedded_3rd::absl::decay_t<T>>, ilist,
              std::forward<Args>(args)...) {
-    static_assert(std::is_same<T, std::decay_t<T>>::value,
+    static_assert(std::is_same<T, ex_actor::embedded_3rd::absl::decay_t<T>>::value,
                   "The explicit template argument of in_place_type is required "
                   "to be an unqualified object type.");
   }
@@ -247,7 +248,7 @@ class EX_ACTOR_ABSL_NULLABILITY_COMPATIBLE EX_ACTOR_ABSL_ATTRIBUTE_OWNER AnyInvo
   // Upon assignment, `*this` is only empty if `f` is a function pointer or
   // member pointer type and is null, or if `f` is an `AnyInvocable` that is
   // empty.
-  template <class F, typename = std::enable_if_t<
+  template <class F, typename = ex_actor::embedded_3rd::absl::enable_if_t<
                          internal_any_invocable::CanAssign<Sig, F>::value>>
   AnyInvocable& operator=(F&& f) {
     *this = AnyInvocable(std::forward<F>(f));
@@ -259,7 +260,7 @@ class EX_ACTOR_ABSL_NULLABILITY_COMPATIBLE EX_ACTOR_ABSL_ATTRIBUTE_OWNER AnyInvo
   // `AnyInvocable` instance.
   template <
       class F,
-      typename = std::enable_if_t<
+      typename = ex_actor::embedded_3rd::absl::enable_if_t<
           internal_any_invocable::CanAssignReferenceWrapper<Sig, F>::value>>
   AnyInvocable& operator=(std::reference_wrapper<F> f) noexcept {
     *this = AnyInvocable(f);

@@ -31,7 +31,6 @@
 #define EX_ACTOR_ABSL_BASE_OPTIMIZATION_H_
 
 #include <assert.h>
-#include <stdlib.h>
 
 #ifdef __cplusplus
 // Included for std::unreachable()
@@ -218,12 +217,12 @@
 #elif defined(_MSC_VER)
 #define EX_ACTOR_ABSL_INTERNAL_UNREACHABLE_IMPL() __assume(false)
 #else
-#define EX_ACTOR_ABSL_INTERNAL_UNREACHABLE_IMPL() ((void)0)
+#define EX_ACTOR_ABSL_INTERNAL_UNREACHABLE_IMPL()
 #endif
 
 // `EX_ACTOR_ABSL_UNREACHABLE()` is an unreachable statement.  A program which reaches
 // one has undefined behavior, and the compiler may optimize accordingly.
-#if (EX_ACTOR_ABSL_OPTION_HARDENED == 1 || EX_ACTOR_ABSL_OPTION_HARDENED == 2) && defined(NDEBUG)
+#if EX_ACTOR_ABSL_OPTION_HARDENED == 1 && defined(NDEBUG)
 // Abort in hardened mode to avoid dangerous undefined behavior.
 #define EX_ACTOR_ABSL_UNREACHABLE()                \
   do {                                    \

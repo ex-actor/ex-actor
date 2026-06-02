@@ -117,8 +117,8 @@
 //
 // LTS releases can be obtained from
 // https://github.com/abseil/abseil-cpp/releases.
-#undef EX_ACTOR_ABSL_LTS_RELEASE_VERSION
-#undef EX_ACTOR_ABSL_LTS_RELEASE_PATCH_LEVEL
+#define EX_ACTOR_ABSL_LTS_RELEASE_VERSION 20260107
+#define EX_ACTOR_ABSL_LTS_RELEASE_PATCH_LEVEL 1
 
 // Helper macro to convert a CPP variable to a string literal.
 #define EX_ACTOR_ABSL_INTERNAL_DO_TOKEN_STR(x) #x
@@ -493,6 +493,34 @@ static_assert(EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[0] != 'h' ||
 #error "absl endian detection needs to be set up for your compiler"
 #endif
 
+// macOS < 10.13 and iOS < 12 don't support <any>, <optional>, or <variant>
+// because the libc++ shared library shipped on the system doesn't have the
+// requisite exported symbols.  See
+// https://github.com/abseil/abseil-cpp/issues/207 and
+// https://developer.apple.com/documentation/xcode_release_notes/xcode_10_release_notes
+//
+// libc++ spells out the availability requirements in the file
+// llvm-project/libcxx/include/__config via the #define
+// _LIBCPP_AVAILABILITY_BAD_OPTIONAL_ACCESS. The set of versions has been
+// modified a few times, via
+// https://github.com/llvm/llvm-project/commit/7fb40e1569dd66292b647f4501b85517e9247953
+// and
+// https://github.com/llvm/llvm-project/commit/0bc451e7e137c4ccadcd3377250874f641ca514a
+// The second has the actually correct versions, thus, is what we copy here.
+#if defined(__APPLE__) &&                                         \
+    ((defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) &&   \
+      __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 101300) ||  \
+     (defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__) &&  \
+      __ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__ < 120000) || \
+     (defined(__ENVIRONMENT_WATCH_OS_VERSION_MIN_REQUIRED__) &&   \
+      __ENVIRONMENT_WATCH_OS_VERSION_MIN_REQUIRED__ < 50000) ||   \
+     (defined(__ENVIRONMENT_TV_OS_VERSION_MIN_REQUIRED__) &&      \
+      __ENVIRONMENT_TV_OS_VERSION_MIN_REQUIRED__ < 120000))
+#define EX_ACTOR_ABSL_INTERNAL_APPLE_CXX17_TYPES_UNAVAILABLE 1
+#else
+#define EX_ACTOR_ABSL_INTERNAL_APPLE_CXX17_TYPES_UNAVAILABLE 0
+#endif
+
 // Deprecated macros for polyfill detection.
 #define EX_ACTOR_ABSL_HAVE_STD_ANY 1
 #define EX_ACTOR_ABSL_USES_STD_ANY 1
@@ -502,42 +530,6 @@ static_assert(EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[0] != 'h' ||
 #define EX_ACTOR_ABSL_USES_STD_STRING_VIEW 1
 #define EX_ACTOR_ABSL_HAVE_STD_VARIANT 1
 #define EX_ACTOR_ABSL_USES_STD_VARIANT 1
-
-// EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION
-//
-// Checks whether C++20 std::source_location is available.
-#ifdef EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION
-#error "EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION cannot be directly set."
-#elif (defined(__cpp_lib_source_location) &&    \
-       __cpp_lib_source_location >= 201907L) || \
-    (defined(EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG) &&   \
-     EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG >= 202002L)
-#ifdef __has_include
-#if __has_include(<source_location>)
-#define EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION 1
-#endif
-#else
-// No __has_include support, so just assume C++ language version is correct.
-#define EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION 1
-#endif
-#endif
-
-// EX_ACTOR_ABSL_USES_STD_SOURCE_LOCATION
-//
-// Indicates whether ex_actor::embedded_3rd::absl::SourceLocation is an alias for std::source_location.
-#if !defined(EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION)
-#error options.h is misconfigured.
-#elif EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION == 0 || \
-    (EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION == 2 &&  \
-     !defined(EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION))
-#undef EX_ACTOR_ABSL_USES_STD_SOURCE_LOCATION
-#elif EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION == 1 || \
-    (EX_ACTOR_ABSL_OPTION_USE_STD_SOURCE_LOCATION == 2 &&  \
-     defined(EX_ACTOR_ABSL_HAVE_STD_SOURCE_LOCATION))
-#define EX_ACTOR_ABSL_USES_STD_SOURCE_LOCATION 1
-#else
-#error options.h is misconfigured.
-#endif
 
 // EX_ACTOR_ABSL_HAVE_STD_ORDERING
 //
@@ -704,7 +696,7 @@ static_assert(EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[0] != 'h' ||
 // Clang standalone LeakSanitizer (-fsanitize=leak)
 #elif EX_ACTOR_ABSL_HAVE_FEATURE(leak_sanitizer)
 #define EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER 1
-#elif defined(EX_ACTOR_ABSL_HAVE_ADDRESS_SANITIZER) && !defined(_WIN32)
+#elif defined(EX_ACTOR_ABSL_HAVE_ADDRESS_SANITIZER)
 // GCC or Clang using the LeakSanitizer integrated into AddressSanitizer.
 #define EX_ACTOR_ABSL_HAVE_LEAK_SANITIZER 1
 #endif
@@ -807,14 +799,6 @@ static_assert(EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[0] != 'h' ||
 #define EX_ACTOR_ABSL_INTERNAL_HAVE_ARM_NEON 1
 #endif
 
-#if EX_ACTOR_ABSL_HAVE_BUILTIN(__builtin_LINE) && EX_ACTOR_ABSL_HAVE_BUILTIN(__builtin_FILE)
-#define EX_ACTOR_ABSL_INTERNAL_HAVE_BUILTIN_LINE_FILE 1
-#elif defined(__GNUC__) && !defined(__clang__) && 5 <= __GNUC__ && __GNUC__ < 10
-#define EX_ACTOR_ABSL_INTERNAL_HAVE_BUILTIN_LINE_FILE 1
-#elif defined(_MSC_VER) && _MSC_VER >= 1926
-#define EX_ACTOR_ABSL_INTERNAL_HAVE_BUILTIN_LINE_FILE 1
-#endif
-
 // EX_ACTOR_ABSL_HAVE_CONSTANT_EVALUATED is used for compile-time detection of
 // constant evaluation support through `ex_actor::embedded_3rd::absl::is_constant_evaluated`.
 #ifdef EX_ACTOR_ABSL_HAVE_CONSTANT_EVALUATED
@@ -854,16 +838,16 @@ static_assert(EX_ACTOR_ABSL_INTERNAL_INLINE_NAMESPACE_STR[0] != 'h' ||
 #endif
 #ifdef __EMSCRIPTEN__
 #include <emscripten/version.h>
-#ifdef __EMSCRIPTEN_MAJOR__
-#if __EMSCRIPTEN_MINOR__ >= 1000
-#error __EMSCRIPTEN_MINOR__ is too big to fit in EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION
+#ifdef __EMSCRIPTEN_major__
+#if __EMSCRIPTEN_minor__ >= 1000
+#error __EMSCRIPTEN_minor__ is too big to fit in EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION
 #endif
-#if __EMSCRIPTEN_TINY__ >= 1000
-#error __EMSCRIPTEN_TINY__ is too big to fit in EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION
+#if __EMSCRIPTEN_tiny__ >= 1000
+#error __EMSCRIPTEN_tiny__ is too big to fit in EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION
 #endif
 #define EX_ACTOR_ABSL_INTERNAL_EMSCRIPTEN_VERSION                              \
-  ((__EMSCRIPTEN_MAJOR__) * 1000000 + (__EMSCRIPTEN_MINOR__) * 1000 + \
-   (__EMSCRIPTEN_TINY__))
+  ((__EMSCRIPTEN_major__) * 1000000 + (__EMSCRIPTEN_minor__) * 1000 + \
+   (__EMSCRIPTEN_tiny__))
 #endif
 #endif
 

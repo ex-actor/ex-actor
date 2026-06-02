@@ -531,25 +531,6 @@
 #define EX_ACTOR_ABSL_XRAY_LOG_ARGS(N)
 #endif
 
-// EX_ACTOR_ABSL_ATTRIBUTE_NULL_AFTER_MOVE
-//
-// Indicates that a user-defined smart-pointer-like type makes guarantees on the
-// state of a moved-from object, leaving it in a null state, where it can be
-// used as long as it is not dereferenced. In other words, these are the same
-// semantics that smart pointers from the standard library provide.
-//
-// The clang-tidy check bugprone-use-after-move allows member functions of types
-// marked with this attribute to be called on objects that have been moved from;
-// without the attribute, this would result in a use-after-move warning.
-#if EX_ACTOR_ABSL_HAVE_CPP_ATTRIBUTE(clang::annotate) && defined(__clang__) && \
-    __clang_major__ >= 12
-#define EX_ACTOR_ABSL_ATTRIBUTE_NULL_AFTER_MOVE                       \
-  [[clang::annotate("clang-tidy", "bugprone-use-after-move", \
-                    "null_after_move")]]
-#else
-#define EX_ACTOR_ABSL_ATTRIBUTE_NULL_AFTER_MOVE
-#endif
-
 // EX_ACTOR_ABSL_ATTRIBUTE_REINITIALIZES
 //
 // Indicates that a member function reinitializes the entire object to a known
@@ -741,6 +722,46 @@
 #define EX_ACTOR_ABSL_INTERNAL_RESTORE_DEPRECATED_DECLARATION_WARNING
 #endif  // defined(__GNUC__) || defined(__clang__)
 
+// EX_ACTOR_ABSL_CONST_INIT
+//
+// A variable declaration annotated with the `EX_ACTOR_ABSL_CONST_INIT` attribute will
+// not compile (on supported platforms) unless the variable has a constant
+// initializer. This is useful for variables with static and thread storage
+// duration, because it guarantees that they will not suffer from the so-called
+// "static init order fiasco".
+//
+// This attribute must be placed on the initializing declaration of the
+// variable. Some compilers will give a -Wmissing-constinit warning when this
+// attribute is placed on some other declaration but missing from the
+// initializing declaration.
+//
+// In some cases (notably with thread_local variables), `EX_ACTOR_ABSL_CONST_INIT` can
+// also be used in a non-initializing declaration to tell the compiler that a
+// variable is already initialized, reducing overhead that would otherwise be
+// incurred by a hidden guard variable. Thus annotating all declarations with
+// this attribute is recommended to potentially enhance optimization.
+//
+// Example:
+//
+//   class MyClass {
+//    public:
+//     EX_ACTOR_ABSL_CONST_INIT static MyType my_var;
+//   };
+//
+//   EX_ACTOR_ABSL_CONST_INIT MyType MyClass::my_var = MakeMyType(...);
+//
+// For code or headers that are assured to only build with C++20 and up, prefer
+// just using the standard `constinit` keyword directly over this macro.
+//
+// Note that this attribute is redundant if the variable is declared constexpr.
+#if defined(__cpp_constinit) && __cpp_constinit >= 201907L
+#define EX_ACTOR_ABSL_CONST_INIT constinit
+#elif EX_ACTOR_ABSL_HAVE_CPP_ATTRIBUTE(clang::require_constant_initialization)
+#define EX_ACTOR_ABSL_CONST_INIT [[clang::require_constant_initialization]]
+#else
+#define EX_ACTOR_ABSL_CONST_INIT
+#endif
+
 // EX_ACTOR_ABSL_REQUIRE_EXPLICIT_INIT
 //
 // EX_ACTOR_ABSL_REQUIRE_EXPLICIT_INIT is placed *after* the data members of an aggregate
@@ -809,46 +830,6 @@ struct AbslInternal_YouForgotToExplicitlyInitializeAField {
   // This is deliberately left undefined to prevent linking
   static AbslInternal_YouForgotToExplicitlyInitializeAField v;
 };
-#endif
-
-// EX_ACTOR_ABSL_CONST_INIT
-//
-// A variable declaration annotated with the `EX_ACTOR_ABSL_CONST_INIT` attribute will
-// not compile (on supported platforms) unless the variable has a constant
-// initializer. This is useful for variables with static and thread storage
-// duration, because it guarantees that they will not suffer from the so-called
-// "static init order fiasco".
-//
-// This attribute must be placed on the initializing declaration of the
-// variable. Some compilers will give a -Wmissing-constinit warning when this
-// attribute is placed on some other declaration but missing from the
-// initializing declaration.
-//
-// In some cases (notably with thread_local variables), `EX_ACTOR_ABSL_CONST_INIT` can
-// also be used in a non-initializing declaration to tell the compiler that a
-// variable is already initialized, reducing overhead that would otherwise be
-// incurred by a hidden guard variable. Thus annotating all declarations with
-// this attribute is recommended to potentially enhance optimization.
-//
-// Example:
-//
-//   class MyClass {
-//    public:
-//     EX_ACTOR_ABSL_CONST_INIT static MyType my_var;
-//   };
-//
-//   EX_ACTOR_ABSL_CONST_INIT MyType MyClass::my_var = MakeMyType(...);
-//
-// For code or headers that are assured to only build with C++20 and up, prefer
-// just using the standard `constinit` keyword directly over this macro.
-//
-// Note that this attribute is redundant if the variable is declared constexpr.
-#if defined(__cpp_constinit) && __cpp_constinit >= 201907L
-#define EX_ACTOR_ABSL_CONST_INIT constinit
-#elif EX_ACTOR_ABSL_HAVE_CPP_ATTRIBUTE(clang::require_constant_initialization)
-#define EX_ACTOR_ABSL_CONST_INIT [[clang::require_constant_initialization]]
-#else
-#define EX_ACTOR_ABSL_CONST_INIT
 #endif
 
 // EX_ACTOR_ABSL_ATTRIBUTE_PURE_FUNCTION
@@ -952,7 +933,7 @@ struct AbslInternal_YouForgotToExplicitlyInitializeAField {
 // We disable this on Clang versions < 13 because of the following
 // false-positive:
 //
-//   ex_actor::embedded_3rd::absl::string_view f(std::optional<ex_actor::embedded_3rd::absl::string_view> sv) { return *sv; }
+//   ex_actor::embedded_3rd::absl::string_view f(ex_actor::embedded_3rd::absl::optional<ex_actor::embedded_3rd::absl::string_view> sv) { return *sv; }
 //
 // See the following links for details:
 // https://reviews.llvm.org/D64448
@@ -983,7 +964,7 @@ struct AbslInternal_YouForgotToExplicitlyInitializeAField {
 // We disable this on Clang versions < 13 because of the following
 // false-positive:
 //
-//   ex_actor::embedded_3rd::absl::string_view f(std::optional<ex_actor::embedded_3rd::absl::string_view> sv) { return *sv; }
+//   ex_actor::embedded_3rd::absl::string_view f(ex_actor::embedded_3rd::absl::optional<ex_actor::embedded_3rd::absl::string_view> sv) { return *sv; }
 //
 // See the following links for details:
 // https://reviews.llvm.org/D64448

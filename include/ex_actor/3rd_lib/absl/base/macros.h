@@ -28,7 +28,6 @@
 #ifndef EX_ACTOR_ABSL_BASE_MACROS_H_
 #define EX_ACTOR_ABSL_BASE_MACROS_H_
 
-#include <atomic>
 #include <cassert>
 #include <cstddef>
 
@@ -54,39 +53,8 @@ namespace macros_internal {
 template <typename T, size_t N>
 auto ArraySizeHelper(const T (&array)[N]) -> char (&)[N];
 }  // namespace macros_internal
-
-namespace base_internal {
-#if EX_ACTOR_ABSL_HAVE_CPP_ATTRIBUTE(clang::nomerge)
-[[clang::nomerge]]  // Needed when this function is not inlined
-#endif
-[[noreturn]] inline void HardeningAbort() {
-#if EX_ACTOR_ABSL_HAVE_CPP_ATTRIBUTE(clang::nomerge)
-  [[clang::nomerge]]  // Needed when this function is inlined
-#endif
-  EX_ACTOR_ABSL_INTERNAL_IMMEDIATE_ABORT_IMPL();
-  EX_ACTOR_ABSL_INTERNAL_UNREACHABLE_IMPL();
-}
-}  // namespace base_internal
 EX_ACTOR_ABSL_NAMESPACE_END
 }  // namespace ex_actor::embedded_3rd::absl
-
-// EX_ACTOR_ABSL_INTERNAL_UNEVALUATED()
-//
-// Expands into a no-op expression that contains the given expression. Used to
-// avoid unused-variable warnings in configurations that don't need to evaluate
-// the given expression (e.g., NDEBUG).
-#if EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG >= 202002L
-// We use `decltype` here to avoid generating unnecessary code that the
-// optimizer then has to optimize away.
-// This not only improves compilation performance by reducing codegen bloat
-// and optimization work, but also guarantees fast run-time performance without
-// having to rely on the optimizer.
-#define EX_ACTOR_ABSL_INTERNAL_UNEVALUATED(expr) (decltype((void)(expr))())
-#else
-// Pre-C++20, lambdas can't be inside unevaluated operands, so we're forced to
-// rely on the optimizer.
-#define EX_ACTOR_ABSL_INTERNAL_UNEVALUATED(expr) (false ? (void)(expr) : void())
-#endif
 
 // EX_ACTOR_ABSL_BAD_CALL_IF()
 //
@@ -125,26 +93,33 @@ EX_ACTOR_ABSL_NAMESPACE_END
 // This macro is inspired by
 // https://akrzemi1.wordpress.com/2017/05/18/asserts-in-constexpr-functions/
 #if defined(NDEBUG)
-#define EX_ACTOR_ABSL_ASSERT(expr) EX_ACTOR_ABSL_INTERNAL_UNEVALUATED((expr) ? void() : void())
+#if EX_ACTOR_ABSL_INTERNAL_CPLUSPLUS_LANG >= 202002L
+// We use `decltype` here to avoid generating unnecessary code that the
+// optimizer then has to optimize away.
+// This not only improves compilation performance by reducing codegen bloat
+// and optimization work, but also guarantees fast run-time performance without
+// having to rely on the optimizer.
+#define EX_ACTOR_ABSL_ASSERT(expr) (decltype((expr) ? void() : void())())
+#else
+// Pre-C++20, lambdas can't be inside unevaluated operands, so we're forced to
+// rely on the optimizer.
+#define EX_ACTOR_ABSL_ASSERT(expr) (false ? ((expr) ? void() : void()) : void())
+#endif
 #else
 #define EX_ACTOR_ABSL_ASSERT(expr)                           \
   (EX_ACTOR_ABSL_PREDICT_TRUE((expr)) ? static_cast<void>(0) \
-                             : assert(false && #expr))  // NOLINT
+                             : [] { assert(false && #expr); }())  // NOLINT
 #endif
 
 // `EX_ACTOR_ABSL_INTERNAL_HARDENING_ABORT()` controls how `EX_ACTOR_ABSL_HARDENING_ASSERT()`
 // aborts the program in release mode (when NDEBUG is defined). The
 // implementation should abort the program as quickly as possible and ideally it
 // should not be possible to ignore the abort request.
-#if defined(__CUDACC__) || defined(__CUDA_ARCH__) || defined(__CUDA__)
 #define EX_ACTOR_ABSL_INTERNAL_HARDENING_ABORT()   \
   do {                                    \
     EX_ACTOR_ABSL_INTERNAL_IMMEDIATE_ABORT_IMPL(); \
     EX_ACTOR_ABSL_INTERNAL_UNREACHABLE_IMPL();     \
   } while (false)
-#else
-#define EX_ACTOR_ABSL_INTERNAL_HARDENING_ABORT() ::ex_actor::embedded_3rd::absl::base_internal::HardeningAbort()
-#endif
 
 // EX_ACTOR_ABSL_HARDENING_ASSERT()
 //
@@ -158,12 +133,9 @@ EX_ACTOR_ABSL_NAMESPACE_END
 // See `EX_ACTOR_ABSL_OPTION_HARDENED` in `absl/base/options.h` for more information on
 // hardened mode.
 #if (EX_ACTOR_ABSL_OPTION_HARDENED == 1 || EX_ACTOR_ABSL_OPTION_HARDENED == 2) && defined(NDEBUG)
- #define EX_ACTOR_ABSL_HARDENING_ASSERT(expr)    \
-   do {                                 \
-     if (!EX_ACTOR_ABSL_PREDICT_TRUE((expr))) {  \
-       EX_ACTOR_ABSL_INTERNAL_HARDENING_ABORT(); \
-     }                                  \
-   } while (false)
+#define EX_ACTOR_ABSL_HARDENING_ASSERT(expr)                 \
+  (EX_ACTOR_ABSL_PREDICT_TRUE((expr)) ? static_cast<void>(0) \
+                             : [] { EX_ACTOR_ABSL_INTERNAL_HARDENING_ABORT(); }())
 #else
 #define EX_ACTOR_ABSL_HARDENING_ASSERT(expr) EX_ACTOR_ABSL_ASSERT(expr)
 #endif
@@ -180,7 +152,9 @@ EX_ACTOR_ABSL_NAMESPACE_END
 // See `EX_ACTOR_ABSL_OPTION_HARDENED` in `absl/base/options.h` for more information on
 // hardened mode.
 #if EX_ACTOR_ABSL_OPTION_HARDENED == 1 && defined(NDEBUG)
-#define EX_ACTOR_ABSL_HARDENING_ASSERT_SLOW(expr) EX_ACTOR_ABSL_HARDENING_ASSERT(expr)
+#define EX_ACTOR_ABSL_HARDENING_ASSERT_SLOW(expr)            \
+  (EX_ACTOR_ABSL_PREDICT_TRUE((expr)) ? static_cast<void>(0) \
+                             : [] { EX_ACTOR_ABSL_INTERNAL_HARDENING_ABORT(); }())
 #else
 #define EX_ACTOR_ABSL_HARDENING_ASSERT_SLOW(expr) EX_ACTOR_ABSL_ASSERT(expr)
 #endif

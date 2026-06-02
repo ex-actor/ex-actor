@@ -342,12 +342,12 @@ ReturnType RemoteInvoker(
 ////////////////////////////////////////////////////////////////////////////////
 //
 // A metafunction that checks if a type T is an instantiation of
-// std::in_place_type_t (needed for constructor constraints of AnyInvocable).
+// ex_actor::embedded_3rd::absl::in_place_type_t (needed for constructor constraints of AnyInvocable).
 template <class T>
 struct IsInPlaceType : std::false_type {};
 
 template <class T>
-struct IsInPlaceType<std::in_place_type_t<T>> : std::true_type {};
+struct IsInPlaceType<ex_actor::embedded_3rd::absl::in_place_type_t<T>> : std::true_type {};
 //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -464,7 +464,7 @@ class CoreImpl {
   // invocation of the Invocable. The unqualified type is the target object
   // type to be stored.
   template <class QualTRef, class... Args>
-  explicit CoreImpl(std::in_place_type_t<QualTRef>, Args&&... args) {
+  explicit CoreImpl(ex_actor::embedded_3rd::absl::in_place_type_t<QualTRef>, Args&&... args) {
     InitializeStorage<QualTRef>(std::forward<Args>(args)...);
   }
 
@@ -611,39 +611,39 @@ using TrueAlias =
 
 /*SFINAE constraints for the conversion-constructor.*/
 template <class Sig, class F,
-          class = std::enable_if_t<
+          class = ex_actor::embedded_3rd::absl::enable_if_t<
               !std::is_same<RemoveCVRef<F>, AnyInvocable<Sig>>::value>>
 using CanConvert = TrueAlias<
-    std::enable_if_t<!IsInPlaceType<RemoveCVRef<F>>::value>,
-    std::enable_if_t<Impl<Sig>::template CallIsValid<F>::value>,
-    std::enable_if_t<
+    ex_actor::embedded_3rd::absl::enable_if_t<!IsInPlaceType<RemoveCVRef<F>>::value>,
+    ex_actor::embedded_3rd::absl::enable_if_t<Impl<Sig>::template CallIsValid<F>::value>,
+    ex_actor::embedded_3rd::absl::enable_if_t<
         Impl<Sig>::template CallIsNoexceptIfSigIsNoexcept<F>::value>,
-    std::enable_if_t<std::is_constructible<std::decay_t<F>, F>::value>>;
+    ex_actor::embedded_3rd::absl::enable_if_t<std::is_constructible<ex_actor::embedded_3rd::absl::decay_t<F>, F>::value>>;
 
 /*SFINAE constraints for the std::in_place constructors.*/
 template <class Sig, class F, class... Args>
 using CanEmplace = TrueAlias<
-    std::enable_if_t<Impl<Sig>::template CallIsValid<F>::value>,
-    std::enable_if_t<
+    ex_actor::embedded_3rd::absl::enable_if_t<Impl<Sig>::template CallIsValid<F>::value>,
+    ex_actor::embedded_3rd::absl::enable_if_t<
         Impl<Sig>::template CallIsNoexceptIfSigIsNoexcept<F>::value>,
-    std::enable_if_t<std::is_constructible<std::decay_t<F>, Args...>::value>>;
+    ex_actor::embedded_3rd::absl::enable_if_t<std::is_constructible<ex_actor::embedded_3rd::absl::decay_t<F>, Args...>::value>>;
 
 /*SFINAE constraints for the conversion-assign operator.*/
 template <class Sig, class F,
-          class = std::enable_if_t<
+          class = ex_actor::embedded_3rd::absl::enable_if_t<
               !std::is_same<RemoveCVRef<F>, AnyInvocable<Sig>>::value>>
 using CanAssign = TrueAlias<
-    std::enable_if_t<Impl<Sig>::template CallIsValid<F>::value>,
-    std::enable_if_t<
+    ex_actor::embedded_3rd::absl::enable_if_t<Impl<Sig>::template CallIsValid<F>::value>,
+    ex_actor::embedded_3rd::absl::enable_if_t<
         Impl<Sig>::template CallIsNoexceptIfSigIsNoexcept<F>::value>,
-    std::enable_if_t<std::is_constructible<std::decay_t<F>, F>::value>>;
+    ex_actor::embedded_3rd::absl::enable_if_t<std::is_constructible<ex_actor::embedded_3rd::absl::decay_t<F>, F>::value>>;
 
 /*SFINAE constraints for the reference-wrapper conversion-assign operator.*/
 template <class Sig, class F>
 using CanAssignReferenceWrapper = TrueAlias<
-    std::enable_if_t<
+    ex_actor::embedded_3rd::absl::enable_if_t<
         Impl<Sig>::template CallIsValid<std::reference_wrapper<F>>::value>,
-    std::enable_if_t<Impl<Sig>::template CallIsNoexceptIfSigIsNoexcept<
+    ex_actor::embedded_3rd::absl::enable_if_t<Impl<Sig>::template CallIsNoexceptIfSigIsNoexcept<
         std::reference_wrapper<F>>::value>>;
 
 // The constraint for checking whether or not a call meets the noexcept
@@ -657,17 +657,17 @@ using CanAssignReferenceWrapper = TrueAlias<
 // don't treat non-moveable result types correctly. For example this was the
 // case in libc++ before commit c3a24882 (2022-05).
 #define EX_ACTOR_ABSL_INTERNAL_ANY_INVOCABLE_NOEXCEPT_CONSTRAINT_true(inv_quals)      \
-  std::enable_if_t<std::disjunction<                                       \
+  ex_actor::embedded_3rd::absl::enable_if_t<ex_actor::embedded_3rd::absl::disjunction<                                       \
       std::is_nothrow_invocable_r<                                           \
-          ReturnType, UnwrapStdReferenceWrapper<std::decay_t<F>> inv_quals, \
+          ReturnType, UnwrapStdReferenceWrapper<ex_actor::embedded_3rd::absl::decay_t<F>> inv_quals, \
           P...>,                                                             \
       std::conjunction<                                                      \
           std::is_nothrow_invocable<                                         \
-              UnwrapStdReferenceWrapper<std::decay_t<F>> inv_quals, P...>,  \
+              UnwrapStdReferenceWrapper<ex_actor::embedded_3rd::absl::decay_t<F>> inv_quals, P...>,  \
           std::is_same<                                                      \
               ReturnType,                                                    \
               std::invoke_result_t<                                          \
-                  UnwrapStdReferenceWrapper<std::decay_t<F>> inv_quals,     \
+                  UnwrapStdReferenceWrapper<ex_actor::embedded_3rd::absl::decay_t<F>> inv_quals,     \
                   P...>>>>::value>
 
 #define EX_ACTOR_ABSL_INTERNAL_ANY_INVOCABLE_NOEXCEPT_CONSTRAINT_false(inv_quals)
@@ -696,11 +696,11 @@ using CanAssignReferenceWrapper = TrueAlias<
                                                                                \
     /*SFINAE constraint to check if F is invocable with the proper signature*/ \
     template <class F>                                                         \
-    using CallIsValid = TrueAlias<std::enable_if_t<std::disjunction<           \
-        std::is_invocable_r<ReturnType, std::decay_t<F> inv_quals, P...>,      \
-        std::is_same<ReturnType,                                               \
-                     std::invoke_result_t<std::decay_t<F> inv_quals, P...>>>:: \
-                                                       value>>;                \
+    using CallIsValid = TrueAlias<ex_actor::embedded_3rd::absl::enable_if_t<ex_actor::embedded_3rd::absl::disjunction<         \
+        std::is_invocable_r<ReturnType, ex_actor::embedded_3rd::absl::decay_t<F> inv_quals, P...>,     \
+        std::is_same<                                                          \
+            ReturnType,                                                        \
+            std::invoke_result_t<ex_actor::embedded_3rd::absl::decay_t<F> inv_quals, P...>>>::value>>; \
                                                                                \
     /*SFINAE constraint to check if F is nothrow-invocable when necessary*/    \
     template <class F>                                                         \
@@ -722,8 +722,8 @@ using CanAssignReferenceWrapper = TrueAlias<
                                                                                \
     /*Forward along the in-place construction parameters.*/                    \
     template <class T, class... Args>                                          \
-    explicit Impl(std::in_place_type_t<T>, Args&&... args)                     \
-        : Core(std::in_place_type<std::decay_t<T> inv_quals>,                  \
+    explicit Impl(ex_actor::embedded_3rd::absl::in_place_type_t<T>, Args&&... args)                    \
+        : Core(ex_actor::embedded_3rd::absl::in_place_type<ex_actor::embedded_3rd::absl::decay_t<T> inv_quals>,                \
                std::forward<Args>(args)...) {}                                 \
                                                                                \
     /*Raises a fatal error when the AnyInvocable is invoked after a move*/     \

@@ -67,7 +67,10 @@ TEST(AsyncInitTest, NameRegistrationRolledBackWhenConstructorThrows) {
   auto coroutine = [kName]() -> stdexec::task<void> {
     bool threw = false;
     try {
-      co_await ex_actor::Spawn<ThrowingActor>().WithConfig({.actor_name = kName});
+      // GCC < 13 double-frees a temporary ActorConfig (heap-allocated actor_name) used directly
+      // in a co_await expression, so bind it to a named variable first. See actor_config.h.
+      ex_actor::ActorConfig config {.actor_name = kName};
+      co_await ex_actor::Spawn<ThrowingActor>().WithConfig(config);
     } catch (const std::exception&) {
       threw = true;
     }
@@ -79,7 +82,8 @@ TEST(AsyncInitTest, NameRegistrationRolledBackWhenConstructorThrows) {
 
     // The name is free again, so spawning a different actor with the same name
     // must succeed instead of failing the duplicate-name check.
-    auto actor = co_await ex_actor::Spawn<TrivialActor>().WithConfig({.actor_name = kName});
+    ex_actor::ActorConfig config {.actor_name = kName};
+    auto actor = co_await ex_actor::Spawn<TrivialActor>().WithConfig(config);
     EXPECT_FALSE(actor.IsEmpty());
     auto looked_up_again = co_await ex_actor::GetActorRefByName<TrivialActor>(kName);
     EXPECT_TRUE(looked_up_again.has_value());

@@ -1,2 +1,2 @@
 [files]
-extend-exclude = ["include/ex_actor/3rd_lib/cppzmq/"]
+extend-exclude = ["include/ex_actor/3rd_lib/"]

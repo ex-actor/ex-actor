@@ -1,11 +1,16 @@
+github_checks:
+  annotations: true
+
 coverage:
   status:
     project:
       default:
         target: auto
+        informational: true
     patch:
       default:
         target: auto
+        informational: true
 
 ignore:
   - "test/**"

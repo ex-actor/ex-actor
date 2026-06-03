@@ -61,7 +61,7 @@ class BlockingConcurrentQueue {
     assert(reinterpret_cast<ConcurrentQueue*>((BlockingConcurrentQueue*)1) == &((BlockingConcurrentQueue*)1)->inner &&
            "BlockingConcurrentQueue must have ConcurrentQueue as its first member");
     if (!sema) {
-      MOODYCAMEL_THROW(std::bad_alloc());
+      EX_ACTOR_MOODYCAMEL_THROW(std::bad_alloc());
     }
   }
 
@@ -72,13 +72,13 @@ class BlockingConcurrentQueue {
     assert(reinterpret_cast<ConcurrentQueue*>((BlockingConcurrentQueue*)1) == &((BlockingConcurrentQueue*)1)->inner &&
            "BlockingConcurrentQueue must have ConcurrentQueue as its first member");
     if (!sema) {
-      MOODYCAMEL_THROW(std::bad_alloc());
+      EX_ACTOR_MOODYCAMEL_THROW(std::bad_alloc());
     }
   }
 
   // Disable copying and copy assignment
-  BlockingConcurrentQueue(BlockingConcurrentQueue const&) MOODYCAMEL_DELETE_FUNCTION;
-  BlockingConcurrentQueue& operator=(BlockingConcurrentQueue const&) MOODYCAMEL_DELETE_FUNCTION;
+  BlockingConcurrentQueue(BlockingConcurrentQueue const&) EX_ACTOR_MOODYCAMEL_DELETE_FUNCTION;
+  BlockingConcurrentQueue& operator=(BlockingConcurrentQueue const&) EX_ACTOR_MOODYCAMEL_DELETE_FUNCTION;
 
   // Moving is supported, but note that it is *not* a thread-safe operation.
   // Nobody can use the queue while it's being moved, and the memory effects
@@ -86,10 +86,10 @@ class BlockingConcurrentQueue {
   // Note: When a queue is moved, its tokens are still valid but can only be
   // used with the destination queue (i.e. semantically they are moved along
   // with the queue itself).
-  BlockingConcurrentQueue(BlockingConcurrentQueue&& other) MOODYCAMEL_NOEXCEPT : inner(std::move(other.inner)),
+  BlockingConcurrentQueue(BlockingConcurrentQueue&& other) EX_ACTOR_MOODYCAMEL_NOEXCEPT : inner(std::move(other.inner)),
                                                                                  sema(std::move(other.sema)) {}
 
-  inline BlockingConcurrentQueue& operator=(BlockingConcurrentQueue&& other) MOODYCAMEL_NOEXCEPT {
+  inline BlockingConcurrentQueue& operator=(BlockingConcurrentQueue&& other) EX_ACTOR_MOODYCAMEL_NOEXCEPT {
     return swap_internal(other);
   }
 
@@ -98,7 +98,7 @@ class BlockingConcurrentQueue {
   // the tokens that were created for one queue must be used with
   // only the swapped queue (i.e. the tokens are tied to the
   // queue's movable state, not the object itself).
-  inline void swap(BlockingConcurrentQueue& other) MOODYCAMEL_NOEXCEPT { swap_internal(other); }
+  inline void swap(BlockingConcurrentQueue& other) EX_ACTOR_MOODYCAMEL_NOEXCEPT { swap_internal(other); }
 
  private:
   BlockingConcurrentQueue& swap_internal(BlockingConcurrentQueue& other) {
@@ -531,7 +531,7 @@ class BlockingConcurrentQueue {
 };
 
 template <typename T, typename Traits>
-inline void swap(BlockingConcurrentQueue<T, Traits>& a, BlockingConcurrentQueue<T, Traits>& b) MOODYCAMEL_NOEXCEPT {
+inline void swap(BlockingConcurrentQueue<T, Traits>& a, BlockingConcurrentQueue<T, Traits>& b) EX_ACTOR_MOODYCAMEL_NOEXCEPT {
   a.swap(b);
 }
 

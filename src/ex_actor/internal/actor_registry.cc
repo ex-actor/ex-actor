@@ -66,9 +66,7 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer reque
   auto request = Deserialize<NetworkRequest>(request_buffer);
 
   if (auto* msg = std::get_if<ActorCreationRequest>(&request.variant)) {
-    ByteBuffer reply_out;
-    HandleActorCreationRequest(std::move(*msg), reply_out);
-    co_return reply_out;
+    co_return co_await HandleActorCreationRequest(std::move(*msg));
   }
 
   if (auto* msg = std::get_if<ActorMethodCallRequest>(&request.variant)) {
@@ -108,7 +106,7 @@ uint64_t ActorRegistryBackend::GenerateRandomActorId() {
 
 ByteBuffer ActorRegistryBackend::SerializeReply(const NetworkReply& reply) { return Serialize(reply); }
 
-void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out) {
+ex::task<ByteBuffer> ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg) {
   try {
     auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(msg.handler_key);
     ActorRefSerdeContext info {.this_node_id = this_node_id_,
@@ -120,11 +118,12 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
                                },
                                .broker_actor_ref = broker_actor_ref_};
     uint64_t actor_id = GenerateRandomActorId();
-    auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
+    RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext context {
         .serialized_args = std::move(msg.serialized_args),
         .scheduler = user_actor_scheduler_->Clone(),
         .actor_ref_serde_ctx = info,
-        .actor_id = actor_id});
+        .actor_id = actor_id};
+    auto result = co_await handler(std::move(context));
     if (result.actor_name.has_value()) {
       EXA_THROW_CHECK(!actor_name_to_id_.contains(result.actor_name.value()))
           << "An actor with the same name already exists, name=" << result.actor_name.value();
@@ -132,11 +131,11 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
     }
     actor_id_to_actor_[actor_id] = std::move(result.actor);
     actor_id_to_serialized_ref_[actor_id] = result.serialized_actor_ref;
-    reply_out = SerializeReply(NetworkReply {
+    co_return SerializeReply(NetworkReply {
         ActorCreationReply {.success = true, .serialized_actor_ref = std::move(result.serialized_actor_ref)}});
   } catch (std::exception& error) {
     auto error_msg = fmt_lib::format("Exception type: {}, what(): {}", typeid(error).name(), error.what());
-    reply_out = SerializeReply(NetworkReply {ActorCreationReply {.success = false, .error = std::move(error_msg)}});
+    co_return SerializeReply(NetworkReply {ActorCreationReply {.success = false, .error = std::move(error_msg)}});
   }
 }
 
@@ -219,9 +218,9 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
                                 ? std::move(scheduler)
                                 : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                       default_work_sharing_thread_pool_.GetScheduler())),
-      backend_actor_(system_actor_scheduler_->Clone(), ActorConfig {}, user_actor_scheduler_->Clone(), this_node_id_,
-                     broker_actor_ref_),
-      backend_actor_ref_(/*actor_id=*/UINT64_MAX, &backend_actor_) {
+      backend_actor_(system_actor_scheduler_->Clone(), ActorConfig {}) {
+  ex::sync_wait(backend_actor_.InitUserClassInstance(user_actor_scheduler_->Clone(), this_node_id_, broker_actor_ref_));
+  backend_actor_ref_ = BasicActorRef<ActorRegistryBackend>(/*actor_id=*/UINT64_MAX, &backend_actor_);
   log::Info("ActorRegistry created, node_id={:#x}", this_node_id_);
 }
 
@@ -230,8 +229,8 @@ ex::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_co
   EXA_THROW_CHECK(broker_actor_ref_.IsEmpty()) << "Already in distributed mode.";
   EXA_THROW_CHECK(!cluster_config.listen_address.empty()) << "listen_address must not be empty";
 
-  broker_actor_ = std::make_unique<Actor<MessageBroker>>(system_actor_scheduler_->Clone(), ActorConfig {},
-                                                         this_node_id_, cluster_config);
+  broker_actor_ = std::make_unique<Actor<MessageBroker>>(system_actor_scheduler_->Clone(), ActorConfig {});
+  co_await broker_actor_->InitUserClassInstance(this_node_id_, cluster_config);
 
   broker_actor_ref_ = BasicActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
   NotifyExActorOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);

@@ -33,7 +33,7 @@ __declspec(dllimport) int __stdcall ReleaseSemaphore(void* hSemaphore, long lRel
 
 #if defined(__GLIBC_PREREQ) && defined(_GNU_SOURCE)
 #if __GLIBC_PREREQ(2, 30)
-#define MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
+#define EX_ACTOR_MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
 #endif
 #endif
 #endif
@@ -67,8 +67,8 @@ class Semaphore {
  private:
   void* m_hSema;
 
-  Semaphore(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
-  Semaphore& operator=(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore(const Semaphore& other) EX_ACTOR_MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore& operator=(const Semaphore& other) EX_ACTOR_MOODYCAMEL_DELETE_FUNCTION;
 
  public:
   Semaphore(int initialCount = 0) {
@@ -103,8 +103,8 @@ class Semaphore {
  private:
   semaphore_t m_sema;
 
-  Semaphore(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
-  Semaphore& operator=(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore(const Semaphore& other) EX_ACTOR_MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore& operator=(const Semaphore& other) EX_ACTOR_MOODYCAMEL_DELETE_FUNCTION;
 
  public:
   Semaphore(int initialCount = 0) {
@@ -151,8 +151,8 @@ class Semaphore {
  private:
   sem_t m_sema;
 
-  Semaphore(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
-  Semaphore& operator=(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore(const Semaphore& other) EX_ACTOR_MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore& operator=(const Semaphore& other) EX_ACTOR_MOODYCAMEL_DELETE_FUNCTION;
 
  public:
   Semaphore(int initialCount = 0) {
@@ -185,7 +185,7 @@ class Semaphore {
     struct timespec ts;
     const int usecs_in_1_sec = 1000000;
     const int nsecs_in_1_sec = 1000000000;
-#ifdef MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
+#ifdef EX_ACTOR_MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
     clock_gettime(CLOCK_MONOTONIC, &ts);
 #else
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -201,7 +201,7 @@ class Semaphore {
 
     int rc;
     do {
-#ifdef MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
+#ifdef EX_ACTOR_MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
       rc = sem_clockwait(&m_sema, CLOCK_MONOTONIC, &ts);
 #else
       rc = sem_timedwait(&m_sema, &ts);

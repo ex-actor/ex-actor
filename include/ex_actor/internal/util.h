@@ -41,6 +41,39 @@ auto& MapAt(Map& map, const Key& key, std::source_location loc = std::source_loc
   return it->second;
 }
 
+// A move-only RAII guard that runs `cleanup` when it goes out of scope, unless Dismiss() was
+// called first. Use it to roll back a side effect (e.g. a map insertion made before a co_await)
+// on any early/exceptional exit, then Dismiss() once the operation has committed successfully.
+//
+//   auto guard = MakeScopeGuard([&] { map.erase(key); });
+//   map[key] = value;
+//   co_await something_that_may_throw();
+//   guard.Dismiss();  // success: keep the entry
+//
+// Prefer the MakeScopeGuard factory so the lambda type is deduced.
+template <class Cleanup>
+class ScopeGuard {
+ public:
+  explicit ScopeGuard(Cleanup cleanup) : cleanup_(std::move(cleanup)) {}
+  ScopeGuard(ScopeGuard&& other) noexcept
+      : cleanup_(std::move(other.cleanup_)), active_(std::exchange(other.active_, false)) {}
+  ScopeGuard& operator=(ScopeGuard&&) = delete;
+  ScopeGuard(const ScopeGuard&) = delete;
+  ScopeGuard& operator=(const ScopeGuard&) = delete;
+  ~ScopeGuard() {
+    if (active_) {
+      cleanup_();
+    }
+  }
+
+  // Cancel the cleanup so it won't run on destruction.
+  void Dismiss() { active_ = false; }
+
+ private:
+  Cleanup cleanup_;
+  bool active_ = true;
+};
+
 // A sender that wraps two alternative senders in a variant, choosing at runtime.
 // Used to type erase different senders without using ex::task, so the scheduler can be preserved.
 template <class SenderA, class SenderB>

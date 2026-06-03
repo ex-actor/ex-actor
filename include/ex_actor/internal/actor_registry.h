@@ -176,25 +176,19 @@ class ActorRegistryBackend {
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
   ex::task<ActorRef<UserClass>> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
     auto actor_id = GenerateRandomActorId();
+    reserved_uncommitted_actor_ids_.insert(actor_id);
+    auto cleanup = ScopeGuard([this, actor_id] { reserved_uncommitted_actor_ids_.erase(actor_id); });
+
     auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(user_actor_scheduler_->Clone(), config);
     auto* actor_ptr = actor.get();
 
-    // Must inserted before InitUserClassInstance, or GenerateRandomActorId might generate the same id again
+    co_await actor_ptr->InitUserClassInstance(std::move(args)...);
+
     actor_id_to_actor_[actor_id] = std::move(actor);
     if (config.actor_name.has_value()) {
       std::string& name = *config.actor_name;
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists, name=" << name;
       actor_name_to_id_[name] = actor_id;
-    }
-
-    try {
-      co_await actor_ptr->InitUserClassInstance(std::move(args)...);
-    } catch (...) {
-      if (config.actor_name.has_value()) {
-        actor_name_to_id_.erase(*config.actor_name);
-        actor_id_to_actor_.erase(actor_id);
-      }
-      throw;
     }
 
     auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor_ptr, broker_actor_ref_);
@@ -208,6 +202,7 @@ class ActorRegistryBackend {
   std::unique_ptr<TypeErasedActorScheduler> user_actor_scheduler_;
   uint64_t this_node_id_ = 0;
   BasicActorRef<MessageBroker> broker_actor_ref_;
+  std::unordered_set<uint64_t> reserved_uncommitted_actor_ids_;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   // Serialized ActorRef bytes for each actor, captured at creation time with the concrete type known.
   // Used to return correctly-typed ActorRef from remote GetActorRefByName without knowing UserClass.

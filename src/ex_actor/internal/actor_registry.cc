@@ -91,7 +91,7 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer reque
 uint64_t ActorRegistryBackend::GenerateRandomActorId() {
   while (true) {
     auto id = random_num_generator_();
-    if (!actor_id_to_actor_.contains(id)) {
+    if (!actor_id_to_actor_.contains(id) && !reserved_uncommitted_actor_ids_.contains(id)) {
       return id;
     }
   }
@@ -111,12 +111,16 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleActorCreationRequest(ActorCreat
                                },
                                .broker_actor_ref = broker_actor_ref_};
     uint64_t actor_id = GenerateRandomActorId();
+    reserved_uncommitted_actor_ids_.insert(actor_id);
+    auto cleanup = ScopeGuard([this, actor_id] { reserved_uncommitted_actor_ids_.erase(actor_id); });
+
     RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext context {
         .serialized_args = std::move(msg.serialized_args),
         .scheduler = user_actor_scheduler_->Clone(),
         .actor_ref_serde_ctx = info,
         .actor_id = actor_id};
     auto result = co_await handler(std::move(context));
+
     if (result.actor_name.has_value()) {
       EXA_THROW_CHECK(!actor_name_to_id_.contains(result.actor_name.value()))
           << "An actor with the same name already exists, name=" << result.actor_name.value();

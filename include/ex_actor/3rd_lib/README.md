@@ -7,10 +7,19 @@ This directory contains third-party libraries vendored directly into ex_actor to
 ```
 3rd_lib/
 ├── absl/                   # Subset of abseil-cpp (LTS 20260107.1)
+│   ├── algorithm/          # Equal/linear_search helpers
 │   ├── base/               # Platform detection, macros, config
+│   │   └── internal/       # iterator_traits, throw_delegate (inline impl)
+│   ├── container/          # InlinedVector (small-buffer-optimized vector)
+│   │   └── internal/
 │   ├── functional/         # AnyInvocable (move-only type-erased callable with SBO)
 │   │   └── internal/
+│   ├── hash/
+│   │   └── internal/       # weakly_mixed_integer (used by InlinedVector hashing)
+│   ├── memory/             # memory.h (allocator utilities)
 │   ├── meta/               # Type traits utilities
+│   ├── types/              # Span
+│   │   └── internal/
 │   └── utility/            # Utility helpers
 ├── daking/                 # Lock-free MPSC queue
 ├── moody_camel_queue/      # High-performance concurrent queue

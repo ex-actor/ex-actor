@@ -86,7 +86,7 @@ Result<internal::wrap_in_rfl_array_t<T>> read(const concepts::ByteLike auto* byt
 };  // namespace rfl
 
 // ===================================================
-// Custom Parser for SmallVector<std::byte, kN> → capnproto Data.
+// Custom Parser for absl::InlinedVector<std::byte, kN> → capnproto Data.
 // Bypasses Writer entirely: no intermediate Bytestring allocation, zero-copy write.
 // Covers both capnproto::Reader and ReaderWithContext<Ctx> (which inherits Reader).
 // ===================================================
@@ -95,22 +95,22 @@ namespace rfl::parsing {
 
 template <class R, class W, size_t kN, class ProcessorsType>
   requires(std::is_base_of_v<rfl::capnproto::Reader, R> && std::is_same_v<W, rfl::capnproto::Writer>)
-struct Parser<R, W, ex_actor::internal::SmallVector<std::byte, kN>, ProcessorsType> {
+struct Parser<R, W, ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>, ProcessorsType> {
   using InputVarType = typename rfl::capnproto::Reader::InputVarType;
   using ParentType = Parent<rfl::capnproto::Writer>;
 
-  static rfl::Result<ex_actor::internal::SmallVector<std::byte, kN>> read(const R& /*_r*/,
-                                                                          const InputVarType& _var) noexcept {
+  static rfl::Result<ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>> read(const R& /*_r*/,
+                                                                                       const InputVarType& _var) noexcept {
     if (_var.val_.getType() != capnp::DynamicValue::DATA) {
-      return rfl::error("Expected DATA type for SmallVector<byte>");
+      return rfl::error("Expected DATA type for InlinedVector<byte>");
     }
     const auto data = _var.val_.as<capnp::Data>();
     const auto* begin = reinterpret_cast<const std::byte*>(data.begin());
-    return ex_actor::internal::SmallVector<std::byte, kN>(begin, begin + data.size());
+    return ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>(begin, begin + data.size());
   }
 
   template <class P>
-  static void write(const rfl::capnproto::Writer& /*_w*/, const ex_actor::internal::SmallVector<std::byte, kN>& _sv,
+  static void write(const rfl::capnproto::Writer& /*_w*/, const ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>& _sv,
                     const P& _parent) {
     using PType = std::remove_cvref_t<P>;
     const auto arr = kj::ArrayPtr<const kj::byte>(reinterpret_cast<const kj::byte*>(_sv.data()), _sv.size());
@@ -138,7 +138,7 @@ struct Parser<R, W, ex_actor::internal::SmallVector<std::byte, kN>, ProcessorsTy
 // ===================================================
 namespace ex_actor::internal {
 
-using ByteBuffer = SmallVector<std::byte, 512>;  // SBO: no heap alloc for messages <= 512 bytes
+using ByteBuffer = ex_actor::embedded_3rd::absl::InlinedVector<std::byte, 512>;  // SBO: no heap alloc for messages <= 512 bytes
 
 constexpr size_t kBuilderBufferSize = 65536;
 

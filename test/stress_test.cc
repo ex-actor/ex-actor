@@ -15,8 +15,6 @@ struct TestActor {
     running = false;
   }
 
-  constexpr static auto kActorMethods = std::make_tuple(&TestActor::Run);
-
   bool running = false;
 };
 

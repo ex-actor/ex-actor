@@ -100,9 +100,6 @@ TEST(AsyncInitTest, NameRegistrationRolledBackWhenConstructorThrows) {
 struct SeededActor {
   explicit SeededActor(int seed) : seed(seed) {}
   int GetSeed() const { return seed; }
-
-  constexpr static auto kActorMethods = std::make_tuple(&SeededActor::GetSeed);
-
   int seed = 0;
 };
 

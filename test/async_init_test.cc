@@ -2,6 +2,8 @@
 #include <chrono>
 #include <stdexcept>
 #include <thread>
+#include <unordered_set>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -87,6 +89,71 @@ TEST(AsyncInitTest, NameRegistrationRolledBackWhenConstructorThrows) {
     EXPECT_FALSE(actor.IsEmpty());
     auto looked_up_again = co_await ex_actor::GetActorRefByName<TrivialActor>(kName);
     EXPECT_TRUE(looked_up_again.has_value());
+  };
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
+
+// An actor that remembers the unique seed it was constructed with, so we can
+// detect whether the ActorRef handed back to the caller still points at the
+// object that was created for it (and not one clobbered by an id collision).
+struct SeededActor {
+  explicit SeededActor(int seed) : seed(seed) {}
+  int GetSeed() const { return seed; }
+
+  constexpr static auto kActorMethods = std::make_tuple(&SeededActor::GetSeed);
+
+  int seed = 0;
+};
+
+// Regression test: concurrent spawns must not be handed the same actor id.
+//
+// The bug:
+//   1. SpawnLocal draws a random id, then `co_await`s the constructor, then
+//      inserts the actor into actor_id_to_actor_.
+//   2. That `co_await` suspends, so the registry keeps draining its mailbox and
+//      starts more spawns before the first one has inserted its id.
+//   3. GenerateRandomActorId dedups only against actor_id_to_actor_, so it
+//      can't see those in-flight ids and may hand out a duplicate.
+//   4. The second insert overwrites and destroys the first Actor while an
+//      ActorRef to it is already live -> use-after-free on the next Send.
+//
+// The fix inserts the id *before* the `co_await` (and rolls it back if the
+// constructor throws), so in-flight ids are visible to GenerateRandomActorId.
+//
+// This test spawns many actors concurrently, each carrying a unique seed, then
+// checks that all ids are distinct and every ref still reports its own seed.
+// With the bug, ids collide and the seed read-back mismatches (or segfaults).
+TEST(AsyncInitTest, ConcurrentSpawnsDoNotCollideActorIds) {
+  ex_actor::Init(/*thread_pool_size=*/4);
+  auto coroutine = []() -> stdexec::task<void> {
+    constexpr int kNumActors = 100000;
+    std::vector<ex_actor::ActorRef<SeededActor>> refs(kNumActors);
+
+    stdexec::simple_counting_scope scope;
+    for (int i = 0; i < kNumActors; ++i) {
+      stdexec::spawn(ex_actor::Spawn<SeededActor>(i) | stdexec::then([&refs, i](auto ref) { refs[i] = ref; }) |
+                         ex_actor::DiscardResult(),
+                     scope.get_token());
+    }
+    co_await scope.join();
+
+    // Every actor must have a distinct id; a collision means one actor's slot
+    // in the registry was overwritten (and its Actor destroyed) by another.
+    std::unordered_set<uint64_t> seen_ids;
+    seen_ids.reserve(kNumActors);
+    for (int i = 0; i < kNumActors; ++i) {
+      EXPECT_FALSE(refs[i].IsEmpty()) << "spawn " << i << " produced an empty ref";
+      bool inserted = seen_ids.insert(refs[i].GetActorId()).second;
+      EXPECT_TRUE(inserted) << "duplicate actor id for spawn " << i;
+    }
+
+    // Each ref must still resolve to the actor constructed with its own seed.
+    // A clobbered ref would read freed memory and return the wrong seed.
+    for (int i = 0; i < kNumActors; ++i) {
+      int seed = co_await refs[i].SendLocal<&SeededActor::GetSeed>();
+      EXPECT_EQ(seed, i) << "ref " << i << " points at the wrong actor (id collision use-after-free)";
+    }
   };
   ex::sync_wait(coroutine());
   ex_actor::Shutdown();

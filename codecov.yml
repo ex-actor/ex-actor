@@ -15,3 +15,4 @@ coverage:
 ignore:
   - "test/**"
   - "include/ex_actor/3rd_lib/**"
+  - "src/ex_actor/3rd_lib/**"

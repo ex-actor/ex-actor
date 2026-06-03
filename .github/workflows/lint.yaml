@@ -52,6 +52,7 @@ jobs:
           find src/ include/ -name '*.cc' -o -name '*.h' \
             | grep -v 'test/import_test' \
             | grep -v 'include/ex_actor/3rd_lib' \
+            | grep -v 'src/ex_actor/3rd_lib' \
             | xargs clangd-tidy \
               -p . \
               -f \

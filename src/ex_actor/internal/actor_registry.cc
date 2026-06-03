@@ -30,9 +30,7 @@ ActorRegistryBackend::ActorRegistryBackend(std::unique_ptr<TypeErasedActorSchedu
                                            uint64_t this_node_id, BasicActorRef<MessageBroker> broker_actor_ref)
     : user_actor_scheduler_(std::move(user_actor_scheduler)),
       this_node_id_(this_node_id),
-      broker_actor_ref_(broker_actor_ref) {
-  InitRandomNumGenerator();
-}
+      broker_actor_ref_(broker_actor_ref) {}
 
 void ActorRegistryBackend::SetBrokerActorRef(BasicActorRef<MessageBroker> broker_actor_ref) {
   broker_actor_ref_ = broker_actor_ref;
@@ -88,11 +86,6 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleNetworkRequest(ByteBuffer reque
   }
 
   EXA_THROW << "Unknown network request variant";
-}
-
-void ActorRegistryBackend::InitRandomNumGenerator() {
-  std::random_device rd;
-  random_num_generator_ = std::mt19937(rd());
 }
 
 uint64_t ActorRegistryBackend::GenerateRandomActorId() {

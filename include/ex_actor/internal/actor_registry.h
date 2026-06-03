@@ -179,6 +179,8 @@ class ActorRegistryBackend {
     auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(user_actor_scheduler_->Clone(), config);
     auto* actor_ptr = actor.get();
 
+    // Must inserted before InitUserClassInstance, or GenerateRandomActorId might generate the same id again
+    actor_id_to_actor_[actor_id] = std::move(actor);
     if (config.actor_name.has_value()) {
       std::string& name = *config.actor_name;
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists, name=" << name;
@@ -190,11 +192,11 @@ class ActorRegistryBackend {
     } catch (...) {
       if (config.actor_name.has_value()) {
         actor_name_to_id_.erase(*config.actor_name);
+        actor_id_to_actor_.erase(actor_id);
       }
       throw;
     }
 
-    actor_id_to_actor_[actor_id] = std::move(actor);
     auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor_ptr, broker_actor_ref_);
     NotifyExActorOnSpawned<UserClass>(actor_ptr, handle);
     // Workaround: see DeserializeActorRef comment.
@@ -202,7 +204,7 @@ class ActorRegistryBackend {
     co_return handle;
   }
 
-  std::mt19937 random_num_generator_;
+  std::mt19937_64 random_num_generator_ {std::random_device {}()};
   std::unique_ptr<TypeErasedActorScheduler> user_actor_scheduler_;
   uint64_t this_node_id_ = 0;
   BasicActorRef<MessageBroker> broker_actor_ref_;
@@ -212,7 +214,6 @@ class ActorRegistryBackend {
   std::unordered_map</*actor_id*/ uint64_t, ByteBuffer> actor_id_to_serialized_ref_;
   std::unordered_map<std::string, std::uint64_t> actor_name_to_id_;
 
-  void InitRandomNumGenerator();
   uint64_t GenerateRandomActorId();
   ByteBuffer SerializeReply(const NetworkReply& reply);
   ex::task<ByteBuffer> HandleActorCreationRequest(ActorCreationRequest msg);

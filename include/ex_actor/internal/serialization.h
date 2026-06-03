@@ -26,7 +26,7 @@
 #include <rfl/capnproto.hpp>
 #include <spdlog/spdlog.h>
 
-#include "ex_actor/internal/container.h"
+#include "ex_actor/3rd_lib/absl/container/inlined_vector.h"
 #include "ex_actor/internal/logging.h"
 
 // ===================================================
@@ -99,8 +99,8 @@ struct Parser<R, W, ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>, 
   using InputVarType = typename rfl::capnproto::Reader::InputVarType;
   using ParentType = Parent<rfl::capnproto::Writer>;
 
-  static rfl::Result<ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>> read(const R& /*_r*/,
-                                                                                       const InputVarType& _var) noexcept {
+  static rfl::Result<ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>> read(
+      const R& /*_r*/, const InputVarType& _var) noexcept {
     if (_var.val_.getType() != capnp::DynamicValue::DATA) {
       return rfl::error("Expected DATA type for InlinedVector<byte>");
     }
@@ -110,8 +110,8 @@ struct Parser<R, W, ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>, 
   }
 
   template <class P>
-  static void write(const rfl::capnproto::Writer& /*_w*/, const ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>& _sv,
-                    const P& _parent) {
+  static void write(const rfl::capnproto::Writer& /*_w*/,
+                    const ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>& _sv, const P& _parent) {
     using PType = std::remove_cvref_t<P>;
     const auto arr = kj::ArrayPtr<const kj::byte>(reinterpret_cast<const kj::byte*>(_sv.data()), _sv.size());
     const capnp::Data::Reader data_reader(arr);
@@ -138,7 +138,8 @@ struct Parser<R, W, ex_actor::embedded_3rd::absl::InlinedVector<std::byte, kN>, 
 // ===================================================
 namespace ex_actor::internal {
 
-using ByteBuffer = ex_actor::embedded_3rd::absl::InlinedVector<std::byte, 512>;  // SBO: no heap alloc for messages <= 512 bytes
+using ByteBuffer =
+    ex_actor::embedded_3rd::absl::InlinedVector<std::byte, 512>;  // SBO: no heap alloc for messages <= 512 bytes
 
 constexpr size_t kBuilderBufferSize = 65536;
 

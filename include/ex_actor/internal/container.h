@@ -30,7 +30,6 @@
 #include <unordered_set>
 #include <utility>
 
-#include "ex_actor/3rd_lib/absl/container/inlined_vector.h"
 #include "ex_actor/3rd_lib/daking/MPSC_queue.h"
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
 #include "ex_actor/internal/logging.h"

@@ -87,13 +87,11 @@ CPMAddPackage(
 )
 
 # ------------------- targets -------------------
+file(GLOB_RECURSE EX_ACTOR_SOURCES CONFIGURE_DEPENDS "src/*.cc")
 add_library(
   ex_actor
   STATIC
-  src/ex_actor/internal/network.cc
-  src/ex_actor/internal/actor_registry.cc
-  src/ex_actor/internal/global_registry.cc
-  src/ex_actor/internal/logging.cc
+  ${EX_ACTOR_SOURCES}
 )
 target_include_directories(ex_actor PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

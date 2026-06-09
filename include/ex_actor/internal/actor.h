@@ -80,11 +80,31 @@ class TypeErasedActorScheduler {
 template <ex::scheduler Scheduler>
 class AnyStdExecScheduler : public TypeErasedActorScheduler {
  public:
+  struct ActorEnv {
+    const ActorConfig& config;
+
+    uint32_t query(get_priority_t) const noexcept { return config.priority; }
+    size_t query(get_scheduler_index_t) const noexcept { return config.scheduler_index; }
+
+    // Only match tags that are NOT standard stdexec queries to avoid breaking stop tokens, etc.
+    template <typename Tag>
+      requires(!std::is_same_v<Tag, ex::get_stop_token_t> && !std::is_same_v<Tag, ex::get_scheduler_t> &&
+               !std::is_same_v<Tag, ex::get_delegation_scheduler_t> && !std::is_same_v<Tag, ex::get_allocator_t>)
+    auto query(Tag) const noexcept {
+      auto key = internal::GetTypeName<Tag>();
+      for (const auto& item : config.scheduler_envs) {
+        if (item.key == key) {
+          return item.value;
+        }
+      }
+      return std::variant<int64_t, uint64_t, double, std::string, bool> {};
+    }
+  };
+
   explicit AnyStdExecScheduler(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
   void Schedule(::ex_actor::embedded_3rd::absl::AnyInvocable<void()> fn, const ActorConfig& config,
                 ex::simple_counting_scope::token scope_token) override {
-    auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, config.priority}) |
-                  ex::write_env(ex::prop {ex_actor::get_scheduler_index, config.scheduler_index}) |
+    auto sender = ex::schedule(scheduler_) | ex::write_env(ActorEnv {config}) |
                   ex::then([fn = std::move(fn)]() mutable { fn(); });
     ex::spawn(std::move(sender) | DiscardResult(), scope_token);
   }

@@ -65,14 +65,15 @@ struct ActorConfig {
    * @brief 3rd-party scheduler environments.
    */
   struct SchedulerEnvItem {
-    std::string key;
+    uint64_t key_hash;
     std::variant<int64_t, uint64_t, double, std::string, bool> value;
   };
   std::vector<SchedulerEnvItem> scheduler_envs;
 
   template <typename Tag, typename T>
   void SetSchedulerEnv(T&& value) {
-    scheduler_envs.push_back(SchedulerEnvItem {std::string(internal::GetTypeName<Tag>()), std::forward<T>(value)});
+    constexpr uint64_t kHash = internal::FnvHash(internal::GetTypeName<Tag>());
+    scheduler_envs.push_back(SchedulerEnvItem {kHash, std::forward<T>(value)});
   }
 };
 

@@ -91,9 +91,9 @@ class AnyStdExecScheduler : public TypeErasedActorScheduler {
       requires(!std::is_same_v<Tag, ex::get_stop_token_t> && !std::is_same_v<Tag, ex::get_scheduler_t> &&
                !std::is_same_v<Tag, ex::get_delegation_scheduler_t> && !std::is_same_v<Tag, ex::get_allocator_t>)
     auto query(Tag) const noexcept {
-      auto key = internal::GetTypeName<Tag>();
+      constexpr uint64_t kTargetHash = internal::FnvHash(internal::GetTypeName<Tag>());
       for (const auto& item : config.scheduler_envs) {
-        if (item.key == key) {
+        if (item.key_hash == kTargetHash) {
           return item.value;
         }
       }

@@ -23,7 +23,8 @@
 
 #include <stdexec/execution.hpp>
 
-#include "ex_actor/internal/alias.h"  // IWYU pragma: keep
+#include "ex_actor/internal/alias.h"    // IWYU pragma: keep
+#include "ex_actor/internal/reflect.h"  // IWYU pragma: keep
 
 namespace ex_actor {
 
@@ -59,6 +60,21 @@ struct ActorConfig {
   size_t scheduler_index = 0;
   // used in PriorityThreadPool
   uint32_t priority = UINT32_MAX;
+
+  /**
+   * @brief 3rd-party scheduler environments.
+   */
+  struct SchedulerEnvItem {
+    uint64_t key_hash;
+    std::variant<int64_t, uint64_t, double, std::string, bool> value;
+  };
+  std::vector<SchedulerEnvItem> scheduler_envs;
+
+  template <typename Tag, typename T>
+  void SetSchedulerEnv(T&& value) {
+    constexpr uint64_t kHash = internal::FnvHash(internal::GetTypeName<Tag>());
+    scheduler_envs.push_back(SchedulerEnvItem {kHash, std::forward<T>(value)});
+  }
 };
 
 struct get_priority_t {

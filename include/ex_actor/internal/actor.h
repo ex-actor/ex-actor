@@ -85,6 +85,7 @@ class AnyStdExecScheduler : public TypeErasedActorScheduler {
                 ex::simple_counting_scope::token scope_token) override {
     auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, config.priority}) |
                   ex::write_env(ex::prop {ex_actor::get_scheduler_index, config.scheduler_index}) |
+                  ex::write_env(ex::prop {ex_actor::get_core_index, config.core_index}) |
                   ex::then([fn = std::move(fn)]() mutable { fn(); });
     ex::spawn(std::move(sender) | DiscardResult(), scope_token);
   }

@@ -123,6 +123,37 @@ In practice it's used to prioritize downstream actors in some high-throughput sy
 Even though this scheduler takes priority into account, the actor scheduling is still cooperative. Which means a thread can't be interrupted and switch to higher priority actors when executing an actor's message.
 If you do have some very high-priority actors, consider using the [`SchedulerUnion`](#scheduler-union) scheduler to put them in a dedicated thread pool.
 
+### Core-Bound Thread Pool
+
+<!-- doc test start -->
+```cpp
+#include "ex_actor/api.h"
+
+struct TestActor {
+  void Foo() {}
+};
+
+stdexec::task<void> MainCoroutine() {
+  ex_actor::CoreBoundThreadPool thread_pool(/*thread_count=*/4);
+  ex_actor::Init(thread_pool.GetScheduler());
+
+  // Create an actor and bind it to CPU core 0
+  auto actor = co_await ex_actor::Spawn<TestActor>().WithConfig({
+    .core_index = 0
+  });
+
+  ex_actor::Shutdown();
+}
+
+int main() { stdexec::sync_wait(MainCoroutine()); }
+```
+<!-- doc test end -->
+
+This scheduler is suitable for compute-heavy tasks or low-latency systems where CPU core affinity is crucial for cache locality. 
+It consists of $N$ threads, where each thread is pinned to a specific CPU core using CPU affinity system calls (e.g., `pthread_setaffinity_np` on Linux).
+
+Unlike other thread pools, each thread in `CoreBoundThreadPool` maintains its own local queue. When an actor is spawned, you can configure its target CPU core via `.core_index`. The scheduler will dispatch all operations of this actor to the corresponding thread queue (`core_index % thread_count`), ensuring that they always run on the same CPU core.
+
 ### Scheduler Union
 
 <!-- doc test start -->

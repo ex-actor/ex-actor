@@ -26,7 +26,7 @@ This programming paradigm is called "Actor Model". It's a very easy way to write
 
 1. **Easy to Use** - Clean & intuitive API, turn your existing class into an actor.
 2. **Standard-Compliant** - Composable with everything in std::execution ecosystem.
-3. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also [provide many out-of-box](https://ex-actor.github.io/ex-actor/schedulers/): work-sharing, work-stealing, custom priority and so on.
+3. **Pluggable Scheduler** - Use any std::execution scheduler you like! We also [provide many out-of-box](https://ex-actor.github.io/ex-actor/schedulers/): work-sharing, work-stealing, core-bound (CPU affinity), custom priority and so on.
 
 
 # API Glance

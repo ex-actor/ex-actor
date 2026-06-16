@@ -18,14 +18,23 @@
 
 #if defined(__linux__)
 #include <pthread.h>
+#include <sched.h>
 #endif
 
 namespace ex_actor::internal {
 
 #if defined(__linux__)
-inline void SetThreadName(const std::string& name) { pthread_setname_np(pthread_self(), name.c_str()); }
+inline bool SetThreadName(const std::string& name) { return pthread_setname_np(pthread_self(), name.c_str()) == 0; }
+inline bool SetThreadAffinity(size_t core_index) {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(core_index, &cpuset);
+  return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0;
+}
 #else
 inline void SetThreadName(const std::string&) {}
+inline bool SetThreadAffinity(size_t) { return false; }
+
 #endif
 
 }  // namespace ex_actor::internal

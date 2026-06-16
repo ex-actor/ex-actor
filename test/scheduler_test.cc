@@ -138,3 +138,56 @@ TEST(SchedulerTest, TestResourceHolder) {
   ex::sync_wait(coroutine());
   ex_actor::Shutdown();
 }
+
+TEST(SchedulerTest, CoreBoundThreadPoolTest) {
+  ex_actor::CoreBoundThreadPool thread_pool(2);
+  auto scheduler = thread_pool.GetScheduler();
+  auto start = ex::schedule(scheduler) | ex::then([] { return std::this_thread::get_id(); });
+
+  auto sender1 = start | ex::write_env(ex::prop {ex_actor::get_core_index, 0});
+  auto sender2 = start | ex::write_env(ex::prop {ex_actor::get_core_index, 1});
+
+  auto [thread_id1] = ex::sync_wait(sender1).value();
+  auto [thread_id2] = ex::sync_wait(sender2).value();
+  ASSERT_NE(thread_id1, thread_id2);
+
+  auto coroutine = [&]() -> stdexec::task<void> {
+    auto actor1 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.core_index = 0});
+    auto actor2 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.core_index = 1});
+
+    uint64_t thread_id1 = co_await actor1.Send<&TestActor2::GetThreadId>();
+    uint64_t thread_id2 = co_await actor2.Send<&TestActor2::GetThreadId>();
+    EXPECT_NE(thread_id1, thread_id2);
+  };
+  ex_actor::Init(scheduler);
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}
+
+TEST(SchedulerTest, SchedulerUnionWithCoreBoundThreadPoolTest) {
+  ex_actor::WorkSharingThreadPool ws_pool(1);
+  ex_actor::CoreBoundThreadPool cb_pool(2);
+  ex_actor::SchedulerUnion scheduler_union(ws_pool.GetScheduler(), cb_pool.GetScheduler());
+  auto scheduler = scheduler_union.GetScheduler();
+  auto start = ex::schedule(scheduler) | ex::then([] { return std::this_thread::get_id(); });
+
+  auto sender1 = start | ex::write_env(ex::prop {ex_actor::get_scheduler_index, 0});
+  auto sender2 = start | ex::write_env(ex::prop {ex_actor::get_scheduler_index, 1}) |
+                 ex::write_env(ex::prop {ex_actor::get_core_index, 1});
+
+  auto [thread_id1] = ex::sync_wait(sender1).value();
+  auto [thread_id2] = ex::sync_wait(sender2).value();
+  ASSERT_NE(thread_id1, thread_id2);
+
+  auto coroutine = [&]() -> stdexec::task<void> {
+    auto actor1 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 0});
+    auto actor2 = co_await ex_actor::Spawn<TestActor2>().WithConfig({.scheduler_index = 1, .core_index = 1});
+
+    uint64_t thread_id1 = co_await actor1.Send<&TestActor2::GetThreadId>();
+    uint64_t thread_id2 = co_await actor2.Send<&TestActor2::GetThreadId>();
+    EXPECT_NE(thread_id1, thread_id2);
+  };
+  ex_actor::Init(scheduler_union.GetScheduler());
+  ex::sync_wait(coroutine());
+  ex_actor::Shutdown();
+}

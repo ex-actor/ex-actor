@@ -16,16 +16,9 @@
 
 #include <string>
 
-#if defined(__linux__)
-#include <pthread.h>
-#endif
-
 namespace ex_actor::internal {
 
-#if defined(__linux__)
-inline void SetThreadName(const std::string& name) { pthread_setname_np(pthread_self(), name.c_str()); }
-#else
-inline void SetThreadName(const std::string&) {}
-#endif
+bool SetThreadName(const std::string& name);
+bool SetThreadAffinity(size_t core_index);
 
 }  // namespace ex_actor::internal

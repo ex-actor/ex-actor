@@ -59,6 +59,8 @@ struct ActorConfig {
   size_t scheduler_index = 0;
   // used in PriorityThreadPool
   uint32_t priority = UINT32_MAX;
+  // used in CorePinnedThreadPool
+  size_t core_index = 0;
 };
 
 struct get_priority_t {
@@ -82,7 +84,17 @@ struct get_scheduler_index_t {
   }
   constexpr auto query(ex::forwarding_query_t) const noexcept -> bool { return true; }
 };
-
+struct get_core_index_t {
+  constexpr size_t operator()(const auto& prop) const noexcept {
+    if constexpr (requires { prop.query(get_core_index_t {}); }) {
+      return prop.query(get_core_index_t {});
+    } else {
+      return 0;
+    }
+  }
+  constexpr auto query(ex::forwarding_query_t) const noexcept -> bool { return true; }
+};
+constexpr inline get_core_index_t get_core_index {};
 constexpr inline get_priority_t get_priority {};
 constexpr inline get_scheduler_index_t get_scheduler_index {};
 }  // namespace ex_actor

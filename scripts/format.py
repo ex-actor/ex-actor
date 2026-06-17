@@ -16,9 +16,23 @@ clang_format = shutil.which("clang-format-20") or shutil.which("clang-format")
 git_clang_format = shutil.which("git-clang-format-20") or shutil.which("git-clang-format")
 
 if git_clang_format and clang_format:
-    subprocess.run(
-        [git_clang_format, "--binary", clang_format, "-f", "origin/main"],
-    )
+    try:
+        changed_files = subprocess.check_output(
+            ["git", "diff", "--name-only", "origin/main"],
+            text=True
+        ).splitlines()
+    except subprocess.CalledProcessError:
+        changed_files = []
+
+    filtered_files = [
+        f for f in changed_files
+        if not f.replace(os.sep, "/").startswith("include/ex_actor/3rd_lib")
+    ]
+
+    if filtered_files:
+        subprocess.run(
+            [git_clang_format, "--binary", clang_format, "-f", "origin/main", "--"] + filtered_files,
+        )
 else:
     print("WARNING: git-clang-format or clang-format not found, skipping", file=sys.stderr)
 

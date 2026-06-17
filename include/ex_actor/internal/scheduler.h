@@ -166,14 +166,14 @@ class WorkStealingThreadPool : public exec::static_thread_pool {
   auto GetScheduler() { return get_scheduler(); }
 };
 
-class CoreBoundThreadPool {
+class CorePinnedThreadPool {
  public:
   struct TypeErasedOperation {
     virtual ~TypeErasedOperation() = default;
     virtual void Execute() = 0;
   };
 
-  explicit CoreBoundThreadPool(size_t thread_count) : thread_count_(thread_count), queues_(thread_count) {
+  explicit CorePinnedThreadPool(size_t thread_count) : thread_count_(thread_count), queues_(thread_count) {
     for (size_t i = 0; i < thread_count; ++i) {
       workers_.emplace_back([this, i](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token, i); });
     }
@@ -181,10 +181,11 @@ class CoreBoundThreadPool {
 
   template <ex::receiver R>
   struct Operation : TypeErasedOperation {
-    Operation(R receiver, CoreBoundThreadPool* thread_pool) : receiver(std::move(receiver)), thread_pool(thread_pool) {}
+    Operation(R receiver, CorePinnedThreadPool* thread_pool)
+        : receiver(std::move(receiver)), thread_pool(thread_pool) {}
 
     R receiver;
-    CoreBoundThreadPool* thread_pool;
+    CorePinnedThreadPool* thread_pool;
 
     void Execute() override {
       auto env = ex::get_env(receiver);
@@ -211,10 +212,10 @@ class CoreBoundThreadPool {
 
   struct Sender : ex::sender_t, internal::StoppableSchedulerCompletionSignatures {
     using internal::StoppableSchedulerCompletionSignatures::get_completion_signatures;
-    CoreBoundThreadPool* thread_pool;
+    CorePinnedThreadPool* thread_pool;
 
     struct Env {
-      CoreBoundThreadPool* thread_pool;
+      CorePinnedThreadPool* thread_pool;
       template <class CPO>
       auto query(ex::get_completion_scheduler_t<CPO>) const noexcept -> Scheduler {
         return {.thread_pool = thread_pool};
@@ -230,7 +231,7 @@ class CoreBoundThreadPool {
   };
 
   struct Scheduler : ex::scheduler_t {
-    CoreBoundThreadPool* thread_pool;
+    CorePinnedThreadPool* thread_pool;
     Sender schedule() const noexcept { return {.thread_pool = thread_pool}; }
     friend bool operator==(const Scheduler& lhs, const Scheduler& rhs) noexcept {
       return lhs.thread_pool == rhs.thread_pool;
@@ -250,7 +251,7 @@ class CoreBoundThreadPool {
   std::vector<std::jthread> workers_;
 
   void WorkerThreadLoop(const std::stop_token& stop_token, size_t thread_index) {
-    internal::SetThreadName(fmt_lib::format("cb_pool_worker_{}", thread_index));
+    internal::SetThreadName(fmt_lib::format("cp_pool_worker_{}", thread_index));
     internal::SetThreadAffinity(thread_index);
 
     while (!stop_token.stop_requested()) {

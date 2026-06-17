@@ -59,7 +59,7 @@ struct ActorConfig {
   size_t scheduler_index = 0;
   // used in PriorityThreadPool
   uint32_t priority = UINT32_MAX;
-  // used in CoreBoundThreadPool
+  // used in CorePinnedThreadPool
   size_t core_index = 0;
 };
 

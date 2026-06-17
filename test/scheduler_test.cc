@@ -139,8 +139,8 @@ TEST(SchedulerTest, TestResourceHolder) {
   ex_actor::Shutdown();
 }
 
-TEST(SchedulerTest, CoreBoundThreadPoolTest) {
-  ex_actor::CoreBoundThreadPool thread_pool(2);
+TEST(SchedulerTest, CorePinnedThreadPoolTest) {
+  ex_actor::CorePinnedThreadPool thread_pool(2);
   auto scheduler = thread_pool.GetScheduler();
   auto start = ex::schedule(scheduler) | ex::then([] { return std::this_thread::get_id(); });
 
@@ -164,10 +164,10 @@ TEST(SchedulerTest, CoreBoundThreadPoolTest) {
   ex_actor::Shutdown();
 }
 
-TEST(SchedulerTest, SchedulerUnionWithCoreBoundThreadPoolTest) {
+TEST(SchedulerTest, SchedulerUnionWithCorePinnedThreadPoolTest) {
   ex_actor::WorkSharingThreadPool ws_pool(1);
-  ex_actor::CoreBoundThreadPool cb_pool(2);
-  ex_actor::SchedulerUnion scheduler_union(ws_pool.GetScheduler(), cb_pool.GetScheduler());
+  ex_actor::CorePinnedThreadPool cp_pool(2);
+  ex_actor::SchedulerUnion scheduler_union(ws_pool.GetScheduler(), cp_pool.GetScheduler());
   auto scheduler = scheduler_union.GetScheduler();
   auto start = ex::schedule(scheduler) | ex::then([] { return std::this_thread::get_id(); });
 

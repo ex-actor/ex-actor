@@ -165,6 +165,7 @@ class WorkStealingThreadPool : public exec::static_thread_pool {
   using exec::static_thread_pool::static_thread_pool;
   auto GetScheduler() { return get_scheduler(); }
 };
+
 class CoreBoundThreadPool {
  public:
   struct TypeErasedOperation {
@@ -261,6 +262,7 @@ class CoreBoundThreadPool {
     }
   }
 };
+
 template <class... Schedulers>
 class SchedulerUnion {
   static_assert(sizeof...(Schedulers) > 0, "SchedulerUnion must have at least one scheduler");

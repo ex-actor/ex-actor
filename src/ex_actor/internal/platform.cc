@@ -67,9 +67,10 @@ bool SetThreadAffinity(size_t core_index) {
 
 #elif defined(__APPLE__)
 
+#include <pthread.h>
+
 #include <mach/mach.h>
 #include <mach/thread_policy.h>
-#include <pthread.h>
 
 namespace ex_actor::internal {
 
@@ -80,8 +81,7 @@ bool SetThreadAffinity(size_t core_index) {
   // hint to the scheduler to co-locate threads with the same tag; it does NOT
   // pin to a specific core. We use the core_index as the affinity tag.
   thread_affinity_policy_data_t policy = {static_cast<integer_t>(core_index + 1)};
-  return thread_policy_set(mach_thread_self(), THREAD_AFFINITY_POLICY,
-                           reinterpret_cast<thread_policy_t>(&policy),
+  return thread_policy_set(mach_thread_self(), THREAD_AFFINITY_POLICY, reinterpret_cast<thread_policy_t>(&policy),
                            THREAD_AFFINITY_POLICY_COUNT) == KERN_SUCCESS;
 }
 

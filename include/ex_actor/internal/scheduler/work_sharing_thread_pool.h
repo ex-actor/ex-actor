@@ -15,17 +15,19 @@
 #pragma once
 
 #include <thread>
-#include <utility>
 
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/container.h"
 #include "ex_actor/internal/platform.h"
-#include "ex_actor/internal/scheduler/stoppable_scheduler_completion_signatures.h"
+#include "ex_actor/internal/scheduler/scheduler_operation.h"
+#include "ex_actor/internal/scheduler/scheduler_sender.h"
 
 namespace ex_actor {
 
 class WorkSharingThreadPool {
  public:
+  using TypeErasedOperation = internal::TypeErasedOperation;
+
   explicit WorkSharingThreadPool(size_t thread_count, bool start_workers_immediately = true)
       : thread_count_(thread_count) {
     if (thread_count > 0 && start_workers_immediately) {
@@ -39,61 +41,16 @@ class WorkSharingThreadPool {
     }
   }
 
-  struct TypeErasedOperation {
-    virtual ~TypeErasedOperation() = default;
-    virtual void Execute() = 0;
-  };
-
   template <ex::receiver R>
-  struct Operation : TypeErasedOperation {
-    Operation(R receiver, WorkSharingThreadPool* thread_pool)
-        : receiver(std::move(receiver)), thread_pool(thread_pool) {}
-    R receiver;
-    WorkSharingThreadPool* thread_pool;
-    void Execute() override {
-      auto env = ex::get_env(receiver);
-      auto stoken = ex::get_stop_token(env);
-      if constexpr (ex::unstoppable_token<decltype(stoken)>) {
-        receiver.set_value();
-      } else {
-        if (stoken.stop_requested()) {
-          receiver.set_stopped();
-        } else {
-          receiver.set_value();
-        }
-      }
-    }
+  struct Operation : internal::SchedulerOperationBase<WorkSharingThreadPool, R> {
+    using Base = internal::SchedulerOperationBase<WorkSharingThreadPool, R>;
+    using Base::Base;
 
-    void start() noexcept { thread_pool->EnqueueOperation(this); }
+    void start() noexcept { this->thread_pool->EnqueueOperation(this); }
   };
 
-  struct Scheduler;
-
-  struct Sender : ex::sender_t, internal::StoppableSchedulerCompletionSignatures {
-    using internal::StoppableSchedulerCompletionSignatures::get_completion_signatures;
-    WorkSharingThreadPool* thread_pool;
-
-    struct Env {
-      WorkSharingThreadPool* thread_pool;
-      template <class CPO>
-      auto query(ex::get_completion_scheduler_t<CPO>) const noexcept -> Scheduler {
-        return {.thread_pool = thread_pool};
-      }
-    };
-    auto get_env() const noexcept -> Env { return Env {.thread_pool = thread_pool}; }
-    template <ex::receiver R>
-    Operation<R> connect(R receiver) {
-      return {std::move(receiver), thread_pool};
-    }
-  };
-
-  struct Scheduler : ex::scheduler_t {
-    WorkSharingThreadPool* thread_pool;
-    Sender schedule() const noexcept { return {.thread_pool = thread_pool}; }
-    friend bool operator==(const Scheduler& lhs, const Scheduler& rhs) noexcept {
-      return lhs.thread_pool == rhs.thread_pool;
-    }
-  };
+  using Sender = internal::SchedulerSender<WorkSharingThreadPool>;
+  using Scheduler = internal::SchedulerHandle<WorkSharingThreadPool>;
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 

@@ -1,12 +1,11 @@
 comment:
   layout: "header, diff, files"
-  require_changes: true
   hide_project_coverage: false
 
 coverage:
   status:
-    project: false
-    patch: false
+    project: off
+    patch: off
 
 ignore:
   - "test/**"

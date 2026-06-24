@@ -1,6 +1,10 @@
 github_checks:
   annotations: true
 
+comment:
+  layout: "reach, diff, files"
+  require_changes: true
+
 coverage:
   status:
     project:

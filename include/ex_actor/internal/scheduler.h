@@ -132,6 +132,10 @@ class WorkSharingThreadPoolBase {
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
   void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0) {
+    if (owning_pool_ == this && local_slot_ == nullptr) {
+      local_slot_ = operation;
+      return;
+    }
     if constexpr (std::is_same_v<Queue<TypeErasedOperation*>,
                                  internal::UnboundedBlockingPriorityQueue<TypeErasedOperation*>>) {
       queue_.Push(operation, priority);
@@ -144,16 +148,25 @@ class WorkSharingThreadPoolBase {
   size_t thread_count_;
   Queue<TypeErasedOperation*> queue_;
   std::vector<std::jthread> workers_;
+  inline static thread_local TypeErasedOperation* local_slot_ = nullptr;
+  inline static thread_local WorkSharingThreadPoolBase* owning_pool_ = nullptr;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {
     internal::SetThreadName("ws_pool_worker");
+    owning_pool_ = this;
     while (!stop_token.stop_requested()) {
-      auto optional_operation = queue_.Pop(/*timeout_ms=*/10);
+      auto optional_operation = queue_.Pop(/*timeout_ms=*/100);
       if (!optional_operation) {
         continue;
       }
       optional_operation.value()->Execute();
+      while (local_slot_ != nullptr) {
+        auto* operation = local_slot_;
+        local_slot_ = nullptr;
+        operation->Execute();
+      }
     }
+    owning_pool_ = nullptr;
   }
 };
 

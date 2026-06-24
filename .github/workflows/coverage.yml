@@ -85,14 +85,34 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
 
-      - name: Save base coverage
-        if: github.ref == 'refs/heads/main'
+      - name: Compute coverage percentage
         run: |
-          grep -E '^lines:' coverage-summary.txt | grep -oP '[\d.]+%' > base-coverage.txt
-          grep -E '^branches:' coverage-summary.txt | grep -oP '[\d.]+%' >> base-coverage.txt
-        continue-on-error: true
+          python3 << 'EOF' > head-coverage.txt
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml')
+          hits = partials = misses = 0
+          for line in tree.getroot().iter('line'):
+              h = int(line.get('hits', 0))
+              if h == 0:
+                  misses += 1
+              elif line.get('branch') == 'true':
+                  cond = line.get('condition-coverage', '')
+                  if '100%' in cond:
+                      hits += 1
+                  else:
+                      partials += 1
+              else:
+                  hits += 1
+          total = hits + partials + misses
+          print(f'{hits / total * 100:.1f}%' if total else '0.0%')
+          EOF
+          echo "Coverage: $(cat head-coverage.txt)"
 
-      - name: Cache base coverage
+      - name: Cache coverage for base comparison
+        if: github.ref == 'refs/heads/main'
+        run: cp head-coverage.txt base-coverage.txt
+
+      - name: Save base coverage cache
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
@@ -101,45 +121,20 @@ jobs:
 
       - name: Restore base coverage
         if: github.event_name == 'pull_request'
-        id: base-coverage
         uses: actions/cache/restore@v4
         with:
           path: base-coverage.txt
           key: coverage-main-not-a-real-key
           restore-keys: coverage-main-
 
-      - name: Fetch base coverage from last main build
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Get coverage from the last successful coverage run on main
-          RUN_ID=$(gh run list --workflow=coverage.yml --branch=main --status=success \
-            --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
-          if [ -n "$RUN_ID" ]; then
-            LOGS=$(gh run view "$RUN_ID" --log 2>/dev/null || true)
-            BASE_LINE=$(echo "$LOGS" | grep -oP '(?<=lines: )[\d.]+%' | tail -1)
-            BASE_BRANCH_COV=$(echo "$LOGS" | grep -oP '(?<=branches: )[\d.]+%' | tail -1)
-            if [ -n "$BASE_LINE" ]; then
-              echo "$BASE_LINE" > base-coverage.txt
-              echo "${BASE_BRANCH_COV:-N/A}" >> base-coverage.txt
-            fi
-          fi
-        continue-on-error: true
-
       - name: Generate coverage comment
         if: github.event_name == 'pull_request'
         run: |
-          # Current project coverage
-          LINE_COV=$(grep -E '^lines:' coverage-summary.txt | grep -oP '[\d.]+%')
-          BRANCH_COV=$(grep -E '^branches:' coverage-summary.txt | grep -oP '[\d.]+%')
+          PR_COV=$(cat head-coverage.txt)
 
-          # Base branch coverage (from Codecov API or cache)
-          BASE_LINE="N/A"
-          BASE_BRANCH="N/A"
+          BASE_COV="N/A"
           if [ -f base-coverage.txt ]; then
-            BASE_LINE=$(sed -n '1p' base-coverage.txt)
-            BASE_BRANCH=$(sed -n '2p' base-coverage.txt)
+            BASE_COV=$(cat base-coverage.txt)
           fi
 
           # Changed source files
@@ -149,10 +144,10 @@ jobs:
           {
             echo "## Coverage Report"
             echo ""
-            echo "| | Lines | Branches |"
-            echo "|---|:---:|:---:|"
-            echo "| Base (\`${{ github.base_ref }}\`) | \`$BASE_LINE\` | \`$BASE_BRANCH\` |"
-            echo "| This PR | \`$LINE_COV\` | \`$BRANCH_COV\` |"
+            echo "| | Coverage |"
+            echo "|---|:---:|"
+            echo "| Base (\`${{ github.base_ref }}\`) | \`$BASE_COV\` |"
+            echo "| This PR | \`$PR_COV\` |"
             echo ""
 
             # Per-file coverage for changed files
@@ -160,7 +155,6 @@ jobs:
               echo "<details><summary>Coverage by changed file</summary>"
               echo ""
 
-              # Generate JSON coverage report for per-file data
               gcovr --root ${{ github.workspace }} build \
                 --gcov-executable gcov-14 \
                 --exclude '/usr/.*' \
@@ -173,7 +167,6 @@ jobs:
               echo "|------|:---:|:---:|"
               for f in $CHANGED_FILES; do
                 if [ -f "$f" ]; then
-                  # Extract per-file coverage from JSON using jq
                   FILE_DATA=$(jq -r --arg path "$f" \
                     '.files[] | select(.filename | endswith($path)) | "\(.line_percent) \(.branch_percent)"' \
                     coverage-per-file.json 2>/dev/null | head -1)

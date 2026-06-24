@@ -4,8 +4,14 @@ comment:
 
 coverage:
   status:
-    project: off
-    patch: off
+    project:
+      default:
+        target: 0%
+        informational: true
+    patch:
+      default:
+        target: 0%
+        informational: true
 
 ignore:
   - "test/**"

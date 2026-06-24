@@ -40,7 +40,7 @@ struct SchedulerSender : ex::sender_t, StoppableSchedulerCompletionSignatures {
   auto get_env() const noexcept -> Env { return Env {.thread_pool = thread_pool}; }
 
   template <ex::receiver R>
-  typename Pool::template Operation<R> connect(R receiver) {
+  typename Pool::template Operation<R> connect(R receiver) const {
     return {std::move(receiver), thread_pool};
   }
 };

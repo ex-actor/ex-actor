@@ -30,8 +30,7 @@ struct TypeErasedOperation {
 // Operation that adds its own start() dispatching to the pool's queue.
 template <typename Pool, ex::receiver R>
 struct SchedulerOperationBase : TypeErasedOperation {
-  SchedulerOperationBase(R receiver, Pool* thread_pool)
-      : receiver(std::move(receiver)), thread_pool(thread_pool) {}
+  SchedulerOperationBase(R receiver, Pool* thread_pool) : receiver(std::move(receiver)), thread_pool(thread_pool) {}
 
   R receiver;
   Pool* thread_pool;
@@ -40,12 +39,12 @@ struct SchedulerOperationBase : TypeErasedOperation {
     auto env = ex::get_env(receiver);
     auto stoken = ex::get_stop_token(env);
     if constexpr (ex::unstoppable_token<decltype(stoken)>) {
-      receiver.set_value();
+      ex::set_value(std::move(receiver));
     } else {
       if (stoken.stop_requested()) {
-        receiver.set_stopped();
+        ex::set_stopped(std::move(receiver));
       } else {
-        receiver.set_value();
+        ex::set_value(std::move(receiver));
       }
     }
   }

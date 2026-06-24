@@ -49,8 +49,7 @@ class PriorityThreadPool {
 
   template <ex::receiver R>
   struct Operation : TypeErasedOperation {
-    Operation(R receiver, PriorityThreadPool* thread_pool)
-        : receiver(std::move(receiver)), thread_pool(thread_pool) {}
+    Operation(R receiver, PriorityThreadPool* thread_pool) : receiver(std::move(receiver)), thread_pool(thread_pool) {}
     R receiver;
     PriorityThreadPool* thread_pool;
     void Execute() override {
@@ -104,9 +103,7 @@ class PriorityThreadPool {
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
-  void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0) {
-    queue_.Push(operation, priority);
-  }
+  void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0) { queue_.Push(operation, priority); }
 
  private:
   size_t thread_count_;

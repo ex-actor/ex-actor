@@ -108,6 +108,27 @@ jobs:
           key: coverage-main-not-a-real-key
           restore-keys: coverage-main-
 
+      - name: Fetch base coverage from Codecov
+        if: github.event_name == 'pull_request'
+        run: |
+          # Try Codecov API for the base branch coverage (public repos)
+          CODECOV_DATA=$(curl -sf -H "Authorization: Bearer ${{ secrets.CODECOV_TOKEN }}" \
+            "https://api.codecov.io/api/v2/github/ex-actor/repos/ex-actor/branches/main" 2>/dev/null || true)
+          if [ -n "$CODECOV_DATA" ]; then
+            CC_LINE=$(echo "$CODECOV_DATA" | jq -r '.head_commit.totals.coverage // empty' 2>/dev/null || true)
+            if [ -n "$CC_LINE" ]; then
+              echo "${CC_LINE}%" > base-coverage.txt
+              # Codecov API doesn't always expose branch coverage separately; use line as primary
+              CC_BRANCH=$(echo "$CODECOV_DATA" | jq -r '.head_commit.totals.branches // empty' 2>/dev/null || true)
+              if [ -n "$CC_BRANCH" ]; then
+                echo "${CC_BRANCH}%" >> base-coverage.txt
+              else
+                echo "N/A" >> base-coverage.txt
+              fi
+            fi
+          fi
+        continue-on-error: true
+
       - name: Generate coverage comment
         if: github.event_name == 'pull_request'
         run: |
@@ -115,7 +136,7 @@ jobs:
           LINE_COV=$(grep -E '^lines:' coverage-summary.txt | grep -oP '[\d.]+%')
           BRANCH_COV=$(grep -E '^branches:' coverage-summary.txt | grep -oP '[\d.]+%')
 
-          # Base branch coverage (from cache)
+          # Base branch coverage (from Codecov API or cache)
           BASE_LINE="N/A"
           BASE_BRANCH="N/A"
           if [ -f base-coverage.txt ]; then

@@ -29,7 +29,7 @@
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/network.h"
 #include "ex_actor/internal/reflect.h"
-#include "ex_actor/internal/scheduler.h"
+#include "ex_actor/internal/scheduler/all.h"
 #include "ex_actor/internal/serialization.h"
 
 namespace ex_actor::internal {

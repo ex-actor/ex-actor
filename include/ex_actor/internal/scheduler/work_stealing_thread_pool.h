@@ -14,9 +14,14 @@
 
 #pragma once
 
-#include "ex_actor/internal/actor_registry.h"           // IWYU pragma: export
-#include "ex_actor/internal/global_registry.h"          // IWYU pragma: export
-#include "ex_actor/internal/reflect.h"                  // IWYU pragma: export
-#include "ex_actor/internal/remote_handler_registry.h"  // IWYU pragma: export
-#include "ex_actor/internal/scheduler/all.h"            // IWYU pragma: export
-#include "ex_actor/internal/util.h"                     // IWYU pragma: export
+#include <exec/static_thread_pool.hpp>
+
+namespace ex_actor {
+
+class WorkStealingThreadPool : public exec::static_thread_pool {
+ public:
+  using exec::static_thread_pool::static_thread_pool;
+  auto GetScheduler() { return get_scheduler(); }
+};
+
+}  // namespace ex_actor

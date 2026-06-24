@@ -14,9 +14,8 @@
 
 #pragma once
 
-#include "ex_actor/internal/actor_registry.h"           // IWYU pragma: export
-#include "ex_actor/internal/global_registry.h"          // IWYU pragma: export
-#include "ex_actor/internal/reflect.h"                  // IWYU pragma: export
-#include "ex_actor/internal/remote_handler_registry.h"  // IWYU pragma: export
-#include "ex_actor/internal/scheduler/all.h"            // IWYU pragma: export
-#include "ex_actor/internal/util.h"                     // IWYU pragma: export
+#include "ex_actor/internal/scheduler/core_pinned_thread_pool.h"
+#include "ex_actor/internal/scheduler/priority_thread_pool.h"
+#include "ex_actor/internal/scheduler/scheduler_union.h"
+#include "ex_actor/internal/scheduler/work_sharing_thread_pool.h"
+#include "ex_actor/internal/scheduler/work_stealing_thread_pool.h"

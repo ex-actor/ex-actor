@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 
 #include "ex_actor/api.h"
-#include "ex_actor/internal/scheduler.h"
+#include "ex_actor/internal/scheduler/all.h"
 
 struct TestActor {
   void Run() {

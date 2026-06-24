@@ -18,9 +18,8 @@
 
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/container.h"
-#include "ex_actor/internal/platform.h"
-#include "ex_actor/internal/scheduler/scheduler_operation.h"
-#include "ex_actor/internal/scheduler/scheduler_sender.h"
+#include "ex_actor/internal/scheduler/shared/scheduler_operation.h"
+#include "ex_actor/internal/scheduler/shared/scheduler_sender.h"
 
 namespace ex_actor {
 
@@ -28,18 +27,9 @@ class WorkSharingThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit WorkSharingThreadPool(size_t thread_count, bool start_workers_immediately = true)
-      : thread_count_(thread_count) {
-    if (thread_count > 0 && start_workers_immediately) {
-      StartWorkers();
-    }
-  }
+  explicit WorkSharingThreadPool(size_t thread_count, bool start_workers_immediately = true);
 
-  void StartWorkers() {
-    for (size_t i = 0; i < thread_count_; ++i) {
-      workers_.emplace_back([this](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token); });
-    }
-  }
+  void StartWorkers();
 
   template <ex::receiver R>
   struct Operation : internal::SchedulerOperationBase<WorkSharingThreadPool, R> {
@@ -54,13 +44,7 @@ class WorkSharingThreadPool {
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
-  void EnqueueOperation(TypeErasedOperation* operation) {
-    if (owning_pool_ == this && local_slot_ == nullptr) {
-      local_slot_ = operation;
-      return;
-    }
-    queue_.Push(operation);
-  }
+  void EnqueueOperation(TypeErasedOperation* operation);
 
  private:
   size_t thread_count_;
@@ -69,23 +53,7 @@ class WorkSharingThreadPool {
   inline static thread_local TypeErasedOperation* local_slot_ = nullptr;
   inline static thread_local WorkSharingThreadPool* owning_pool_ = nullptr;
 
-  void WorkerThreadLoop(const std::stop_token& stop_token) {
-    internal::SetThreadName("ws_pool_worker");
-    owning_pool_ = this;
-    while (!stop_token.stop_requested()) {
-      auto optional_operation = queue_.Pop(/*timeout_ms=*/10);
-      if (!optional_operation) {
-        continue;
-      }
-      optional_operation.value()->Execute();
-      while (local_slot_ != nullptr) {
-        auto* operation = local_slot_;
-        local_slot_ = nullptr;
-        operation->Execute();
-      }
-    }
-    owning_pool_ = nullptr;
-  }
+  void WorkerThreadLoop(const std::stop_token& stop_token);
 };
 
 }  // namespace ex_actor

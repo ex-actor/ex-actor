@@ -20,7 +20,7 @@
 
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/logging.h"
-#include "ex_actor/internal/scheduler/stoppable_scheduler_completion_signatures.h"
+#include "ex_actor/internal/scheduler/shared/stoppable_scheduler_completion_signatures.h"
 
 namespace ex_actor {
 

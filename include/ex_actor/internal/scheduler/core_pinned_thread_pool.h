@@ -18,10 +18,8 @@
 
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/container.h"
-#include "ex_actor/internal/logging.h"
-#include "ex_actor/internal/platform.h"
-#include "ex_actor/internal/scheduler/scheduler_operation.h"
-#include "ex_actor/internal/scheduler/scheduler_sender.h"
+#include "ex_actor/internal/scheduler/shared/scheduler_operation.h"
+#include "ex_actor/internal/scheduler/shared/scheduler_sender.h"
 
 namespace ex_actor {
 
@@ -29,12 +27,7 @@ class CorePinnedThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit CorePinnedThreadPool(size_t thread_count) : thread_count_(thread_count), queues_(thread_count) {
-    EXA_THROW_CHECK(thread_count > 0) << "Thread count must be greater than 0";
-    for (size_t i = 0; i < thread_count; ++i) {
-      workers_.emplace_back([this, i](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token, i); });
-    }
-  }
+  explicit CorePinnedThreadPool(size_t thread_count);
 
   template <ex::receiver R>
   struct Operation : internal::SchedulerOperationBase<CorePinnedThreadPool, R> {
@@ -53,28 +46,14 @@ class CorePinnedThreadPool {
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
-  void EnqueueOperation(TypeErasedOperation* operation, size_t core_index) {
-    size_t queue_idx = core_index % thread_count_;
-    queues_[queue_idx].Push(operation);
-  }
+  void EnqueueOperation(TypeErasedOperation* operation, size_t core_index);
 
  private:
   size_t thread_count_;
   std::vector<internal::UnboundedBlockingQueue<TypeErasedOperation*>> queues_;
   std::vector<std::jthread> workers_;
 
-  void WorkerThreadLoop(const std::stop_token& stop_token, size_t thread_index) {
-    internal::SetThreadName(fmt_lib::format("cp_pool_worker_{}", thread_index));
-    internal::SetThreadAffinity(thread_index);
-
-    while (!stop_token.stop_requested()) {
-      auto optional_operation = queues_[thread_index].Pop(/*timeout_ms=*/10);
-      if (!optional_operation) {
-        continue;
-      }
-      optional_operation.value()->Execute();
-    }
-  }
+  void WorkerThreadLoop(const std::stop_token& stop_token, size_t thread_index);
 };
 
 }  // namespace ex_actor

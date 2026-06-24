@@ -17,7 +17,7 @@
 #include <utility>
 
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
-#include "ex_actor/internal/scheduler/stoppable_scheduler_completion_signatures.h"
+#include "ex_actor/internal/scheduler/shared/stoppable_scheduler_completion_signatures.h"
 
 namespace ex_actor::internal {
 

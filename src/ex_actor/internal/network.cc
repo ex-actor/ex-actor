@@ -30,6 +30,7 @@
 
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/message.h"
+#include "ex_actor/internal/platform.h"
 #include "ex_actor/internal/serialization.h"
 #include "ex_actor/internal/util.h"
 

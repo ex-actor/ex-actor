@@ -54,22 +54,37 @@ class WorkSharingThreadPool {
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
-  void EnqueueOperation(TypeErasedOperation* operation) { queue_.Push(operation); }
+  void EnqueueOperation(TypeErasedOperation* operation) {
+    if (owning_pool_ == this && local_slot_ == nullptr) {
+      local_slot_ = operation;
+      return;
+    }
+    queue_.Push(operation);
+  }
 
  private:
   size_t thread_count_;
   internal::UnboundedBlockingQueue<TypeErasedOperation*> queue_;
   std::vector<std::jthread> workers_;
+  inline static thread_local TypeErasedOperation* local_slot_ = nullptr;
+  inline static thread_local WorkSharingThreadPool* owning_pool_ = nullptr;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {
     internal::SetThreadName("ws_pool_worker");
+    owning_pool_ = this;
     while (!stop_token.stop_requested()) {
       auto optional_operation = queue_.Pop(/*timeout_ms=*/10);
       if (!optional_operation) {
         continue;
       }
       optional_operation.value()->Execute();
+      while (local_slot_ != nullptr) {
+        auto* operation = local_slot_;
+        local_slot_ = nullptr;
+        operation->Execute();
+      }
     }
+    owning_pool_ = nullptr;
   }
 };
 

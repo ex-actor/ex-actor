@@ -17,6 +17,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -70,7 +72,7 @@ jobs:
             --exclude '(^|.*/)test/' \
             --exclude '(^|.*/)include/ex_actor/3rd_lib/' \
             --xml coverage.xml \
-            --print-summary
+            --print-summary | tee coverage-summary.txt
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
@@ -78,3 +80,95 @@ jobs:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+
+      - name: Save base coverage
+        if: github.ref == 'refs/heads/main'
+        run: |
+          grep -E '^lines:' coverage-summary.txt | grep -oP '[\d.]+%' > base-coverage.txt
+          grep -E '^branches:' coverage-summary.txt | grep -oP '[\d.]+%' >> base-coverage.txt
+        continue-on-error: true
+
+      - name: Cache base coverage
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: base-coverage.txt
+          key: coverage-main-${{ github.sha }}
+
+      - name: Restore base coverage
+        if: github.event_name == 'pull_request'
+        id: base-coverage
+        uses: actions/cache/restore@v4
+        with:
+          path: base-coverage.txt
+          key: coverage-main-not-a-real-key
+          restore-keys: coverage-main-
+
+      - name: Generate coverage comment
+        if: github.event_name == 'pull_request'
+        run: |
+          # Current project coverage
+          LINE_COV=$(grep -E '^lines:' coverage-summary.txt | grep -oP '[\d.]+%')
+          BRANCH_COV=$(grep -E '^branches:' coverage-summary.txt | grep -oP '[\d.]+%')
+
+          # Base branch coverage (from cache)
+          BASE_LINE="N/A"
+          BASE_BRANCH="N/A"
+          if [ -f base-coverage.txt ]; then
+            BASE_LINE=$(sed -n '1p' base-coverage.txt)
+            BASE_BRANCH=$(sed -n '2p' base-coverage.txt)
+          fi
+
+          # Changed source files
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.h' '*.cc' '*.cpp' | \
+            grep -v '^test/' | grep -v '3rd_lib/' || true)
+
+          {
+            echo "## Coverage Report"
+            echo ""
+            echo "| | Lines | Branches |"
+            echo "|---|:---:|:---:|"
+            echo "| Base (\`${{ github.base_ref }}\`) | \`$BASE_LINE\` | \`$BASE_BRANCH\` |"
+            echo "| This PR | \`$LINE_COV\` | \`$BRANCH_COV\` |"
+            echo ""
+
+            # Per-file coverage for changed files
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "<details><summary>Coverage by changed file</summary>"
+              echo ""
+              # Generate CSV for all files
+              gcovr --root ${{ github.workspace }} build \
+                --gcov-executable gcov-14 \
+                --exclude '/usr/.*' \
+                --exclude '(^|.*/)build/_deps/' \
+                --exclude '(^|.*/)test/' \
+                --exclude '(^|.*/)include/ex_actor/3rd_lib/' \
+                --csv coverage-files.csv 2>/dev/null || true
+
+              echo "| File | Line % | Branch % |"
+              echo "|------|:---:|:---:|"
+              for f in $CHANGED_FILES; do
+                if [ -f "$f" ]; then
+                  # Match file in CSV (filename column is the first column)
+                  ROW=$(grep "$(basename $f)" coverage-files.csv | grep "$f" || true)
+                  if [ -n "$ROW" ]; then
+                    # CSV columns: filename, line_total, line_covered, line_percent, branch_total, branch_covered, branch_percent
+                    F_LINE=$(echo "$ROW" | awk -F',' '{printf "%.1f%%", $4}')
+                    F_BRANCH=$(echo "$ROW" | awk -F',' '{if($5>0) printf "%.1f%%", $7; else print "N/A"}')
+                    echo "| \`$f\` | $F_LINE | $F_BRANCH |"
+                  fi
+                fi
+              done
+              echo ""
+              echo "</details>"
+            fi
+          } > coverage_comment.md
+
+          echo "--- Generated comment ---"
+          cat coverage_comment.md
+
+      - name: Post coverage comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: coverage_comment.md

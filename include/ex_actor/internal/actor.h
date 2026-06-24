@@ -27,7 +27,7 @@
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/container.h"
 #include "ex_actor/internal/reflect.h"
-#include "ex_actor/internal/scheduler/all.h"
+#include "ex_actor/internal/scheduler/all.h"  // IWYU pragma: keep
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor {

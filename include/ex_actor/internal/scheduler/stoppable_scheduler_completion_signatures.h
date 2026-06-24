@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include <exec/static_thread_pool.hpp>
+#include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 
 namespace ex_actor::internal {
 

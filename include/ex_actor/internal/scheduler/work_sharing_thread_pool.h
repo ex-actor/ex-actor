@@ -17,8 +17,7 @@
 #include <thread>
 #include <utility>
 
-#include <exec/static_thread_pool.hpp>
-
+#include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/container.h"
 #include "ex_actor/internal/platform.h"
 #include "ex_actor/internal/scheduler/stoppable_scheduler_completion_signatures.h"

@@ -18,8 +18,6 @@
 #include <thread>
 #include <utility>
 
-#include <exec/static_thread_pool.hpp>
-
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/container.h"
 #include "ex_actor/internal/platform.h"

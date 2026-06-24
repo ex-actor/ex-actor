@@ -18,8 +18,6 @@
 #include <utility>
 #include <variant>
 
-#include <exec/static_thread_pool.hpp>
-
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/scheduler/stoppable_scheduler_completion_signatures.h"

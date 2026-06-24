@@ -1,4 +1,4 @@
-// Copyright 2025 The ex_actor Authors.
+// Copyright 2026 The ex_actor Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,9 @@
 #pragma once
 
 // IWYU pragma: begin_exports
-#include "ex_actor/internal/actor_registry.h"
-#include "ex_actor/internal/global_registry.h"
-#include "ex_actor/internal/reflect.h"
-#include "ex_actor/internal/remote_handler_registry.h"
-#include "ex_actor/internal/scheduler/all.h"
-#include "ex_actor/internal/util.h"
+#include "ex_actor/internal/scheduler/core_pinned_thread_pool.h"
+#include "ex_actor/internal/scheduler/priority_thread_pool.h"
+#include "ex_actor/internal/scheduler/scheduler_union.h"
+#include "ex_actor/internal/scheduler/work_sharing_thread_pool.h"
+#include "ex_actor/internal/scheduler/work_stealing_thread_pool.h"
 // IWYU pragma: end_exports

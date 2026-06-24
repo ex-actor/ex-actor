@@ -10,10 +10,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pull-requests: write
-
 jobs:
   coverage:
     name: Test coverage
@@ -21,8 +17,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -76,7 +70,7 @@ jobs:
             --exclude '(^|.*/)test/' \
             --exclude '(^|.*/)include/ex_actor/3rd_lib/' \
             --xml coverage.xml \
-            --print-summary | tee coverage-summary.txt
+            --print-summary
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
@@ -84,109 +78,3 @@ jobs:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
-
-      - name: Compute coverage percentage
-        run: |
-          python3 << 'EOF' > head-coverage.txt
-          import xml.etree.ElementTree as ET
-          tree = ET.parse('coverage.xml')
-          hits = partials = misses = 0
-          for line in tree.getroot().iter('line'):
-              h = int(line.get('hits', 0))
-              if h == 0:
-                  misses += 1
-              elif line.get('branch') == 'true':
-                  cond = line.get('condition-coverage', '')
-                  if '100%' in cond:
-                      hits += 1
-                  else:
-                      partials += 1
-              else:
-                  hits += 1
-          total = hits + partials + misses
-          print(f'{hits / total * 100:.1f}%' if total else '0.0%')
-          EOF
-          echo "Coverage: $(cat head-coverage.txt)"
-
-      - name: Cache coverage for base comparison
-        if: github.ref == 'refs/heads/main'
-        run: cp head-coverage.txt base-coverage.txt
-
-      - name: Save base coverage cache
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: base-coverage.txt
-          key: coverage-main-${{ github.sha }}
-
-      - name: Restore base coverage
-        if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v4
-        with:
-          path: base-coverage.txt
-          key: coverage-main-not-a-real-key
-          restore-keys: coverage-main-
-
-      - name: Generate coverage comment
-        if: github.event_name == 'pull_request'
-        run: |
-          PR_COV=$(cat head-coverage.txt)
-
-          BASE_COV="N/A"
-          if [ -f base-coverage.txt ]; then
-            BASE_COV=$(cat base-coverage.txt)
-          fi
-
-          # Changed source files
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.h' '*.cc' '*.cpp' | \
-            grep -v '^test/' | grep -v '3rd_lib/' || true)
-
-          {
-            echo "## Coverage Report"
-            echo ""
-            echo "| | Coverage |"
-            echo "|---|:---:|"
-            echo "| Base (\`${{ github.base_ref }}\`) | \`$BASE_COV\` |"
-            echo "| This PR | \`$PR_COV\` |"
-            echo ""
-
-            # Per-file coverage for changed files
-            if [ -n "$CHANGED_FILES" ]; then
-              echo "<details><summary>Coverage by changed file</summary>"
-              echo ""
-
-              gcovr --root ${{ github.workspace }} build \
-                --gcov-executable gcov-14 \
-                --exclude '/usr/.*' \
-                --exclude '(^|.*/)build/_deps/' \
-                --exclude '(^|.*/)test/' \
-                --exclude '(^|.*/)include/ex_actor/3rd_lib/' \
-                --json-summary > coverage-per-file.json 2>/dev/null || true
-
-              echo "| File | Line % | Branch % |"
-              echo "|------|:---:|:---:|"
-              for f in $CHANGED_FILES; do
-                if [ -f "$f" ]; then
-                  FILE_DATA=$(jq -r --arg path "$f" \
-                    '.files[] | select(.filename | endswith($path)) | "\(.line_percent) \(.branch_percent)"' \
-                    coverage-per-file.json 2>/dev/null | head -1)
-                  if [ -n "$FILE_DATA" ]; then
-                    F_LINE=$(echo "$FILE_DATA" | awk '{printf "%.1f%%", $1}')
-                    F_BRANCH=$(echo "$FILE_DATA" | awk '{if($2 >= 0) printf "%.1f%%", $2; else print "N/A"}')
-                    echo "| \`$f\` | $F_LINE | $F_BRANCH |"
-                  fi
-                fi
-              done
-              echo ""
-              echo "</details>"
-            fi
-          } > coverage_comment.md
-
-          echo "--- Generated comment ---"
-          cat coverage_comment.md
-
-      - name: Post coverage comment
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          path: coverage_comment.md

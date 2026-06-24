@@ -35,6 +35,7 @@ class CorePinnedThreadPool {
   };
 
   explicit CorePinnedThreadPool(size_t thread_count) : thread_count_(thread_count), queues_(thread_count) {
+    EXA_THROW_CHECK(thread_count > 0) << "Thread count must be greater than 0";
     for (size_t i = 0; i < thread_count; ++i) {
       workers_.emplace_back([this, i](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token, i); });
     }

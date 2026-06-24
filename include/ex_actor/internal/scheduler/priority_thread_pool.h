@@ -114,7 +114,7 @@ class PriorityThreadPool {
   std::vector<std::jthread> workers_;
 
   void WorkerThreadLoop(const std::stop_token& stop_token) {
-    internal::SetThreadName("ws_pool_worker");
+    internal::SetThreadName("priority_pool_worker");
     while (!stop_token.stop_requested()) {
       auto optional_operation = queue_.Pop(/*timeout_ms=*/10);
       if (!optional_operation) {

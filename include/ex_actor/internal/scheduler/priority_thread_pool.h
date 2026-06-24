@@ -19,9 +19,8 @@
 
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/container.h"
-#include "ex_actor/internal/platform.h"
-#include "ex_actor/internal/scheduler/scheduler_operation.h"
-#include "ex_actor/internal/scheduler/scheduler_sender.h"
+#include "ex_actor/internal/scheduler/shared/scheduler_operation.h"
+#include "ex_actor/internal/scheduler/shared/scheduler_sender.h"
 
 namespace ex_actor {
 
@@ -29,18 +28,9 @@ class PriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit PriorityThreadPool(size_t thread_count, bool start_workers_immediately = true)
-      : thread_count_(thread_count) {
-    if (thread_count > 0 && start_workers_immediately) {
-      StartWorkers();
-    }
-  }
+  explicit PriorityThreadPool(size_t thread_count, bool start_workers_immediately = true);
 
-  void StartWorkers() {
-    for (size_t i = 0; i < thread_count_; ++i) {
-      workers_.emplace_back([this](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token); });
-    }
-  }
+  void StartWorkers();
 
   template <ex::receiver R>
   struct Operation : internal::SchedulerOperationBase<PriorityThreadPool, R> {
@@ -59,23 +49,14 @@ class PriorityThreadPool {
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
-  void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0) { queue_.Push(operation, priority); }
+  void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0);
 
  private:
   size_t thread_count_;
   internal::UnboundedBlockingPriorityQueue<TypeErasedOperation*> queue_;
   std::vector<std::jthread> workers_;
 
-  void WorkerThreadLoop(const std::stop_token& stop_token) {
-    internal::SetThreadName("priority_pool_worker");
-    while (!stop_token.stop_requested()) {
-      auto optional_operation = queue_.Pop(/*timeout_ms=*/10);
-      if (!optional_operation) {
-        continue;
-      }
-      optional_operation.value()->Execute();
-    }
-  }
+  void WorkerThreadLoop(const std::stop_token& stop_token);
 };
 
 }  // namespace ex_actor

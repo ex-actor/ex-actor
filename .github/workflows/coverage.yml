@@ -140,25 +140,27 @@ jobs:
             if [ -n "$CHANGED_FILES" ]; then
               echo "<details><summary>Coverage by changed file</summary>"
               echo ""
-              # Generate CSV for all files
+
+              # Generate JSON coverage report for per-file data
               gcovr --root ${{ github.workspace }} build \
                 --gcov-executable gcov-14 \
                 --exclude '/usr/.*' \
                 --exclude '(^|.*/)build/_deps/' \
                 --exclude '(^|.*/)test/' \
                 --exclude '(^|.*/)include/ex_actor/3rd_lib/' \
-                --csv coverage-files.csv 2>/dev/null || true
+                --json-summary > coverage-per-file.json 2>/dev/null || true
 
               echo "| File | Line % | Branch % |"
               echo "|------|:---:|:---:|"
               for f in $CHANGED_FILES; do
                 if [ -f "$f" ]; then
-                  # Match file in CSV (filename column is the first column)
-                  ROW=$(grep "$(basename $f)" coverage-files.csv | grep "$f" || true)
-                  if [ -n "$ROW" ]; then
-                    # CSV columns: filename, line_total, line_covered, line_percent, branch_total, branch_covered, branch_percent
-                    F_LINE=$(echo "$ROW" | awk -F',' '{printf "%.1f%%", $4}')
-                    F_BRANCH=$(echo "$ROW" | awk -F',' '{if($5>0) printf "%.1f%%", $7; else print "N/A"}')
+                  # Extract per-file coverage from JSON using jq
+                  FILE_DATA=$(jq -r --arg path "$f" \
+                    '.files[] | select(.filename | endswith($path)) | "\(.line_percent) \(.branch_percent)"' \
+                    coverage-per-file.json 2>/dev/null | head -1)
+                  if [ -n "$FILE_DATA" ]; then
+                    F_LINE=$(echo "$FILE_DATA" | awk '{printf "%.1f%%", $1}')
+                    F_BRANCH=$(echo "$FILE_DATA" | awk '{if($2 >= 0) printf "%.1f%%", $2; else print "N/A"}')
                     echo "| \`$f\` | $F_LINE | $F_BRANCH |"
                   fi
                 fi

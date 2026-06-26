@@ -49,13 +49,13 @@ class ActorRegistryBackend {
    * @brief Spawn a local actor with config.
    */
   template <class UserClass, class... Args>
-  ex::task<ActorRef<UserClass>> SpawnWithClass(uint64_t node_id, ActorConfig config, Args... args) {
+  ActorRef<UserClass> SpawnWithClass(uint64_t node_id, ActorConfig config, Args... args) {
     if (node_id != this_node_id_) {
       EXA_THROW << "Spawn<UserClass> can only be used to create local actor, to create remote actor, use "
                    "Spawn<&CreateFn> to provide a fixed signature for remote actor creation. node_id="
                 << node_id << ", this_node_id=" << this_node_id_ << ", actor_type=" << typeid(UserClass).name();
     }
-    co_return co_await SpawnLocal<UserClass>(node_id, std::move(config), std::move(args)...);
+    return SpawnLocal<UserClass>(node_id, std::move(config), std::move(args)...);
   }
 
   /**
@@ -65,7 +65,7 @@ class ActorRegistryBackend {
   ex::task<ActorRef<FnReturnType<kCreateFn>>> SpawnWithCreateFn(uint64_t node_id, ActorConfig config, Args... args) {
     using UserClass = FnReturnType<kCreateFn>;
     if (node_id == this_node_id_) {
-      co_return co_await SpawnLocal<UserClass, kCreateFn>(node_id, std::move(config), std::move(args)...);
+      co_return SpawnLocal<UserClass, kCreateFn>(node_id, std::move(config), std::move(args)...);
     }
 
     EXA_THROW_CHECK(!broker_actor_ref_.IsEmpty()) << "Broker actor not set";
@@ -174,35 +174,27 @@ class ActorRegistryBackend {
   }
 
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
-  ex::task<ActorRef<UserClass>> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
+  ActorRef<UserClass> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
     auto actor_id = GenerateRandomActorId();
-    reserved_uncommitted_actor_ids_.insert(actor_id);
-    auto cleanup = ScopeGuard([this, actor_id] { reserved_uncommitted_actor_ids_.erase(actor_id); });
-
-    auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(user_actor_scheduler_->Clone(), config);
-    auto* actor_ptr = actor.get();
-
-    co_await actor_ptr->InitUserClassInstance(std::move(args)...);
-
-    actor_id_to_actor_[actor_id] = std::move(actor);
+    auto actor =
+        std::make_unique<Actor<UserClass, kCreateFn>>(user_actor_scheduler_->Clone(), config, std::move(args)...);
+    auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor.get(), broker_actor_ref_);
+    NotifyExActorOnSpawned<UserClass>(actor.get(), handle);
     if (config.actor_name.has_value()) {
       std::string& name = *config.actor_name;
       EXA_THROW_CHECK(!actor_name_to_id_.contains(name)) << "An actor with the same name already exists, name=" << name;
       actor_name_to_id_[name] = actor_id;
     }
-
-    auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor_ptr, broker_actor_ref_);
-    NotifyExActorOnSpawned<UserClass>(actor_ptr, handle);
+    actor_id_to_actor_[actor_id] = std::move(actor);
     // Workaround: see DeserializeActorRef comment.
     actor_id_to_serialized_ref_[actor_id] = Serialize(rfl::Reflector<ActorRef<UserClass>>::from(handle));
-    co_return handle;
+    return handle;
   }
 
   std::mt19937_64 random_num_generator_ {std::random_device {}()};
   std::unique_ptr<TypeErasedActorScheduler> user_actor_scheduler_;
   uint64_t this_node_id_ = 0;
   BasicActorRef<MessageBroker> broker_actor_ref_;
-  std::unordered_set<uint64_t> reserved_uncommitted_actor_ids_;
   std::unordered_map<uint64_t, std::unique_ptr<TypeErasedActor>> actor_id_to_actor_;
   // Serialized ActorRef bytes for each actor, captured at creation time with the concrete type known.
   // Used to return correctly-typed ActorRef from remote GetActorRefByName without knowing UserClass.
@@ -211,7 +203,7 @@ class ActorRegistryBackend {
 
   uint64_t GenerateRandomActorId();
   ByteBuffer SerializeReply(const NetworkReply& reply);
-  ex::task<ByteBuffer> HandleActorCreationRequest(ActorCreationRequest msg);
+  void HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out);
   ex::task<ByteBuffer> HandleActorMethodCallRequest(ActorMethodCallRequest msg);
   ex::task<ByteBuffer> HandleActorDestroyRequest(ActorDestroyRequest msg);
 };

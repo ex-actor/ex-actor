@@ -319,8 +319,7 @@ class UnboundedBlockingQueue {
 template <class T>
 class BucketedPriorityQueue {
  public:
-  explicit BucketedPriorityQueue(uint32_t max_priorities)
-      : max_priorities_(max_priorities), buckets_(max_priorities) {}
+  explicit BucketedPriorityQueue(uint32_t max_priorities) : max_priorities_(max_priorities), buckets_(max_priorities) {}
 
   void Push(T value, uint32_t priority) {
     EXA_THROW_CHECK(priority < max_priorities_)

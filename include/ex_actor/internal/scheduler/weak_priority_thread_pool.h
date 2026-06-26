@@ -31,8 +31,7 @@ class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t max_priority,
-                                   bool start_workers_immediately = true);
+  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t max_priority, bool start_workers_immediately = true);
 
   void StartWorkers();
 

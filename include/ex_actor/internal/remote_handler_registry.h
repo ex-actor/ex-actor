@@ -55,8 +55,7 @@ class RemoteActorRequestHandlerRegistry {
 
   using RemoteActorMethodCallHandler =
       std::function<ex::task<NetworkReply>(RemoteActorMethodCallHandlerContext context)>;
-  using RemoteActorCreationHandler =
-      std::function<ex::task<ActorCreationResult>(RemoteActorCreationHandlerContext context)>;
+  using RemoteActorCreationHandler = std::function<ActorCreationResult(RemoteActorCreationHandlerContext context)>;
 
   void RegisterRemoteActorMethodCallHandler(uint64_t handler_key, RemoteActorMethodCallHandler func) {
     EXA_THROW_CHECK(!remote_actor_method_call_handler_.contains(handler_key))
@@ -127,23 +126,19 @@ class RemoteFuncHandlerRegistrar {
 
  private:
   template <auto kCreateFn>
-  ex::task<RemoteActorRequestHandlerRegistry::ActorCreationResult> DeserializeAndCreateActor(
+  RemoteActorRequestHandlerRegistry::ActorCreationResult DeserializeAndCreateActor(
       RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext context) {
     using ActorClass = Signature<decltype(kCreateFn)>::ReturnType;
     ActorCreationArgs creation_args =
         DeserializeFnArgs<kCreateFn>(context.serialized_args, context.actor_ref_serde_ctx);
-
-    auto actor = std::make_unique<Actor<ActorClass, kCreateFn>>(std::move(context.scheduler),
-                                                                std::move(creation_args.actor_config));
-    co_await std::apply([&actor](auto&&... args) { return actor->InitUserClassInstance(std::move(args)...); },
-                        std::move(creation_args.args_tuple));
-
+    std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, kCreateFn>::CreateUseArgTuple(
+        std::move(context.scheduler), std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
     auto this_node_id = context.actor_ref_serde_ctx.this_node_id;
     auto actor_ref = ActorRef<ActorClass>(this_node_id, this_node_id, context.actor_id, actor.get(),
                                           context.actor_ref_serde_ctx.broker_actor_ref);
     NotifyExActorOnSpawned<ActorClass>(actor.get(), actor_ref);
     auto actor_name = actor->GetActorConfig().actor_name;
-    co_return RemoteActorRequestHandlerRegistry::ActorCreationResult {
+    return {
         .actor = std::move(actor),
         .actor_name = std::move(actor_name),
         // Workaround: see ActorRegistryBackend::DeserializeActorRef comment.

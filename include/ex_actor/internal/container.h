@@ -338,8 +338,6 @@ class BucketedPriorityQueue {
         return value;
       }
     }
-    // Semaphore was signaled but scan found nothing (the push might not be visible immediately).
-    sema_.signal();
     return std::nullopt;
   }
 

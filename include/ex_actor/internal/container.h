@@ -338,6 +338,10 @@ class BucketedPriorityQueue {
         return value;
       }
     }
+    // ConcurrentQueue::try_dequeue uses size_approx() (relaxed loads) as a heuristic and
+    // can return false even when an item exists. Re-signal to preserve the permit so a
+    // subsequent Pop attempt will find the item.
+    sema_.signal();
     return std::nullopt;
   }
 

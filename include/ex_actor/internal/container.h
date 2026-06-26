@@ -26,12 +26,11 @@
 #include <optional>
 #include <queue>
 #include <type_traits>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 #include "ex_actor/3rd_lib/daking/MPSC_queue.h"
 #include "ex_actor/3rd_lib/moody_camel_queue/blockingconcurrentqueue.h"
+#include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/logging.h"
 
 namespace ex_actor::internal {
@@ -314,81 +313,42 @@ class UnboundedBlockingQueue {
   ex_actor::embedded_3rd::moodycamel::BlockingConcurrentQueue<T> queue_;
 };
 
-template <class K, class V>
-class LockGuardedMap {
- public:
-  bool Insert(const K& key, V value) {
-    std::lock_guard lock(mutex_);
-    auto [iter, inserted] = map_.try_emplace(key, std::move(value));
-    return inserted;
-  }
-
-  V& At(const K& key) {
-    std::lock_guard lock(mutex_);
-    auto iter = map_.find(key);
-    EXA_THROW_CHECK(iter != map_.end()) << "Key not found: " << key;
-    return iter->second;
-  }
-
-  const V& At(const K& key) const {
-    std::lock_guard lock(mutex_);
-    auto iter = map_.find(key);
-    EXA_THROW_CHECK(iter != map_.end()) << "Key not found: " << key;
-    return iter->second;
-  }
-
-  void Erase(const K& key) {
-    std::lock_guard lock(mutex_);
-    map_.erase(key);
-  }
-
-  bool Contains(const K& key) const {
-    std::lock_guard lock(mutex_);
-    return map_.contains(key);
-  }
-
-  void Clear() {
-    std::lock_guard lock(mutex_);
-    map_.clear();
-  }
-
-  std::unordered_map<K, V>& GetMap() { return map_; }
-  std::mutex& GetMutex() const { return mutex_; }
-
- private:
-  std::unordered_map<K, V> map_;
-  mutable std::mutex mutex_;
-};
-
+// Lock-free bucketed priority queue. One ConcurrentQueue per priority level eliminates
+// contention on Push entirely. Pop uses a LightweightSemaphore (spin-then-futex) for
+// blocking — no mutex involved.
 template <class T>
-class LockGuardedSet {
+class BucketedPriorityQueue {
  public:
-  bool Insert(T value) {
-    std::lock_guard lock(mutex_);
-    auto [iter, inserted] = set_.emplace(std::move(value));
-    return inserted;
+  explicit BucketedPriorityQueue(uint32_t max_priorities) : max_priorities_(max_priorities), buckets_(max_priorities) {}
+
+  void Push(T value, uint32_t priority) {
+    EXA_THROW_CHECK(priority < max_priorities_)
+        << fmt_lib::format("priority={} is out of range, max={}", priority, max_priorities_);
+    buckets_[priority].enqueue(std::move(value));
+    sema_.signal();
   }
 
-  void Erase(const T& value) {
-    std::lock_guard lock(mutex_);
-    set_.erase(value);
+  std::optional<T> Pop(uint64_t timeout_ms) {
+    if (!sema_.wait(static_cast<int64_t>(timeout_ms) * 1000)) {
+      return std::nullopt;
+    }
+    T value;
+    for (auto& bucket : buckets_) {
+      if (bucket.try_dequeue(value)) {
+        return value;
+      }
+    }
+    // ConcurrentQueue::try_dequeue uses size_approx() (relaxed loads) as a heuristic and
+    // can return false even when an item exists. Re-signal to preserve the permit so a
+    // subsequent Pop attempt will find the item.
+    sema_.signal();
+    return std::nullopt;
   }
-
-  bool Empty() {
-    std::lock_guard lock(mutex_);
-    return set_.empty();
-  }
-
-  bool Contains(const T& value) {
-    std::lock_guard lock(mutex_);
-    return set_.contains(value);
-  }
-
-  std::mutex& GetMutex() const { return mutex_; }
 
  private:
-  std::unordered_set<T> set_;
-  mutable std::mutex mutex_;
+  uint32_t max_priorities_;
+  std::vector<ex_actor::embedded_3rd::moodycamel::ConcurrentQueue<T>> buckets_;
+  ex_actor::embedded_3rd::moodycamel::LightweightSemaphore sema_;
 };
 
 }  // namespace ex_actor::internal

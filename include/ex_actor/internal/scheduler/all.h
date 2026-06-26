@@ -18,6 +18,7 @@
 #include "ex_actor/internal/scheduler/core_pinned_thread_pool.h"
 #include "ex_actor/internal/scheduler/priority_thread_pool.h"
 #include "ex_actor/internal/scheduler/scheduler_union.h"
+#include "ex_actor/internal/scheduler/weak_priority_thread_pool.h"
 #include "ex_actor/internal/scheduler/work_sharing_thread_pool.h"
 #include "ex_actor/internal/scheduler/work_stealing_thread_pool.h"
 // IWYU pragma: end_exports

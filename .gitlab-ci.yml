@@ -1,0 +1,31 @@
+# This CI configuration includes common CI template
+# See: https://gitlab.corp.metabit-trading.com/metabit/common/common/-/blob/master/ci_template/user_guide.md
+include:
+  - project: metabit/common/common
+    ref: master
+    file: ci_template/common.gitlab-ci.yml
+
+image: metabit-registry-registry-vpc.cn-zhangjiakou.cr.aliyuncs.com/metabit-public/feature-platform-ci:latest
+
+default:
+  tags:
+    - elixir
+  interruptible: true
+
+stages:
+  - validation
+
+.skip-validation-condition: &skip-validation-condition
+  except:
+    variables:
+      - $CI_COMMIT_MESSAGE =~ /SKIP_VALIDATION/
+
+# FP has relatively high privileges. If you need to debug downstream pipeline failures for FP, ask #ask-ai-platform in Slack for help.
+feature_platform_downstream:
+  stage: validation
+  only:
+    - merge_requests
+  <<: *skip-validation-condition
+  before_script: []
+  script:
+    - mg h2h run_downstream_pipeline --repo common --downstream_project_id 413 --trigger_token ${FP_TRIGGER_TOKEN} --reader_token ${FP_READER_TOKEN} --private_token ${FP_BOT_TOKEN}  --project_id ${CI_MERGE_REQUEST_PROJECT_ID} --mr_id ${CI_MERGE_REQUEST_IID} --sha ${CI_COMMIT_SHA}

@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "ex_actor/internal/actor_config.h"
-#include "ex_actor/internal/container.h"
 #include "ex_actor/internal/scheduler/shared/scheduler_operation.h"
 #include "ex_actor/internal/scheduler/shared/scheduler_sender.h"
 
@@ -32,17 +31,17 @@ namespace ex_actor {
 /// critical-path-first execution without the cost of a globally-ordered priority queue.
 //
 /// Priority values must be in [0, bucket_num). Enqueuing with priority >= bucket_num throws.
-class WeakPriorityThreadPool {
+class BucketedWeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num, bool start_workers_immediately = true);
+  explicit BucketedWeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num, bool start_workers_immediately = true);
 
   void StartWorkers();
 
   template <ex::receiver R>
-  struct Operation : internal::SchedulerOperationBase<WeakPriorityThreadPool, R> {
-    using Base = internal::SchedulerOperationBase<WeakPriorityThreadPool, R>;
+  struct Operation : internal::SchedulerOperationBase<BucketedWeakPriorityThreadPool, R> {
+    using Base = internal::SchedulerOperationBase<BucketedWeakPriorityThreadPool, R>;
     using Base::Base;
 
     void start() noexcept {
@@ -52,8 +51,8 @@ class WeakPriorityThreadPool {
     }
   };
 
-  using Sender = internal::SchedulerSender<WeakPriorityThreadPool>;
-  using Scheduler = internal::SchedulerHandle<WeakPriorityThreadPool>;
+  using Sender = internal::SchedulerSender<BucketedWeakPriorityThreadPool>;
+  using Scheduler = internal::SchedulerHandle<BucketedWeakPriorityThreadPool>;
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
@@ -71,7 +70,7 @@ class WeakPriorityThreadPool {
     uint32_t priority;
   };
   inline static thread_local LocalSlot local_slot_ = {.op = nullptr, .priority = 0};
-  inline static thread_local WeakPriorityThreadPool* owning_pool_ = nullptr;
+  inline static thread_local BucketedWeakPriorityThreadPool* owning_pool_ = nullptr;
 
   void WorkerThreadLoop(const std::stop_token& stop_token);
 };

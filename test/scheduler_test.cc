@@ -164,8 +164,8 @@ TEST(SchedulerTest, CorePinnedThreadPoolTest) {
   ex_actor::Shutdown();
 }
 
-TEST(SchedulerTest, WeakPriorityThreadPoolPriorityOrderTest) {
-  ex_actor::WeakPriorityThreadPool thread_pool(1, /*bucket_num=*/8, /*start_workers_immediately=*/false);
+TEST(SchedulerTest, BucketedWeakPriorityThreadPoolPriorityOrderTest) {
+  ex_actor::BucketedWeakPriorityThreadPool thread_pool(1, /*bucket_num=*/8, /*start_workers_immediately=*/false);
   auto scheduler = thread_pool.GetScheduler();
   std::atomic_int count = 0;
   auto sender1 = ex::schedule(scheduler) | ex::then([&count]() {
@@ -192,8 +192,8 @@ TEST(SchedulerTest, WeakPriorityThreadPoolPriorityOrderTest) {
   ASSERT_EQ(count, 3);
 }
 
-TEST(SchedulerTest, WeakPriorityThreadPoolStoppableTest) {
-  ex_actor::WeakPriorityThreadPool thread_pool(1, /*bucket_num=*/4);
+TEST(SchedulerTest, BucketedWeakPriorityThreadPoolStoppableTest) {
+  ex_actor::BucketedWeakPriorityThreadPool thread_pool(1, /*bucket_num=*/4);
   auto scheduler = thread_pool.GetScheduler();
   auto task = ex::schedule(scheduler) | ex::then([]() { std::this_thread::sleep_for(std::chrono::milliseconds(100)); });
   stdexec::counting_scope scope;
@@ -206,10 +206,10 @@ TEST(SchedulerTest, WeakPriorityThreadPoolStoppableTest) {
   ex::sync_wait(scope.join());
 }
 
-TEST(SchedulerTest, WeakPriorityThreadPoolLocalSlotTest) {
+TEST(SchedulerTest, BucketedWeakPriorityThreadPoolLocalSlotTest) {
   // Verify the thread-local slot works: an operation that re-enqueues to the same pool
   // should complete without deadlock.
-  ex_actor::WeakPriorityThreadPool thread_pool(1, /*bucket_num=*/4);
+  ex_actor::BucketedWeakPriorityThreadPool thread_pool(1, /*bucket_num=*/4);
   auto scheduler = thread_pool.GetScheduler();
   auto sender = ex::schedule(scheduler) | ex::then([]() { return 1; }) |
                 ex::write_env(ex::prop {ex_actor::get_priority, 0}) | ex::let_value([&](int val) {

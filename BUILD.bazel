@@ -19,10 +19,10 @@ cc_library(
     deps = [
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/capnp:capnpc",
-        "@com_github_getml_reflect_cpp//:reflect-cpp",
-        "@com_libzmq//:zmq",
-        "@com_spdlog//:spdlog",
-        "@com_stdexec//:stdexec",
+        "@libzmq",
+        "@reflect-cpp",
+        "@spdlog",
+        "@stdexec",
     ],
 )
 

@@ -18,6 +18,8 @@
 #include <thread>
 #include <vector>
 
+#include "ex_actor/3rd_lib/moody_camel_queue/concurrentqueue.h"
+#include "ex_actor/3rd_lib/moody_camel_queue/lightweightsemaphore.h"
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/scheduler/shared/scheduler_operation.h"
 #include "ex_actor/internal/scheduler/shared/scheduler_sender.h"
@@ -35,7 +37,8 @@ class BucketedWeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit BucketedWeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num, bool start_workers_immediately = true);
+  explicit BucketedWeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num,
+                                          bool start_workers_immediately = true);
 
   void StartWorkers();
 

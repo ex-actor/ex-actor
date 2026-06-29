@@ -14,11 +14,13 @@
 
 #include "ex_actor/internal/scheduler/bucketed_weak_priority_thread_pool.h"
 
+#include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/platform.h"
 
 namespace ex_actor {
 
-BucketedWeakPriorityThreadPool::BucketedWeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num, bool start_workers_immediately)
+BucketedWeakPriorityThreadPool::BucketedWeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num,
+                                                               bool start_workers_immediately)
     : thread_count_(thread_count), bucket_num_(bucket_num), queues_(bucket_num_) {
   EXA_THROW_CHECK_GT(bucket_num_, 0U);
   if (thread_count > 0 && start_workers_immediately) {

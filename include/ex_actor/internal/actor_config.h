@@ -58,7 +58,7 @@ struct ActorConfig {
   // used in SchedulerUnion
   size_t scheduler_index = 0;
   // used in PriorityThreadPool
-  uint32_t priority = UINT32_MAX;
+  uint32_t priority = 0;
   // used in CorePinnedThreadPool
   size_t core_index = 0;
 };
@@ -68,7 +68,7 @@ struct get_priority_t {
     if constexpr (requires { prop.query(get_priority_t {}); }) {
       return prop.query(get_priority_t {});
     } else {
-      return UINT32_MAX;
+      return 0;
     }
   }
   constexpr auto query(ex::forwarding_query_t) const noexcept -> bool { return true; }

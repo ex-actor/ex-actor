@@ -18,9 +18,9 @@
 
 namespace ex_actor {
 
-WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, uint32_t max_priority,
-                                               bool start_workers_immediately)
-    : thread_count_(thread_count), max_priority_(max_priority > 0 ? max_priority : 1) {
+WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num, bool start_workers_immediately)
+    : thread_count_(thread_count), bucket_num_(bucket_num), queues_(bucket_num_) {
+  EXA_THROW_CHECK_GT(bucket_num_, 0U);
   if (thread_count > 0 && start_workers_immediately) {
     StartWorkers();
   }
@@ -33,6 +33,7 @@ void WeakPriorityThreadPool::StartWorkers() {
 }
 
 void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, uint32_t priority) {
+  EXA_THROW_CHECK_LT(priority, bucket_num_);
   if (owning_pool_ == this) {
     if (local_slot_.op == nullptr) {
       local_slot_ = {.op = operation, .priority = priority};
@@ -45,8 +46,7 @@ void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, ui
       priority = evicted.priority;
     }
   }
-  uint32_t queue_index = priority * kNumQueues / max_priority_;
-  if (queue_index >= kNumQueues) queue_index = kNumQueues - 1;
+  uint32_t queue_index = priority;
   queues_[queue_index].enqueue(operation);
   sema_.signal();
 }
@@ -64,6 +64,9 @@ void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token)
         break;
       }
     }
+    // ConcurrentQueue::try_dequeue uses size_approx() (relaxed loads) as a heuristic and
+    // can return false even when an item exists. Re-signal to preserve the permit so a
+    // subsequent Pop attempt will find the item.
     if (operation == nullptr) {
       sema_.signal();
       continue;

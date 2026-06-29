@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <thread>
+#include <vector>
 
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/container.h"
@@ -24,16 +25,18 @@
 
 namespace ex_actor {
 
-// Thread pool with priority-aware local scheduling. The shared queue is a simple FIFO
-// (single-bucket) for minimal contention. Priority ordering is achieved locally: the
-// thread-local slot holds the highest-priority pending operation, evicting lower-priority
-// items to the shared queue. This gives FIFO-queue speed (no bitmap/bucket scanning) while
-// preserving critical-path-first execution for coarse-grained graphs.
+/// Thread pool with weak priority scheduling. Priority is best-effort: the shared queues
+/// are partitioned into `bucket_num` buckets and workers drain them in priority order, but
+/// ordering is not strict across threads. The thread-local slot holds the highest-priority
+/// pending operation, evicting lower-priority items to the shared queues. This favors
+/// critical-path-first execution without the cost of a globally-ordered priority queue.
+//
+/// Priority values must be in [0, bucket_num). Enqueuing with priority >= bucket_num throws.
 class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t max_priority, bool start_workers_immediately = true);
+  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num, bool start_workers_immediately = true);
 
   void StartWorkers();
 
@@ -57,11 +60,9 @@ class WeakPriorityThreadPool {
   void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0);
 
  private:
-  static constexpr uint32_t kNumQueues = 8;
-
   size_t thread_count_;
-  uint32_t max_priority_;
-  embedded_3rd::moodycamel::ConcurrentQueue<TypeErasedOperation*> queues_[kNumQueues];
+  uint32_t bucket_num_;
+  std::vector<embedded_3rd::moodycamel::ConcurrentQueue<TypeErasedOperation*>> queues_;
   embedded_3rd::moodycamel::LightweightSemaphore sema_;
   std::vector<std::jthread> workers_;
 

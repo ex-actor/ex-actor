@@ -312,43 +312,4 @@ class UnboundedBlockingQueue {
  private:
   ex_actor::embedded_3rd::moodycamel::BlockingConcurrentQueue<T> queue_;
 };
-
-// Lock-free bucketed priority queue. One ConcurrentQueue per priority level eliminates
-// contention on Push entirely. Pop uses a LightweightSemaphore (spin-then-futex) for
-// blocking — no mutex involved.
-template <class T>
-class BucketedPriorityQueue {
- public:
-  explicit BucketedPriorityQueue(uint32_t max_priorities) : max_priorities_(max_priorities), buckets_(max_priorities) {}
-
-  void Push(T value, uint32_t priority) {
-    EXA_THROW_CHECK(priority < max_priorities_)
-        << fmt_lib::format("priority={} is out of range, max={}", priority, max_priorities_);
-    buckets_[priority].enqueue(std::move(value));
-    sema_.signal();
-  }
-
-  std::optional<T> Pop(uint64_t timeout_ms) {
-    if (!sema_.wait(static_cast<int64_t>(timeout_ms) * 1000)) {
-      return std::nullopt;
-    }
-    T value;
-    for (auto& bucket : buckets_) {
-      if (bucket.try_dequeue(value)) {
-        return value;
-      }
-    }
-    // ConcurrentQueue::try_dequeue uses size_approx() (relaxed loads) as a heuristic and
-    // can return false even when an item exists. Re-signal to preserve the permit so a
-    // subsequent Pop attempt will find the item.
-    sema_.signal();
-    return std::nullopt;
-  }
-
- private:
-  uint32_t max_priorities_;
-  std::vector<ex_actor::embedded_3rd::moodycamel::ConcurrentQueue<T>> buckets_;
-  ex_actor::embedded_3rd::moodycamel::LightweightSemaphore sema_;
-};
-
 }  // namespace ex_actor::internal

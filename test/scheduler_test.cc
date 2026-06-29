@@ -1,6 +1,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -218,6 +219,34 @@ TEST(SchedulerTest, BucketedWeakPriorityThreadPoolLocalSlotTest) {
                 });
   auto [result] = ex::sync_wait(sender).value();
   ASSERT_EQ(result, 2);
+}
+
+TEST(SchedulerTest, BucketedWeakPriorityThreadPoolLocalSlotEvictionTest) {
+  ex_actor::BucketedWeakPriorityThreadPool thread_pool(1, /*bucket_num=*/4);
+  auto scheduler = thread_pool.GetScheduler();
+  std::vector<int> execution_order;
+  stdexec::simple_counting_scope scope;
+
+  auto sender = ex::schedule(scheduler) | ex::then([&]() {
+                  stdexec::spawn(ex::schedule(scheduler) | ex::then([&]() { execution_order.push_back(2); }) |
+                                     ex::write_env(ex::prop {ex_actor::get_priority, 2}) | ex_actor::DiscardResult(),
+                                 scope.get_token());
+
+                  stdexec::spawn(ex::schedule(scheduler) | ex::then([&]() { execution_order.push_back(1); }) |
+                                     ex::write_env(ex::prop {ex_actor::get_priority, 1}) | ex_actor::DiscardResult(),
+                                 scope.get_token());
+
+                  stdexec::spawn(ex::schedule(scheduler) | ex::then([&]() { execution_order.push_back(3); }) |
+                                     ex::write_env(ex::prop {ex_actor::get_priority, 3}) | ex_actor::DiscardResult(),
+                                 scope.get_token());
+                }) |
+                ex::write_env(ex::prop {ex_actor::get_priority, 2});
+
+  ex::sync_wait(sender);
+  ex::sync_wait(scope.join());
+
+  std::vector<int> expected = {1, 2, 3};
+  ASSERT_EQ(execution_order, expected);
 }
 
 TEST(SchedulerTest, SchedulerUnionWithCorePinnedThreadPoolTest) {

@@ -69,7 +69,7 @@ class WeakPriorityThreadPool {
     TypeErasedOperation* op;
     uint32_t priority;
   };
-  inline static thread_local LocalSlot local_slot_ = {nullptr, 0};
+  inline static thread_local LocalSlot local_slot_ = {.op = nullptr, .priority = 0};
   inline static thread_local WeakPriorityThreadPool* owning_pool_ = nullptr;
 
   void WorkerThreadLoop(const std::stop_token& stop_token);

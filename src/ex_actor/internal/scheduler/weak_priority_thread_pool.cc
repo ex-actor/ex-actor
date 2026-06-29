@@ -35,12 +35,12 @@ void WeakPriorityThreadPool::StartWorkers() {
 void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, uint32_t priority) {
   if (owning_pool_ == this) {
     if (local_slot_.op == nullptr) {
-      local_slot_ = {operation, priority};
+      local_slot_ = {.op = operation, .priority = priority};
       return;
     }
     if (priority < local_slot_.priority) {
       auto evicted = local_slot_;
-      local_slot_ = {operation, priority};
+      local_slot_ = {.op = operation, .priority = priority};
       operation = evicted.op;
       priority = evicted.priority;
     }
@@ -59,12 +59,12 @@ void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token)
       continue;
     }
     TypeErasedOperation* operation = nullptr;
-    for (uint32_t i = 0; i < kNumQueues; ++i) {
-      if (queues_[i].try_dequeue(operation)) {
+    for (auto& queue : queues_) {
+      if (queue.try_dequeue(operation)) {
         break;
       }
     }
-    if (!operation) {
+    if (operation == nullptr) {
       sema_.signal();
       continue;
     }

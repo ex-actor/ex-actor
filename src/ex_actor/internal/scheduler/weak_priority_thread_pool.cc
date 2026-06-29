@@ -20,7 +20,7 @@ namespace ex_actor {
 
 WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, uint32_t max_priority,
                                                bool start_workers_immediately)
-    : thread_count_(thread_count), queue_(max_priority) {
+    : thread_count_(thread_count), max_priority_(max_priority > 0 ? max_priority : 1) {
   if (thread_count > 0 && start_workers_immediately) {
     StartWorkers();
   }
@@ -33,28 +33,45 @@ void WeakPriorityThreadPool::StartWorkers() {
 }
 
 void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, uint32_t priority) {
-  if (owning_pool_ == this && local_slot_ == nullptr) {
-    local_slot_ = operation;
-    return;
+  if (owning_pool_ == this) {
+    if (local_slot_.op == nullptr) {
+      local_slot_ = {operation, priority};
+      return;
+    }
+    if (priority < local_slot_.priority) {
+      auto evicted = local_slot_;
+      local_slot_ = {operation, priority};
+      operation = evicted.op;
+      priority = evicted.priority;
+    }
   }
-  queue_.Push(operation, priority);
+  uint32_t queue_index = priority * kNumQueues / max_priority_;
+  if (queue_index >= kNumQueues) queue_index = kNumQueues - 1;
+  queues_[queue_index].enqueue(operation);
+  sema_.signal();
 }
 
 void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token) {
   internal::SetThreadName("weak_pri_worker");
   owning_pool_ = this;
   while (!stop_token.stop_requested()) {
-    auto optional_operation = queue_.Pop(/*timeout_ms=*/10);
-    if (!optional_operation) {
+    if (!sema_.wait(static_cast<int64_t>(10) * 1000)) {
       continue;
     }
-    optional_operation.value()->Execute();
-    // Drain the local slot: priority ordering is "weak" here — local slot items execute
-    // inline without re-entering the shared priority queue, trading strict ordering for
-    // reduced contention.
-    while (local_slot_ != nullptr) {
-      auto* operation = local_slot_;
-      local_slot_ = nullptr;
+    TypeErasedOperation* operation = nullptr;
+    for (uint32_t i = 0; i < kNumQueues; ++i) {
+      if (queues_[i].try_dequeue(operation)) {
+        break;
+      }
+    }
+    if (!operation) {
+      sema_.signal();
+      continue;
+    }
+    operation->Execute();
+    while (local_slot_.op != nullptr) {
+      operation = local_slot_.op;
+      local_slot_.op = nullptr;
       operation->Execute();
     }
   }

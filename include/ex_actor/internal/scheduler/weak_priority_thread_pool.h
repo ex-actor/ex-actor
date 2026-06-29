@@ -24,9 +24,11 @@
 
 namespace ex_actor {
 
-// Lock-free priority thread pool with thread-local slot optimization. Priority ordering is
-// weak: operations re-enqueued by the currently-executing task bypass the shared queue and
-// run inline, which may violate strict priority order in exchange for reduced contention.
+// Thread pool with priority-aware local scheduling. The shared queue is a simple FIFO
+// (single-bucket) for minimal contention. Priority ordering is achieved locally: the
+// thread-local slot holds the highest-priority pending operation, evicting lower-priority
+// items to the shared queue. This gives FIFO-queue speed (no bitmap/bucket scanning) while
+// preserving critical-path-first execution for coarse-grained graphs.
 class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
@@ -55,10 +57,19 @@ class WeakPriorityThreadPool {
   void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0);
 
  private:
+  static constexpr uint32_t kNumQueues = 8;
+
   size_t thread_count_;
-  internal::BucketedPriorityQueue<TypeErasedOperation*> queue_;
+  uint32_t max_priority_;
+  embedded_3rd::moodycamel::ConcurrentQueue<TypeErasedOperation*> queues_[kNumQueues];
+  embedded_3rd::moodycamel::LightweightSemaphore sema_;
   std::vector<std::jthread> workers_;
-  inline static thread_local TypeErasedOperation* local_slot_ = nullptr;
+
+  struct LocalSlot {
+    TypeErasedOperation* op;
+    uint32_t priority;
+  };
+  inline static thread_local LocalSlot local_slot_ = {nullptr, 0};
   inline static thread_local WeakPriorityThreadPool* owning_pool_ = nullptr;
 
   void WorkerThreadLoop(const std::stop_token& stop_token);

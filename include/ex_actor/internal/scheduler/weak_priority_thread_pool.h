@@ -26,25 +26,21 @@
 
 namespace ex_actor {
 
-/// Thread pool with weak priority scheduling. Priority is best-effort: the shared queues
-/// are partitioned into `bucket_num` buckets and workers drain them in priority order, but
-/// ordering is not strict across threads. The thread-local slot holds the highest-priority
-/// pending operation, evicting lower-priority items to the shared queues. This favors
-/// critical-path-first execution without the cost of a globally-ordered priority queue.
-//
-/// Priority values must be in [0, bucket_num). Enqueuing with priority >= bucket_num throws.
-class BucketedWeakPriorityThreadPool {
+/// A high-performance lock-free priority thread pool, but with the following constraints:
+///   1. priority level is limited, must be specified at construction time
+///   2. priority is only a hint, not a strict guarantee
+class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit BucketedWeakPriorityThreadPool(size_t thread_count, uint32_t bucket_num,
-                                          bool start_workers_immediately = true);
+  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t priority_upper_bound,
+                                  bool start_workers_immediately = true);
 
   void StartWorkers();
 
   template <ex::receiver R>
-  struct Operation : internal::SchedulerOperationBase<BucketedWeakPriorityThreadPool, R> {
-    using Base = internal::SchedulerOperationBase<BucketedWeakPriorityThreadPool, R>;
+  struct Operation : internal::SchedulerOperationBase<WeakPriorityThreadPool, R> {
+    using Base = internal::SchedulerOperationBase<WeakPriorityThreadPool, R>;
     using Base::Base;
 
     void start() noexcept {
@@ -54,8 +50,8 @@ class BucketedWeakPriorityThreadPool {
     }
   };
 
-  using Sender = internal::SchedulerSender<BucketedWeakPriorityThreadPool>;
-  using Scheduler = internal::SchedulerHandle<BucketedWeakPriorityThreadPool>;
+  using Sender = internal::SchedulerSender<WeakPriorityThreadPool>;
+  using Scheduler = internal::SchedulerHandle<WeakPriorityThreadPool>;
 
   Scheduler GetScheduler() noexcept { return Scheduler {.thread_pool = this}; }
 
@@ -63,7 +59,7 @@ class BucketedWeakPriorityThreadPool {
 
  private:
   size_t thread_count_;
-  uint32_t bucket_num_;
+  uint32_t priority_upper_bound_;
   std::vector<embedded_3rd::moodycamel::ConcurrentQueue<TypeErasedOperation*>> queues_;
   embedded_3rd::moodycamel::LightweightSemaphore sema_;
   std::vector<std::jthread> workers_;
@@ -73,7 +69,7 @@ class BucketedWeakPriorityThreadPool {
     uint32_t priority;
   };
   inline static thread_local LocalSlot local_slot_ = {.op = nullptr, .priority = 0};
-  inline static thread_local BucketedWeakPriorityThreadPool* owning_pool_ = nullptr;
+  inline static thread_local WeakPriorityThreadPool* owning_pool_ = nullptr;
 
   void WorkerThreadLoop(const std::stop_token& stop_token);
 };

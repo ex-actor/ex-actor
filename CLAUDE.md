@@ -22,4 +22,4 @@ Based on Google Style Guide, with the following additions:
 
 # Pull Request & Commit Message
 
-- Make the description short and concise. don't exceed 50 words.
+- Make the description short and concise so reviewer can quickly understand the changes. don't exceed 50 words. Make the structure compact, no big titles, so it can be directly used as squash merge's commit message.

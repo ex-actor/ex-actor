@@ -19,3 +19,7 @@ Based on Google Style Guide, with the following additions:
 - When using std::pair or iterators, don't use first/second or iterator->first/second, instead use struct binding like `auto& [key, value] = pair`, or alias like `auto& meaningful_name = iterator->second` if only one field is needed.
 - Don't use placeholder `_` in struct binding. Always use meaningful variable names even it's not used.
 - In maps, when you can't get the key/value meaning from the variable name, add comments like `map</*key_meaning*/KeyType, /*value_meaning*/ValueType/>` for better readability. No "=" sign.
+
+# Pull Request & Commit Message
+
+- Make the description short and concise. don't exceed 50 words.

@@ -19,10 +19,10 @@
 
 namespace ex_actor {
 
-WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, uint32_t max_priority,
+WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, uint32_t priority_upper_bound,
                                                bool start_workers_immediately)
-    : thread_count_(thread_count), max_priority_(max_priority), queues_(max_priority_) {
-  EXA_THROW_CHECK_GT(max_priority_, 0U);
+    : thread_count_(thread_count), priority_upper_bound_(priority_upper_bound), queues_(priority_upper_bound_) {
+  EXA_THROW_CHECK_GT(priority_upper_bound_, 0U);
   if (thread_count > 0 && start_workers_immediately) {
     StartWorkers();
   }
@@ -35,7 +35,7 @@ void WeakPriorityThreadPool::StartWorkers() {
 }
 
 void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, uint32_t priority) {
-  EXA_THROW_CHECK_LT(priority, max_priority_);
+  EXA_THROW_CHECK_LT(priority, priority_upper_bound_);
   if (owning_pool_ == this) {
     if (local_slot_.op == nullptr) {
       local_slot_ = {.op = operation, .priority = priority};

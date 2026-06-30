@@ -33,7 +33,8 @@ class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t max_priority, bool start_workers_immediately = true);
+  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t priority_upper_bound,
+                                  bool start_workers_immediately = true);
 
   void StartWorkers();
 
@@ -58,7 +59,7 @@ class WeakPriorityThreadPool {
 
  private:
   size_t thread_count_;
-  uint32_t max_priority_;
+  uint32_t priority_upper_bound_;
   std::vector<embedded_3rd::moodycamel::ConcurrentQueue<TypeErasedOperation*>> queues_;
   embedded_3rd::moodycamel::LightweightSemaphore sema_;
   std::vector<std::jthread> workers_;

@@ -15,6 +15,9 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
+#include <map>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -26,15 +29,16 @@
 
 namespace ex_actor {
 
-/// A high-performance lock-free priority thread pool, but with the following constraints:
-///   1. priority level is limited, must be specified at construction time
-///   2. priority is only a hint, not a strict guarantee
+/// A high-performance sharded priority thread pool using "power of two choices":
+///   1. maintains 4 * cpu_core_num lock-guarded priority sub-queues
+///   2. push: randomly selects a sub-queue
+///   3. pop: randomly selects 2 sub-queues, peeks their tops, takes the higher priority one
 class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t priority_upper_bound,
-                                  bool start_workers_immediately = true);
+  explicit WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues = 0,
+                                   bool start_workers_immediately = true);
 
   void StartWorkers();
 
@@ -58,11 +62,19 @@ class WeakPriorityThreadPool {
   void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0);
 
  private:
+  struct alignas(128) SubQueue {
+    std::mutex lock;
+    std::map<uint32_t, std::deque<TypeErasedOperation*>> queue;
+  };
+
   size_t thread_count_;
-  uint32_t priority_upper_bound_;
-  std::vector<embedded_3rd::moodycamel::ConcurrentQueue<TypeErasedOperation*>> queues_;
+  size_t num_sub_queues_;
+  std::vector<SubQueue> sub_queues_;
   embedded_3rd::moodycamel::LightweightSemaphore sema_;
   std::vector<std::jthread> workers_;
+  inline static thread_local TypeErasedOperation* local_slot_ = nullptr;
+  inline static thread_local uint32_t local_slot_priority_ = 0;
+  inline static thread_local WeakPriorityThreadPool* owning_pool_ = nullptr;
 
   struct LocalSlot {
     TypeErasedOperation* op;

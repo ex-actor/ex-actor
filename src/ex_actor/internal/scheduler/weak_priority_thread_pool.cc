@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <random>
 
-#include "ex_actor/internal/logging.h"
 #include "ex_actor/internal/platform.h"
 
 namespace ex_actor {
@@ -28,17 +27,10 @@ thread_local std::minstd_rand tl_rng {std::random_device {}()};
 
 }  // namespace
 
-WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues,
-                                               bool start_workers_immediately)
+WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues)
     : thread_count_(thread_count),
       num_sub_queues_(std::max<size_t>(2, num_sub_queues == 0 ? thread_count / 2 : num_sub_queues)),
       sub_queues_(num_sub_queues_) {
-  if (thread_count > 0 && start_workers_immediately) {
-    StartWorkers();
-  }
-}
-
-void WeakPriorityThreadPool::StartWorkers() {
   for (size_t i = 0; i < thread_count_; ++i) {
     workers_.emplace_back([this](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token); });
   }

@@ -165,33 +165,6 @@ TEST(SchedulerTest, CorePinnedThreadPoolTest) {
   ex_actor::Shutdown();
 }
 
-TEST(SchedulerTest, WeakPriorityThreadPoolPriorityOrderTest) {
-  ex_actor::WeakPriorityThreadPool thread_pool(1, /*start_workers_immediately=*/false);
-  auto scheduler = thread_pool.GetScheduler();
-  std::atomic_int count = 0;
-  auto sender1 = ex::schedule(scheduler) | ex::then([&count]() {
-                   EXPECT_EQ(count, 0);
-                   count++;
-                 }) |
-                 ex::write_env(ex::prop {ex_actor::get_priority, 1});
-  auto sender2 = ex::schedule(scheduler) | ex::then([&count]() {
-                   EXPECT_EQ(count, 2);
-                   count++;
-                 }) |
-                 ex::write_env(ex::prop {ex_actor::get_priority, 3});
-  auto sender3 = ex::schedule(scheduler) | ex::then([&count]() {
-                   EXPECT_EQ(count, 1);
-                   count++;
-                 }) |
-                 ex::write_env(ex::prop {ex_actor::get_priority, 2});
-  stdexec::simple_counting_scope scope;
-  stdexec::spawn(sender1 | ex_actor::DiscardResult(), scope.get_token());
-  stdexec::spawn(sender2 | ex_actor::DiscardResult(), scope.get_token());
-  stdexec::spawn(sender3 | ex_actor::DiscardResult(), scope.get_token());
-  thread_pool.StartWorkers();
-  ex::sync_wait(scope.join());
-  ASSERT_EQ(count, 3);
-}
 
 TEST(SchedulerTest, WeakPriorityThreadPoolStoppableTest) {
   ex_actor::WeakPriorityThreadPool thread_pool(1);

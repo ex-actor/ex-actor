@@ -21,7 +21,6 @@
 #include <thread>
 #include <vector>
 
-#include "ex_actor/3rd_lib/moody_camel_queue/concurrentqueue.h"
 #include "ex_actor/3rd_lib/moody_camel_queue/lightweightsemaphore.h"
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/scheduler/shared/scheduler_operation.h"
@@ -36,10 +35,7 @@ class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues = 0,
-                                  bool start_workers_immediately = true);
-
-  void StartWorkers();
+  explicit WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues = 0);
 
   template <ex::receiver R>
   struct Operation : internal::SchedulerOperationBase<WeakPriorityThreadPool, R> {

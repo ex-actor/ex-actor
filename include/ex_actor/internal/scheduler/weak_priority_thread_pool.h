@@ -33,7 +33,7 @@ namespace ex_actor {
 ///   - Each sub-queue holds all priority levels via std::map<priority, std::deque<op*>>
 ///   - Push: randomly select one sub-queue
 ///   - Pop: randomly pick 2 sub-queues, peek their tops, take the higher-priority item
-///   - Thread-local slot keeps the highest-priority successor for depth-first DAG execution
+///   - Thread-local slot: bypass the queue for the highest-priority successor task
 class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;

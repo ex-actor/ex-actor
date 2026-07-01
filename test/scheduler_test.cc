@@ -165,7 +165,6 @@ TEST(SchedulerTest, CorePinnedThreadPoolTest) {
   ex_actor::Shutdown();
 }
 
-
 TEST(SchedulerTest, WeakPriorityThreadPoolStoppableTest) {
   ex_actor::WeakPriorityThreadPool thread_pool(1);
   auto scheduler = thread_pool.GetScheduler();

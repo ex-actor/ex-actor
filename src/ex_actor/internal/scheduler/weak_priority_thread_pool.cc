@@ -52,11 +52,20 @@ void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, ui
       priority = evicted_priority;
     }
   }
-  size_t idx = tl_rng() % num_sub_queues_;
+  size_t idx_a = tl_rng() % num_sub_queues_;
+  size_t idx_b = tl_rng() % num_sub_queues_;
+  if (idx_a == idx_b) {
+    idx_b = (idx_b + 1) % num_sub_queues_;
+  }
+  size_t idx =
+      sub_queues_[idx_a].size.load(std::memory_order_relaxed) <= sub_queues_[idx_b].size.load(std::memory_order_relaxed)
+          ? idx_a
+          : idx_b;
   {
     auto& sq = sub_queues_[idx];
     std::lock_guard guard(sq.lock);
     sq.queue[priority].push_back(operation);
+    sq.size.fetch_add(1, std::memory_order_relaxed);
   }
   sema_.signal();
 }
@@ -78,6 +87,7 @@ void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token)
       if (fifo.empty()) {
         sq.queue.erase(it);
       }
+      sq.size.fetch_sub(1, std::memory_order_relaxed);
       return op;
     };
 
@@ -89,6 +99,12 @@ void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token)
       size_t idx_b = tl_rng() % num_sub_queues_;
       if (idx_a == idx_b) {
         idx_b = (idx_b + 1) % num_sub_queues_;
+      }
+
+      bool maybe_has_a = sub_queues_[idx_a].size.load(std::memory_order_relaxed) > 0;
+      bool maybe_has_b = sub_queues_[idx_b].size.load(std::memory_order_relaxed) > 0;
+      if (!maybe_has_a && !maybe_has_b) {
+        continue;
       }
 
       std::scoped_lock guard(sub_queues_[idx_a].lock, sub_queues_[idx_b].lock);

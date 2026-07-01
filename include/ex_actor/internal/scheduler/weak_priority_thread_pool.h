@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -30,7 +31,7 @@
 namespace ex_actor {
 
 /// A sharded thread pool with best-effort (non-strict) priority, using "power of two choices":
-///   - Push: randomly select one sub-queue
+///   - Push: randomly pick 2 sub-queues, enqueue to the less loaded one
 ///   - Pop: randomly pick 2 sub-queues, peek their tops, take the higher-priority item
 class WeakPriorityThreadPool {
  public:
@@ -61,6 +62,7 @@ class WeakPriorityThreadPool {
   struct alignas(128) SubQueue {
     std::mutex lock;
     std::map<uint32_t, std::deque<TypeErasedOperation*>> queue;
+    std::atomic<size_t> size {0};
   };
 
   size_t thread_count_;

@@ -75,6 +75,7 @@ class WeakPriorityThreadPool {
   inline static thread_local WeakPriorityThreadPool* owning_pool_ = nullptr;
 
   void WorkerThreadLoop(const std::stop_token& stop_token);
+  TypeErasedOperation* TryDequeueOperation();
 };
 
 }  // namespace ex_actor

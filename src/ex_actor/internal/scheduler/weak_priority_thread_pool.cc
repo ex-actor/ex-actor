@@ -70,6 +70,47 @@ void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, ui
   sema_.signal();
 }
 
+WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueOperation() {
+  size_t idx_a = tl_rng() % num_sub_queues_;
+  size_t idx_b = tl_rng() % num_sub_queues_;
+  if (idx_a == idx_b) {
+    idx_b = (idx_b + 1) % num_sub_queues_;
+  }
+
+  bool maybe_has_a = sub_queues_[idx_a].size.load(std::memory_order_relaxed) > 0;
+  bool maybe_has_b = sub_queues_[idx_b].size.load(std::memory_order_relaxed) > 0;
+  if (!maybe_has_a && !maybe_has_b) {
+    return nullptr;
+  }
+
+  auto pop_one = [](SubQueue& sq) -> TypeErasedOperation* {
+    auto it = sq.queue.begin();
+    auto& fifo = it->second;
+    TypeErasedOperation* op = fifo.front();
+    fifo.pop_front();
+    if (fifo.empty()) {
+      sq.queue.erase(it);
+    }
+    sq.size.fetch_sub(1, std::memory_order_relaxed);
+    return op;
+  };
+
+  std::scoped_lock guard(sub_queues_[idx_a].lock, sub_queues_[idx_b].lock);
+
+  bool has_a = !sub_queues_[idx_a].queue.empty();
+  bool has_b = !sub_queues_[idx_b].queue.empty();
+  if (has_a && has_b) {
+    uint32_t pri_a = sub_queues_[idx_a].queue.begin()->first;
+    uint32_t pri_b = sub_queues_[idx_b].queue.begin()->first;
+    return pop_one(pri_a <= pri_b ? sub_queues_[idx_a] : sub_queues_[idx_b]);
+  } else if (has_a) {
+    return pop_one(sub_queues_[idx_a]);
+  } else if (has_b) {
+    return pop_one(sub_queues_[idx_b]);
+  }
+  return nullptr;
+}
+
 void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token) {
   internal::SetThreadName("weak_pri_worker");
   owning_pool_ = this;
@@ -79,49 +120,9 @@ void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token)
       continue;
     }
 
-    auto pop_one = [](SubQueue& sq) -> TypeErasedOperation* {
-      auto it = sq.queue.begin();
-      auto& fifo = it->second;
-      TypeErasedOperation* op = fifo.front();
-      fifo.pop_front();
-      if (fifo.empty()) {
-        sq.queue.erase(it);
-      }
-      sq.size.fetch_sub(1, std::memory_order_relaxed);
-      return op;
-    };
-
-    auto peek_priority = [](SubQueue& sq) -> uint32_t { return sq.queue.begin()->first; };
-
     TypeErasedOperation* operation = nullptr;
     while (operation == nullptr) {
-      size_t idx_a = tl_rng() % num_sub_queues_;
-      size_t idx_b = tl_rng() % num_sub_queues_;
-      if (idx_a == idx_b) {
-        idx_b = (idx_b + 1) % num_sub_queues_;
-      }
-
-      bool maybe_has_a = sub_queues_[idx_a].size.load(std::memory_order_relaxed) > 0;
-      bool maybe_has_b = sub_queues_[idx_b].size.load(std::memory_order_relaxed) > 0;
-      if (!maybe_has_a && !maybe_has_b) {
-        continue;
-      }
-
-      std::scoped_lock guard(sub_queues_[idx_a].lock, sub_queues_[idx_b].lock);
-
-      bool has_a = !sub_queues_[idx_a].queue.empty();
-      bool has_b = !sub_queues_[idx_b].queue.empty();
-      if (has_a && has_b) {
-        if (peek_priority(sub_queues_[idx_a]) <= peek_priority(sub_queues_[idx_b])) {
-          operation = pop_one(sub_queues_[idx_a]);
-        } else {
-          operation = pop_one(sub_queues_[idx_b]);
-        }
-      } else if (has_a) {
-        operation = pop_one(sub_queues_[idx_a]);
-      } else if (has_b) {
-        operation = pop_one(sub_queues_[idx_b]);
-      }
+      operation = TryDequeueOperation();
     }
 
     operation->Execute();

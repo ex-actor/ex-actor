@@ -103,9 +103,11 @@ WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueO
     uint32_t pri_a = sub_queues_[idx_a].queue.begin()->first;
     uint32_t pri_b = sub_queues_[idx_b].queue.begin()->first;
     return pop_one(pri_a <= pri_b ? sub_queues_[idx_a] : sub_queues_[idx_b]);
-  } else if (has_a) {
+  }
+  if (has_a) {
     return pop_one(sub_queues_[idx_a]);
-  } else if (has_b) {
+  }
+  if (has_b) {
     return pop_one(sub_queues_[idx_b]);
   }
   return nullptr;

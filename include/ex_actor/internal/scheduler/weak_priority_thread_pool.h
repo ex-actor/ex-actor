@@ -29,10 +29,11 @@
 
 namespace ex_actor {
 
-/// A high-performance sharded priority thread pool using "power of two choices":
-///   1. maintains 4 * cpu_core_num lock-guarded priority sub-queues
-///   2. push: randomly selects a sub-queue
-///   3. pop: randomly selects 2 sub-queues, peeks their tops, takes the higher priority one
+/// A sharded priority thread pool using "power of two choices" load balancing:
+///   - Each sub-queue holds all priority levels via std::map<priority, std::deque<op*>>
+///   - Push: randomly select one sub-queue
+///   - Pop: randomly pick 2 sub-queues, peek their tops, take the higher-priority item
+///   - Thread-local slot keeps the highest-priority successor for depth-first DAG execution
 class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;

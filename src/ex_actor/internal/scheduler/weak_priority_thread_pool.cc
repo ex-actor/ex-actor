@@ -89,9 +89,7 @@ void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token)
       return op;
     };
 
-    auto peek_priority = [](SubQueue& sq) -> uint32_t {
-      return sq.queue.begin()->first;
-    };
+    auto peek_priority = [](SubQueue& sq) -> uint32_t { return sq.queue.begin()->first; };
 
     TypeErasedOperation* operation = nullptr;
     while (operation == nullptr) {

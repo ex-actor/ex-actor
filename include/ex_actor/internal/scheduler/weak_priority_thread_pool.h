@@ -15,6 +15,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstdint>
 #include <mutex>
@@ -62,8 +63,8 @@ class WeakPriorityThreadPool {
 
  private:
   struct alignas(128) SubQueue {
+    std::atomic<uint64_t> bitmap {0};
     std::mutex lock;
-    uint64_t bitmap = 0;
     std::array<std::vector<TypeErasedOperation*>, kMaxPriorityLevels> slots;
   };
 

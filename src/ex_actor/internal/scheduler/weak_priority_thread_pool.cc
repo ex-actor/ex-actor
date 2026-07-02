@@ -68,7 +68,8 @@ void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, ui
     auto& sq = sub_queues_[idx];
     std::lock_guard guard(sq.lock);
     sq.slots[priority].push_back(operation);
-    sq.bitmap |= uint64_t{1} << priority;
+    sq.bitmap.store(sq.bitmap.load(std::memory_order_relaxed) | (uint64_t{1} << priority),
+                    std::memory_order_release);
   }
   sema_.signal();
 }
@@ -80,33 +81,46 @@ WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueO
     idx_b = (idx_b + 1) % num_sub_queues_;
   }
 
-  auto pop_one = [](SubQueue& sq) -> TypeErasedOperation* {
-    size_t pri = std::countr_zero(sq.bitmap);
+  // Speculative bitmap read (no lock) to pick the better queue.
+  uint64_t bm_a = sub_queues_[idx_a].bitmap.load(std::memory_order_acquire);
+  uint64_t bm_b = sub_queues_[idx_b].bitmap.load(std::memory_order_acquire);
+
+  // Order: try the queue with better (lower) top priority first.
+  size_t first = idx_a;
+  size_t second = idx_b;
+  if (bm_a && bm_b) {
+    if (std::countr_zero(bm_b) < std::countr_zero(bm_a)) {
+      first = idx_b;
+      second = idx_a;
+    }
+  } else if (bm_b) {
+    first = idx_b;
+    second = idx_a;
+  } else if (!bm_a) {
+    return nullptr;
+  }
+
+  auto try_pop = [](SubQueue& sq) -> TypeErasedOperation* {
+    std::lock_guard guard(sq.lock);
+    uint64_t bm = sq.bitmap.load(std::memory_order_relaxed);
+    if (!bm) {
+      return nullptr;
+    }
+    size_t pri = std::countr_zero(bm);
     auto& slot = sq.slots[pri];
     TypeErasedOperation* op = slot.back();
     slot.pop_back();
     if (slot.empty()) {
-      sq.bitmap &= ~(uint64_t{1} << pri);
+      sq.bitmap.store(bm & ~(uint64_t{1} << pri), std::memory_order_release);
     }
     return op;
   };
 
-  std::scoped_lock guard(sub_queues_[idx_a].lock, sub_queues_[idx_b].lock);
-
-  uint64_t bm_a = sub_queues_[idx_a].bitmap;
-  uint64_t bm_b = sub_queues_[idx_b].bitmap;
-  if (bm_a && bm_b) {
-    size_t pri_a = std::countr_zero(bm_a);
-    size_t pri_b = std::countr_zero(bm_b);
-    return pop_one(pri_a <= pri_b ? sub_queues_[idx_a] : sub_queues_[idx_b]);
+  TypeErasedOperation* op = try_pop(sub_queues_[first]);
+  if (op) {
+    return op;
   }
-  if (bm_a) {
-    return pop_one(sub_queues_[idx_a]);
-  }
-  if (bm_b) {
-    return pop_one(sub_queues_[idx_b]);
-  }
-  return nullptr;
+  return try_pop(sub_queues_[second]);
 }
 
 void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token) {

@@ -52,20 +52,11 @@ void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, ui
       priority = evicted_priority;
     }
   }
-  size_t idx_a = tl_rng() % num_sub_queues_;
-  size_t idx_b = tl_rng() % num_sub_queues_;
-  if (idx_a == idx_b) {
-    idx_b = (idx_b + 1) % num_sub_queues_;
-  }
-  size_t idx =
-      sub_queues_[idx_a].size.load(std::memory_order_relaxed) <= sub_queues_[idx_b].size.load(std::memory_order_relaxed)
-          ? idx_a
-          : idx_b;
+  size_t idx = tl_rng() % num_sub_queues_;
   {
     auto& sq = sub_queues_[idx];
     std::lock_guard guard(sq.lock);
     sq.queue[priority].push_back(operation);
-    sq.size.fetch_add(1, std::memory_order_relaxed);
   }
   sema_.signal();
 }
@@ -73,14 +64,8 @@ void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, ui
 WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueOperation() {
   size_t idx_a = tl_rng() % num_sub_queues_;
   size_t idx_b = tl_rng() % num_sub_queues_;
-  if (idx_a == idx_b) {
+  if (idx_b == idx_a) [[unlikely]] {
     idx_b = (idx_b + 1) % num_sub_queues_;
-  }
-
-  bool maybe_has_a = sub_queues_[idx_a].size.load(std::memory_order_relaxed) > 0;
-  bool maybe_has_b = sub_queues_[idx_b].size.load(std::memory_order_relaxed) > 0;
-  if (!maybe_has_a && !maybe_has_b) {
-    return nullptr;
   }
 
   auto pop_one = [](SubQueue& sq) -> TypeErasedOperation* {
@@ -91,7 +76,6 @@ WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueO
     if (fifo.empty()) {
       sq.queue.erase(it);
     }
-    sq.size.fetch_sub(1, std::memory_order_relaxed);
     return op;
   };
 

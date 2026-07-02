@@ -1,13 +1,16 @@
-refer README.md and docs/contents for how to use this framework(ignore files listed in .gitignore, which might be stale)
+# Understanding This Project
 
-refer "How to build from source" part in CONTRIBUTING.md for how to build&test.
+- Refer README.md and docs/contents for how to use this framework(ignore files listed in .gitignore, which might be stale)
+- Refer "How to build from source" part in CONTRIBUTING.md for how to build&test.
 
-when refactoring, do not remove original comments unless they are stale.
+# Editing Guidelines
+
+- When editing code, try best to keep original comments unless they are stale.
 
 # Debugging
 
-- when debugging tests, do not simplify the test code unless you are very confident the test is not correct.
-- prefer adding logs to gather more information before thinking too much.
+- When debugging tests, do not simplify the test code unless you are very confident the test is not correct.
+- Prefer adding logs to gather more information before thinking too much.
 
 # Code Style
 
@@ -20,6 +23,7 @@ Based on Google Style Guide, with the following additions:
 - Don't use placeholder `_` in struct binding. Always use meaningful variable names even it's not used.
 - In maps, when you can't get the key/value meaning from the variable name, add comments like `map</*key_meaning*/KeyType, /*value_meaning*/ValueType/>` for better readability. No "=" sign.
 
-# Pull Request & Commit Message
+# Pull Request Description & Commit Message
 
 - Make the description short and concise so reviewer can quickly understand the changes. don't exceed 50 words. Make the structure compact, no big titles, so it can be directly used as squash merge's commit message.
+

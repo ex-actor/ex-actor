@@ -14,70 +14,126 @@
 
 #include "ex_actor/internal/scheduler/weak_priority_thread_pool.h"
 
-#include "ex_actor/internal/logging.h"
+#include <algorithm>
+#include <random>
+
 #include "ex_actor/internal/platform.h"
 
 namespace ex_actor {
 
-WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, uint32_t priority_upper_bound,
-                                               bool start_workers_immediately)
-    : thread_count_(thread_count), priority_upper_bound_(priority_upper_bound), queues_(priority_upper_bound_) {
-  EXA_THROW_CHECK_GT(priority_upper_bound_, 0U);
-  if (thread_count > 0 && start_workers_immediately) {
-    StartWorkers();
-  }
-}
+namespace {
 
-void WeakPriorityThreadPool::StartWorkers() {
+thread_local std::minstd_rand tl_rng {std::random_device {}()};
+
+}  // namespace
+
+WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues)
+    : thread_count_(thread_count),
+      num_sub_queues_(std::max<size_t>(2, num_sub_queues == 0 ? thread_count / 2 : num_sub_queues)),
+      sub_queues_(num_sub_queues_) {
   for (size_t i = 0; i < thread_count_; ++i) {
     workers_.emplace_back([this](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token); });
   }
 }
 
 void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, uint32_t priority) {
-  EXA_THROW_CHECK_LT(priority, priority_upper_bound_);
   if (owning_pool_ == this) {
-    if (local_slot_.op == nullptr) {
-      local_slot_ = {.op = operation, .priority = priority};
+    if (local_slot_ == nullptr) {
+      local_slot_ = operation;
+      local_slot_priority_ = priority;
       return;
     }
-    if (priority < local_slot_.priority) {
-      auto evicted = local_slot_;
-      local_slot_ = {.op = operation, .priority = priority};
-      operation = evicted.op;
-      priority = evicted.priority;
+    if (priority < local_slot_priority_) {
+      auto* evicted = local_slot_;
+      uint32_t evicted_priority = local_slot_priority_;
+      local_slot_ = operation;
+      local_slot_priority_ = priority;
+      operation = evicted;
+      priority = evicted_priority;
     }
   }
-  uint32_t queue_index = priority;
-  queues_[queue_index].enqueue(operation);
+  size_t idx_a = tl_rng() % num_sub_queues_;
+  size_t idx_b = tl_rng() % num_sub_queues_;
+  if (idx_a == idx_b) {
+    idx_b = (idx_b + 1) % num_sub_queues_;
+  }
+  size_t idx =
+      sub_queues_[idx_a].size.load(std::memory_order_relaxed) <= sub_queues_[idx_b].size.load(std::memory_order_relaxed)
+          ? idx_a
+          : idx_b;
+  {
+    auto& sq = sub_queues_[idx];
+    std::lock_guard guard(sq.lock);
+    sq.queue[priority].push_back(operation);
+    sq.size.fetch_add(1, std::memory_order_relaxed);
+  }
   sema_.signal();
+}
+
+WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueOperation() {
+  size_t idx_a = tl_rng() % num_sub_queues_;
+  size_t idx_b = tl_rng() % num_sub_queues_;
+  if (idx_a == idx_b) {
+    idx_b = (idx_b + 1) % num_sub_queues_;
+  }
+
+  bool maybe_has_a = sub_queues_[idx_a].size.load(std::memory_order_relaxed) > 0;
+  bool maybe_has_b = sub_queues_[idx_b].size.load(std::memory_order_relaxed) > 0;
+  if (!maybe_has_a && !maybe_has_b) {
+    return nullptr;
+  }
+
+  auto pop_one = [](SubQueue& sq) -> TypeErasedOperation* {
+    auto it = sq.queue.begin();
+    auto& fifo = it->second;
+    TypeErasedOperation* op = fifo.front();
+    fifo.pop_front();
+    if (fifo.empty()) {
+      sq.queue.erase(it);
+    }
+    sq.size.fetch_sub(1, std::memory_order_relaxed);
+    return op;
+  };
+
+  std::scoped_lock guard(sub_queues_[idx_a].lock, sub_queues_[idx_b].lock);
+
+  bool has_a = !sub_queues_[idx_a].queue.empty();
+  bool has_b = !sub_queues_[idx_b].queue.empty();
+  if (has_a && has_b) {
+    uint32_t pri_a = sub_queues_[idx_a].queue.begin()->first;
+    uint32_t pri_b = sub_queues_[idx_b].queue.begin()->first;
+    return pop_one(pri_a <= pri_b ? sub_queues_[idx_a] : sub_queues_[idx_b]);
+  }
+  if (has_a) {
+    return pop_one(sub_queues_[idx_a]);
+  }
+  if (has_b) {
+    return pop_one(sub_queues_[idx_b]);
+  }
+  return nullptr;
 }
 
 void WeakPriorityThreadPool::WorkerThreadLoop(const std::stop_token& stop_token) {
   internal::SetThreadName("weak_pri_worker");
   owning_pool_ = this;
+
   while (!stop_token.stop_requested()) {
     if (!sema_.wait(static_cast<int64_t>(10) * 1000)) {
       continue;
     }
+
     TypeErasedOperation* operation = nullptr;
-    for (auto& queue : queues_) {
-      if (queue.try_dequeue(operation)) {
-        break;
-      }
+    while (operation == nullptr) {
+      operation = TryDequeueOperation();
     }
-    // ConcurrentQueue::try_dequeue uses size_approx() (relaxed loads) as a heuristic and
-    // can return false even when an item exists. Re-signal to preserve the permit so a
-    // subsequent Pop attempt will find the item.
-    if (operation == nullptr) {
-      sema_.signal();
-      continue;
-    }
+
     operation->Execute();
-    while (local_slot_.op != nullptr) {
-      operation = local_slot_.op;
-      local_slot_.op = nullptr;
-      operation->Execute();
+    // Immediately execute any task that was placed in the local slot
+    // during Execute() (successor task from the same DAG chain).
+    while (local_slot_ != nullptr) {
+      auto* op = local_slot_;
+      local_slot_ = nullptr;
+      op->Execute();
     }
   }
   owning_pool_ = nullptr;

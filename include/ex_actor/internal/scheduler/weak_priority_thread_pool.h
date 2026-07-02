@@ -14,11 +14,15 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <deque>
+#include <map>
+#include <mutex>
 #include <thread>
 #include <vector>
 
-#include "ex_actor/3rd_lib/moody_camel_queue/concurrentqueue.h"
+#include "ex_actor/3rd_lib/moody_camel_queue/concurrentqueue.h"  // IWYU pragma: keep
 #include "ex_actor/3rd_lib/moody_camel_queue/lightweightsemaphore.h"
 #include "ex_actor/internal/actor_config.h"
 #include "ex_actor/internal/scheduler/shared/scheduler_operation.h"
@@ -26,17 +30,14 @@
 
 namespace ex_actor {
 
-/// A high-performance lock-free priority thread pool, but with the following constraints:
-///   1. priority level is limited, must be specified at construction time
-///   2. priority is only a hint, not a strict guarantee
+/// A sharded thread pool with best-effort (non-strict) priority, using "power of two choices":
+///   - Push: randomly pick 2 sub-queues, enqueue to the less loaded one
+///   - Pop: randomly pick 2 sub-queues, peek their tops, take the higher-priority item
 class WeakPriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
-  explicit WeakPriorityThreadPool(size_t thread_count, uint32_t priority_upper_bound,
-                                  bool start_workers_immediately = true);
-
-  void StartWorkers();
+  explicit WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues = 0);
 
   template <ex::receiver R>
   struct Operation : internal::SchedulerOperationBase<WeakPriorityThreadPool, R> {
@@ -58,20 +59,23 @@ class WeakPriorityThreadPool {
   void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0);
 
  private:
+  struct alignas(128) SubQueue {
+    std::mutex lock;
+    std::map<uint32_t, std::deque<TypeErasedOperation*>> queue;
+    std::atomic<size_t> size {0};
+  };
+
   size_t thread_count_;
-  uint32_t priority_upper_bound_;
-  std::vector<embedded_3rd::moodycamel::ConcurrentQueue<TypeErasedOperation*>> queues_;
+  size_t num_sub_queues_;
+  std::vector<SubQueue> sub_queues_;
   embedded_3rd::moodycamel::LightweightSemaphore sema_;
   std::vector<std::jthread> workers_;
-
-  struct LocalSlot {
-    TypeErasedOperation* op;
-    uint32_t priority;
-  };
-  inline static thread_local LocalSlot local_slot_ = {.op = nullptr, .priority = 0};
+  inline static thread_local TypeErasedOperation* local_slot_ = nullptr;
+  inline static thread_local uint32_t local_slot_priority_ = 0;
   inline static thread_local WeakPriorityThreadPool* owning_pool_ = nullptr;
 
   void WorkerThreadLoop(const std::stop_token& stop_token);
+  TypeErasedOperation* TryDequeueOperation();
 };
 
 }  // namespace ex_actor

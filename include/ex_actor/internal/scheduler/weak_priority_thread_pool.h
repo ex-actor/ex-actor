@@ -16,10 +16,8 @@
 
 #include <array>
 #include <atomic>
-#include <bit>
 #include <cstdint>
 #include <mutex>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 

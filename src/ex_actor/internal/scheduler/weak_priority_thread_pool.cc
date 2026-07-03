@@ -15,7 +15,9 @@
 #include "ex_actor/internal/scheduler/weak_priority_thread_pool.h"
 
 #include <algorithm>
+#include <bit>
 #include <random>
+#include <stdexcept>
 
 #include "ex_actor/internal/platform.h"
 
@@ -67,7 +69,7 @@ void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, ui
     auto& sq = sub_queues_[idx];
     std::lock_guard guard(sq.lock);
     sq.slots[priority].push_back(operation);
-    sq.bitmap.fetch_or(uint64_t{1} << priority, std::memory_order_relaxed);
+    sq.bitmap.fetch_or(uint64_t {1} << priority, std::memory_order_relaxed);
   }
   sema_.signal();
 }
@@ -81,13 +83,13 @@ WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueO
 
   uint64_t bm_a = sub_queues_[idx_a].bitmap.load(std::memory_order_relaxed);
   uint64_t bm_b = sub_queues_[idx_b].bitmap.load(std::memory_order_relaxed);
-  if (!bm_a && !bm_b) {
+  if (bm_a == 0 && bm_b == 0) {
     return nullptr;
   }
 
   size_t first = idx_a;
   size_t second = idx_b;
-  if (!bm_a || (bm_b && std::countr_zero(bm_b) < std::countr_zero(bm_a))) {
+  if (bm_a == 0 || (bm_b != 0 && std::countr_zero(bm_b) < std::countr_zero(bm_a))) {
     first = idx_b;
     second = idx_a;
   }
@@ -95,7 +97,7 @@ WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueO
   auto try_pop = [](SubQueue& sq) -> TypeErasedOperation* {
     std::lock_guard guard(sq.lock);
     uint64_t bm = sq.bitmap.load(std::memory_order_relaxed);
-    if (!bm) {
+    if (bm == 0) {
       return nullptr;
     }
     size_t pri = std::countr_zero(bm);
@@ -103,13 +105,13 @@ WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueO
     TypeErasedOperation* op = slot.back();
     slot.pop_back();
     if (slot.empty()) {
-      sq.bitmap.fetch_and(~(uint64_t{1} << pri), std::memory_order_relaxed);
+      sq.bitmap.fetch_and(~(uint64_t {1} << pri), std::memory_order_relaxed);
     }
     return op;
   };
 
   TypeErasedOperation* op = try_pop(sub_queues_[first]);
-  if (op) {
+  if (op != nullptr) {
     return op;
   }
   return try_pop(sub_queues_[second]);

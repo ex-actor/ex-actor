@@ -15,7 +15,6 @@
 #include "ex_actor/internal/scheduler/weak_priority_thread_pool.h"
 
 #include <algorithm>
-#include <bit>
 #include <random>
 
 #include "ex_actor/internal/platform.h"
@@ -68,8 +67,7 @@ void WeakPriorityThreadPool::EnqueueOperation(TypeErasedOperation* operation, ui
     auto& sq = sub_queues_[idx];
     std::lock_guard guard(sq.lock);
     sq.slots[priority].push_back(operation);
-    sq.bitmap.store(sq.bitmap.load(std::memory_order_relaxed) | (uint64_t{1} << priority),
-                    std::memory_order_release);
+    sq.bitmap.fetch_or(uint64_t{1} << priority, std::memory_order_relaxed);
   }
   sema_.signal();
 }
@@ -81,23 +79,17 @@ WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueO
     idx_b = (idx_b + 1) % num_sub_queues_;
   }
 
-  // Speculative bitmap read (no lock) to pick the better queue.
-  uint64_t bm_a = sub_queues_[idx_a].bitmap.load(std::memory_order_acquire);
-  uint64_t bm_b = sub_queues_[idx_b].bitmap.load(std::memory_order_acquire);
+  uint64_t bm_a = sub_queues_[idx_a].bitmap.load(std::memory_order_relaxed);
+  uint64_t bm_b = sub_queues_[idx_b].bitmap.load(std::memory_order_relaxed);
+  if (!bm_a && !bm_b) {
+    return nullptr;
+  }
 
-  // Order: try the queue with better (lower) top priority first.
   size_t first = idx_a;
   size_t second = idx_b;
-  if (bm_a && bm_b) {
-    if (std::countr_zero(bm_b) < std::countr_zero(bm_a)) {
-      first = idx_b;
-      second = idx_a;
-    }
-  } else if (bm_b) {
+  if (!bm_a || (bm_b && std::countr_zero(bm_b) < std::countr_zero(bm_a))) {
     first = idx_b;
     second = idx_a;
-  } else if (!bm_a) {
-    return nullptr;
   }
 
   auto try_pop = [](SubQueue& sq) -> TypeErasedOperation* {
@@ -111,7 +103,7 @@ WeakPriorityThreadPool::TypeErasedOperation* WeakPriorityThreadPool::TryDequeueO
     TypeErasedOperation* op = slot.back();
     slot.pop_back();
     if (slot.empty()) {
-      sq.bitmap.store(bm & ~(uint64_t{1} << pri), std::memory_order_release);
+      sq.bitmap.fetch_and(~(uint64_t{1} << pri), std::memory_order_relaxed);
     }
     return op;
   };

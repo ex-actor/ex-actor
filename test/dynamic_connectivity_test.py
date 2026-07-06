@@ -10,9 +10,13 @@ CLUSTER_SIZE = 8
 def clear_nodes(node_list):
     for node in node_list:
         if node.poll() is None:
-            node.kill()
+            node.terminate()
     for node in node_list:
-        node.wait()
+        try:
+            node.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            node.kill()
+            node.wait()
 
 
 def check_nodes(node_list, timeout=15):

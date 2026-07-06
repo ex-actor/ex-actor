@@ -62,10 +62,9 @@ if not node0_found_peer or not node1_found_peer:
     with open(log_file.name, "r") as f:
         print("=== node1 log ===", flush=True)
         print(f.read(), end="", flush=True)
-    node0.kill()
-    node0.wait()
-    node1.kill()
-    node1.wait()
+    for n in [node0, node1]:
+        n.kill()
+        n.wait()
     os.unlink(log_file0.name)
     os.unlink(log_file.name)
     sys.exit(1)
@@ -86,10 +85,9 @@ if not ping_started:
     with open(log_file.name, "r") as f:
         print("=== node1 log ===", flush=True)
         print(f.read(), end="", flush=True)
-    node0.kill()
-    node0.wait()
-    node1.kill()
-    node1.wait()
+    for n in [node0, node1]:
+        n.kill()
+        n.wait()
     os.unlink(log_file0.name)
     os.unlink(log_file.name)
     sys.exit(1)
@@ -132,6 +130,10 @@ if not death_detected or not exception_caught:
     sys.exit(1)
 
 print("SUCCESS: node1 detected node0's death and caught ConnectionLost", flush=True)
-node1.kill()
-node1.wait()
+node1.terminate()
+try:
+    node1.wait(timeout=5)
+except subprocess.TimeoutExpired:
+    node1.kill()
+    node1.wait()
 os.unlink(log_file.name)

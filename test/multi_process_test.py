@@ -23,11 +23,19 @@ node1 = subprocess.Popen([argv[1], ADDR1, "node1", "node0", ADDR0], stdout=log_f
 log_file1.close()
 
 
-def cleanup(kill=True):
+def cleanup(graceful=True):
     for node in [node0, node1]:
-        if kill:
+        if node.poll() is None:
+            if graceful:
+                node.terminate()
+            else:
+                node.kill()
+    for node in [node0, node1]:
+        try:
+            node.wait(timeout=5)
+        except subprocess.TimeoutExpired:
             node.kill()
-        node.wait()
+            node.wait()
     for path in [log_file0.name, log_file1.name]:
         os.unlink(path)
 
@@ -40,7 +48,7 @@ def check_exit_codes():
             for path in [log_file0.name, log_file1.name]:
                 with open(path, "r") as f:
                     print(f.read(), end="", flush=True)
-            cleanup(kill=True)
+            cleanup(graceful=False)
             sys.exit(1)
 
 
@@ -70,8 +78,8 @@ if not all(done):
         print(f"--- node{i} log ---", flush=True)
         with open(path, "r") as f:
             print(f.read(), end="", flush=True)
-    cleanup(kill=True)
+    cleanup(graceful=False)
     sys.exit(1)
 
 print("SUCCESS: both nodes completed work", flush=True)
-cleanup(kill=True)
+cleanup(graceful=True)

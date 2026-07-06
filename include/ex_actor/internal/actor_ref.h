@@ -323,9 +323,9 @@ struct Parser<capnproto::ReaderWithContext<ex_actor::internal::ActorRefSerdeCont
       return Unexpected {parse_res.error()};
     }
     auto actor_ref = parse_res.value();
-    const auto& info = reader.info;
-    actor_ref.SetLocalRuntimeInfo(info.this_node_id, actor_ref.GetActorTypeHash(),
-                                  info.actor_look_up_fn(actor_ref.GetActorId()), info.broker_actor_ref);
+    const auto& ctx = reader.ctx;
+    actor_ref.SetLocalRuntimeInfo(ctx.this_node_id, actor_ref.GetActorTypeHash(),
+                                  ctx.actor_look_up_fn(actor_ref.GetActorId()), ctx.broker_actor_ref);
 
     return actor_ref;
   }

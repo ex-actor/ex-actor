@@ -104,19 +104,19 @@ ByteBuffer ActorRegistryBackend::SerializeReply(const NetworkReply& reply) { ret
 void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, ByteBuffer& reply_out) {
   try {
     auto handler = RemoteActorRequestHandlerRegistry::GetInstance().GetRemoteActorCreationHandler(msg.handler_key);
-    ActorRefSerdeContext info {.this_node_id = this_node_id_,
-                               .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
-                                 if (actor_id_to_actor_.contains(actor_id)) {
-                                   return actor_id_to_actor_.at(actor_id).get();
-                                 }
-                                 return nullptr;
-                               },
-                               .broker_actor_ref = broker_actor_ref_};
+    ActorRefSerdeContext serde_ctx {.this_node_id = this_node_id_,
+                                    .actor_look_up_fn = [&](uint64_t actor_id) -> TypeErasedActor* {
+                                      if (actor_id_to_actor_.contains(actor_id)) {
+                                        return actor_id_to_actor_.at(actor_id).get();
+                                      }
+                                      return nullptr;
+                                    },
+                                    .broker_actor_ref = broker_actor_ref_};
     uint64_t actor_id = GenerateRandomActorId();
     auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
         .serialized_args = std::move(msg.serialized_args),
         .scheduler = user_actor_scheduler_->Clone(),
-        .actor_ref_serde_ctx = info,
+        .actor_ref_serde_ctx = serde_ctx,
         .actor_id = actor_id});
     if (result.actor_name.has_value()) {
       EXA_THROW_CHECK(!actor_name_to_id_.contains(result.actor_name.value()))
@@ -150,19 +150,19 @@ ex::task<ByteBuffer> ActorRegistryBackend::HandleActorMethodCallRequest(ActorMet
   }
 
   EXA_THROW_CHECK(handler != nullptr);
-  ActorRefSerdeContext info {.this_node_id = this_node_id_,
-                             .actor_look_up_fn = [&](uint64_t aid) -> TypeErasedActor* {
-                               if (actor_id_to_actor_.contains(aid)) {
-                                 return actor_id_to_actor_.at(aid).get();
-                               }
-                               return nullptr;
-                             },
-                             .broker_actor_ref = broker_actor_ref_};
+  ActorRefSerdeContext serde_ctx {.this_node_id = this_node_id_,
+                                  .actor_look_up_fn = [&](uint64_t aid) -> TypeErasedActor* {
+                                    if (actor_id_to_actor_.contains(aid)) {
+                                      return actor_id_to_actor_.at(aid).get();
+                                    }
+                                    return nullptr;
+                                  },
+                                  .broker_actor_ref = broker_actor_ref_};
   try {
     auto task = handler(RemoteActorRequestHandlerRegistry::RemoteActorMethodCallHandlerContext {
         .actor = actor_id_to_actor_.at(msg.actor_id).get(),
         .serialized_args = std::move(msg.serialized_args),
-        .actor_ref_serde_ctx = info,
+        .actor_ref_serde_ctx = serde_ctx,
         .mailbox_index = msg.mailbox_index});
     auto reply = co_await std::move(task);
     co_return SerializeReply(reply);

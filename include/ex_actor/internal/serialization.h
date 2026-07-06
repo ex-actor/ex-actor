@@ -38,8 +38,8 @@ namespace capnproto {
 template <class Ctx>
 class ReaderWithContext : public Reader {
  public:
-  const Ctx& info;
-  explicit ReaderWithContext(const Ctx& info) : info(info) {}
+  const Ctx& ctx;
+  explicit ReaderWithContext(const Ctx& ctx) : ctx(ctx) {}
 
   template <class VariantType, class UnionReaderType>
   Result<VariantType> read_union(const InputUnionType& u) const noexcept {

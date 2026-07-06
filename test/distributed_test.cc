@@ -1,10 +1,15 @@
 #include <algorithm>
+#include <array>
 #include <barrier>
 #include <exception>
+#include <list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <variant>
 #include <vector>
 
 #include <gmock/gmock-matchers.h>
@@ -67,6 +72,16 @@ class Error {
 };
 EXA_REMOTE(&Error::Create);
 
+class Echoer;
+
+struct ComplexContainers {
+  std::list<ex_actor::ActorRef<Echoer>> list_refs;
+  std::array<ex_actor::ActorRef<Echoer>, 1> array_refs;
+  std::map<std::string, ex_actor::ActorRef<Echoer>> map_refs;
+  std::tuple<ex_actor::ActorRef<Echoer>, int> tuple_refs;
+  std::variant<ex_actor::ActorRef<Echoer>, std::string> variant_refs;
+};
+
 class Echoer {
  public:
   static Echoer Create() { return Echoer(); }
@@ -89,8 +104,17 @@ class Echoer {
     }
     co_return strs;
   }
+
+  ex_actor::ActorRef<Echoer> ReturnActorRef(ex_actor::ActorRef<Echoer> ref) { return ref; }
+
+  std::vector<ex_actor::ActorRef<Echoer>> ReturnActorRefVector(std::vector<ex_actor::ActorRef<Echoer>> refs) {
+    return refs;
+  }
+
+  ComplexContainers ReturnComplexContainers(ComplexContainers container) { return container; }
 };
-EXA_REMOTE(&Echoer::Create, &Echoer::Echo, &Echoer::Proxy, &Echoer::ProxyTwoActor);
+EXA_REMOTE(&Echoer::Create, &Echoer::Echo, &Echoer::Proxy, &Echoer::ProxyTwoActor, &Echoer::ReturnActorRef,
+           &Echoer::ReturnActorRefVector, &Echoer::ReturnComplexContainers);
 
 struct ProxyEchoer {
   ex_actor::ActorRef<Echoer> echoer;
@@ -534,4 +558,89 @@ TEST(DistributedTest, NonMovableActorCompiles) {
   [[maybe_unused]] auto unused = [](ex_actor::ActorRegistry& registry) {
     return registry.Spawn<&NonMovableActor::Create>(/*name=*/"Bob").ToNode(0);
   };
+}
+
+TEST(DistributedTest, RemoteMethodReturnsActorRefTest) {
+  std::barrier bar {2};
+  auto node_main = [&bar](size_t index) -> stdexec::task<void> {
+    ex_actor::WorkSharingThreadPool thread_pool(4);
+    std::vector<std::string> addresses = {"tcp://127.0.0.1:5301", "tcp://127.0.0.1:5302"};
+    ex_actor::ClusterConfig cluster_config {
+        .listen_address = addresses.at(index),
+        .contact_node_address = (index == 0) ? "" : addresses.at(0),
+        .network_config = {.heartbeat_timeout_ms = 5000},
+    };
+    ex_actor::ActorRegistry registry(thread_pool.GetScheduler());
+    co_await registry.StartOrJoinCluster(cluster_config);
+
+    auto [cluster_state, condition_met] =
+        co_await registry.WaitClusterState([](const auto& state) { return state.nodes.size() >= 2; },
+                                           /*timeout_ms=*/5000);
+    EXPECT_TRUE(condition_met);
+    if (!condition_met) {
+      bar.arrive_and_wait();
+      co_return;
+    }
+
+    std::string remote_address = addresses.at(1 - index);
+    auto it = std::ranges::find_if(cluster_state.nodes, [&](const auto& n) { return n.address == remote_address; });
+    auto remote_node_id = it->node_id;
+
+    auto local_actor = co_await registry.Spawn<Echoer>();
+    auto remote_actor = co_await registry.Spawn<&Echoer::Create>().ToNode(remote_node_id);
+
+    // Call remote method that returns an ActorRef.
+    // If the bug exists, the deserialization of the return value in actor_ref.h will not pass
+    // the context, so the returned ActorRef's broker_actor_ref_ will be empty, making it broken.
+    auto returned_ref = co_await remote_actor.Send<&Echoer::ReturnActorRef>(remote_actor);
+
+    // Let's try sending a message to the returned_ref.
+    // Since it's fixed, it should succeed.
+    auto reply = co_await returned_ref.Send<&Echoer::Echo>("test");
+    EXPECT_EQ(reply, "test");
+
+    // Now test std::vector<ActorRef>
+    std::vector<ex_actor::ActorRef<Echoer>> vec = {remote_actor};
+    auto returned_vec = co_await remote_actor.Send<&Echoer::ReturnActorRefVector>(vec);
+    EXPECT_EQ(returned_vec.size(), 1);
+
+    auto reply_vec = co_await returned_vec[0].Send<&Echoer::Echo>("test");
+    EXPECT_EQ(reply_vec, "test");
+
+    // Now test ComplexContainers (std::list, std::array, std::map, std::tuple, std::variant)
+    ComplexContainers container;
+    container.list_refs.push_back(remote_actor);
+    container.array_refs[0] = remote_actor;
+    container.map_refs["test_key"] = remote_actor;
+    container.tuple_refs = std::make_tuple(remote_actor, 123);
+    container.variant_refs = remote_actor;
+
+    auto returned_container = co_await remote_actor.Send<&Echoer::ReturnComplexContainers>(container);
+
+    // Verify list element
+    auto reply_list = co_await returned_container.list_refs.front().Send<&Echoer::Echo>("test_list");
+    EXPECT_EQ(reply_list, "test_list");
+
+    // Verify array element
+    auto reply_array = co_await returned_container.array_refs[0].Send<&Echoer::Echo>("test_array");
+    EXPECT_EQ(reply_array, "test_array");
+
+    // Verify map element
+    auto reply_map = co_await returned_container.map_refs.at("test_key").Send<&Echoer::Echo>("test_map");
+    EXPECT_EQ(reply_map, "test_map");
+
+    // Verify tuple element
+    auto reply_tuple = co_await std::get<0>(returned_container.tuple_refs).Send<&Echoer::Echo>("test_tuple");
+    EXPECT_EQ(reply_tuple, "test_tuple");
+
+    // Verify variant element
+    auto reply_variant = co_await std::get<ex_actor::ActorRef<Echoer>>(returned_container.variant_refs)
+                             .Send<&Echoer::Echo>("test_variant");
+    EXPECT_EQ(reply_variant, "test_variant");
+
+    bar.arrive_and_wait();
+  };
+
+  std::jthread node_0([&] { stdexec::sync_wait(node_main(0)); });
+  std::jthread node_1([&] { stdexec::sync_wait(node_main(1)); });
 }

@@ -30,6 +30,13 @@
 #include "ex_actor/internal/util.h"
 
 namespace ex_actor::internal {
+
+struct ActorRefSerdeContext {
+  uint64_t this_node_id = 0;
+  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
+  BasicActorRef<MessageBroker> broker_actor_ref;
+};
+
 template <class UserClass>
 class ActorRef : public BasicActorRef<UserClass> {
  public:
@@ -184,8 +191,12 @@ class ActorRef : public BasicActorRef<UserClass> {
     }};
 
     return broker_actor_ref_.template SendLocal<&MessageBroker::SendRequest>(node_id_, Serialize(request)) |
-           ex::then([node_id = node_id_](ByteBuffer response_buf) -> UnwrappedType {
-             auto reply = Deserialize<NetworkReply>(std::move(response_buf));
+           ex::then([node_id = node_id_, this_node_id = this_node_id_,
+                     broker = broker_actor_ref_](ByteBuffer response_buf) -> UnwrappedType {
+             ActorRefSerdeContext context {.this_node_id = this_node_id,
+                                           .actor_look_up_fn = [](uint64_t) -> TypeErasedActor* { return nullptr; },
+                                           .broker_actor_ref = broker};
+             auto reply = Deserialize<NetworkReply>(std::move(response_buf), context);
              auto& ret = std::get<ActorMethodCallReply>(reply.variant);
              if (!ret.success) {
                EXA_THROW << "Got error from remote actor on node " << node_id << ": " << ret.error;
@@ -193,7 +204,7 @@ class ActorRef : public BasicActorRef<UserClass> {
              if constexpr (std::is_void_v<UnwrappedType>) {
                return;
              } else {
-               auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(ret.serialized_result);
+               auto res = Deserialize<ActorMethodReturnValue<UnwrappedType>>(ret.serialized_result, context);
                return std::move(res.return_value);
              }
            });
@@ -260,14 +271,6 @@ struct hash<ex_actor::ActorRef<UserClass>> {
 // ==============================
 // rfl serialization support
 // ==============================
-
-namespace ex_actor::internal {
-struct ActorRefSerdeContext {
-  uint64_t this_node_id = 0;
-  std::function<TypeErasedActor*(uint64_t)> actor_look_up_fn;
-  BasicActorRef<MessageBroker> broker_actor_ref;
-};
-}  // namespace ex_actor::internal
 
 namespace rfl {
 template <typename U>

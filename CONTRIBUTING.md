@@ -42,7 +42,8 @@ This project requires C++20. The following compilers are tested in CI:
 ```bash
 cd ex-actor
 
-# Generate the build directory (requires python3 and CMake)
+# Generate the build directory (requires python3, CMake and Ninja)
+# It might take several minutes at first time, mostly on downloading dependencies from GitHub.
 # If it fails or blocks due to network issues, just retry it.
 # Previously downloaded dependencies are kept in ~/.cache/CPM, so they won't be downloaded again.
 python3 scripts/regen_build_dir.py

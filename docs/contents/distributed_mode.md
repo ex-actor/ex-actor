@@ -109,7 +109,7 @@ The process will block on `ex_actor::WaitOsExitSignal()`. You should kill them m
 
 ## Fault tolerance
 
-When a node can't be reached by any node in the cluster, it's considered dead, all in-flight remote calls will throw `ex_actor::NetworkError`, by catching this exception you can handle the failure gracefully. (`ex_actor::ConnectionLost` is a type alias kept for backward compatibility.)
+We use heartbeat mechanism to detect node failures, if a node hasn't been heard from for a long time, it's considered dead, all in-flight remote calls will throw `ex_actor::NetworkError`, by catching this exception you can handle the failure gracefully.
 
 ```cpp
 try {

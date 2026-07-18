@@ -54,5 +54,10 @@ inline const uint64_t kDefaultHeartbeatCheckIntervalMs = GetEnv<uint64_t>("EXA_H
 inline const uint64_t kDefaultWaiterExpirationCheckIntervalMs =
     GetEnv<uint64_t>("EXA_WAITER_EXPIRATION_CHECK_INTERVAL_MS", 100);
 
+/// -1: wait indefinitely for queued messages to be sent (Infinite Linger).
+///  0: discard all queued messages immediately and close without blocking (No Linger).
+/// >0: wait up to the specified milliseconds before discarding.
+inline const int kDefaultSocketLingerMs = GetEnv<int>("EXA_SOCKET_LINGER_MS", 1000);
+
 }  // namespace internal
 }  // namespace ex_actor

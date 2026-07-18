@@ -198,6 +198,9 @@ ex::task<void> MessageBroker::Stop() {
   // Without this, the member destructor ordering (sockets destroyed before context)
   // leaves a window where the IO thread is still processing pending message metadata
   // while the main thread frees those resources, causing a data race.
+  for (auto& [node_id, socket] : node_id_to_send_socket_) {
+    socket.set(zmq::sockopt::linger, 0);
+  }
   node_id_to_send_socket_.clear();
   contact_node_send_socket_.close();
   recv_socket_puller_.reset();
@@ -387,7 +390,7 @@ void MessageBroker::StartPeriodicalTaskScheduler() {
 
 void MessageBroker::ConnectContactSendSocket() {
   contact_node_send_socket_ = zmq::socket_t(zmq_context_, zmq::socket_type::dealer);
-  contact_node_send_socket_.set(zmq::sockopt::linger, 0);
+  contact_node_send_socket_.set(zmq::sockopt::linger, kDefaultSocketLingerMs);
   contact_node_send_socket_.set(zmq::sockopt::sndhwm, 0);
   contact_node_send_socket_.connect(cluster_config_.contact_node_address);
   contact_node_send_socket_last_build_ms_ = GetTimeMs();
@@ -442,7 +445,7 @@ void MessageBroker::OnNodeAlive(uint64_t node_id) {
 
   // Create send socket
   auto& socket = (node_id_to_send_socket_[new_node.node_id] = zmq::socket_t(zmq_context_, zmq::socket_type::dealer));
-  socket.set(zmq::sockopt::linger, 0);
+  socket.set(zmq::sockopt::linger, kDefaultSocketLingerMs);
   socket.set(zmq::sockopt::sndhwm, 0);
   socket.connect(new_node.address);
 

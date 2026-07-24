@@ -790,10 +790,10 @@
 // clang-format off
 #define EX_ACTOR_ABSL_REQUIRE_EXPLICIT_INIT \
   [[clang::require_explicit_initialization]] = \
-    AbslInternal_YouForgotToExplicitlyInitializeAField::v
+    ExActorInternal_YouForgotToExplicitlyInitializeAField::v
 #else
 #define EX_ACTOR_ABSL_REQUIRE_EXPLICIT_INIT \
-  = AbslInternal_YouForgotToExplicitlyInitializeAField::v
+  = ExActorInternal_YouForgotToExplicitlyInitializeAField::v
 #endif
 // clang-format on
 #else
@@ -809,7 +809,7 @@
 #endif
 
 #ifdef __cplusplus
-struct AbslInternal_YouForgotToExplicitlyInitializeAField {
+struct ExActorInternal_YouForgotToExplicitlyInitializeAField {
   // A portable version of [[clang::require_explicit_initialization]] that
   // never builds, as a last resort for all toolchains.
   // The error messages are poor, so we don't rely on this unless we have to.
@@ -828,7 +828,7 @@ struct AbslInternal_YouForgotToExplicitlyInitializeAField {
     }
   }
   // This is deliberately left undefined to prevent linking
-  static AbslInternal_YouForgotToExplicitlyInitializeAField v;
+  static ExActorInternal_YouForgotToExplicitlyInitializeAField v;
 };
 #endif
 

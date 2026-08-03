@@ -5,9 +5,9 @@ module(
 
 bazel_dep(name = "rules_foreign_cc", version = "0.15.0")
 bazel_dep(name = "rules_cc", version = "0.2.3")
-bazel_dep(name = "libzmq", version = "4.3.5.bcr.4")
+bazel_dep(name = "libzmq", version = "4.3.5.bcr.4", repo_name = "com_libzmq")
 bazel_dep(name = "capnp-cpp", version = "1.1.0")
-bazel_dep(name = "spdlog", version = "1.16.0.bcr.1")
-bazel_dep(name = "reflect-cpp", version = "30e9b927c2c8309fe12e0b1450816420422701f9")
-bazel_dep(name = "stdexec", version = "73559e8963dab7a4ece32ede22f6472c9a815032")
+bazel_dep(name = "spdlog", version = "1.16.0.bcr.1", repo_name = "com_spdlog")
+bazel_dep(name = "reflect-cpp", version = "30e9b927c2c8309fe12e0b1450816420422701f9", repo_name = "com_github_getml_reflect_cpp")
+bazel_dep(name = "stdexec", version = "73559e8963dab7a4ece32ede22f6472c9a815032", repo_name = "com_stdexec")
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2")

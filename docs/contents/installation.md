@@ -1,5 +1,7 @@
 # Installation
 
+If you have no existing project, only want to build ex_actor itself, see [contribution](/ex-actor/contributing/#how-to-build-from-source) page.
+
 ## Supported Compilers
 
 This project requires C++20. The following compilers are tested in CI:
@@ -10,9 +12,10 @@ This project requires C++20. The following compilers are tested in CI:
 | Clang    | 16 - 18         |
 | MSVC     | 14.50 / `_MSC_VER` 1950 (VS 2026) |
 
-!!! warning "Caution: GCC < 13 has a compiler bug"
+!!! warning "Caution: GCC < 13 has a compiler bug, needs special workaround to use"
 
     GCC versions before 13 have a coroutine bug that causes **double-free errors** when a temporary containing heap-allocated fields (e.g. `std::string`) is used as a direct initializer in a `co_await` expression. This affects any API argument like structs passed to `Send()` or `Spawn()`. See [Known Issues](#known-issues-gcc-before-13) for details and workarounds.
+
 
 ## CMake Projects
 
@@ -44,11 +47,13 @@ target_link_libraries(main ex_actor::ex_actor)
 
 ```
 
-!!! Note
+!!! Note "Set CPM cache dir to mitigate network issue"
+    The download process might take several minutes at first time.
+    If it blocks or fails, just cancel it and retry.
 
-    Highly recommend you to use `CPM_SOURCE_CACHE` env variable to set a cache directory for CPM.cmake,
+    Use `CPM_SOURCE_CACHE` env variable to set a cache directory for CPM to avoid re-downloading,
+    
     e.g. `export CPM_SOURCE_CACHE=$HOME/.cache/CPM`.
-    It's useful when the downloading process fails/blocks due to network issues, and you want to retry again. With this you don't need to download the dependencies again and again.
 
 ### Use legacy install and find_package
 
@@ -195,10 +200,7 @@ Welcome to open an issue to let us know if you have any problem.
 
 GCC versions before 13 have a [coroutine bug](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107288) (duplicate of [bug 101367](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=101367), fixed by [r13-4479](https://gcc.gnu.org/cgit/gcc/commit/?id=58a7b1e354530d)) that causes **double-free errors** when a **temporary object containing heap-allocated data** (e.g. `std::string`) is used as a direct initializer in a `co_await` expression. 
 
-The bug is triggered when a **temporary struct** containing heap-allocated fields appears in a `co_await`-ed expression — regardless of whether the callee takes the argument by value or by const reference.
-
-Any API where a temporary containing heap-allocated fields is passed as an argument to a `co_await`-ed expression can trigger this. You can workaround it by assigning the temporary to a named variable first.
-e.g.:
+**You can workaround it** by assigning the temporary to a named variable first. Here are some examples:
 
 
 ### Send / Spawn
@@ -209,7 +211,7 @@ co_await actor.Send<&MyActor::Process>(MyRequest{.name = "hello"});
 ```
 
 ```cpp
-// GOOD — works on all supported compilers
+// GOOD — works before GCC 13
 MyRequest req{.name = "hello"};
 co_await actor.Send<&MyActor::Process>(std::move(req));
 ```
@@ -222,7 +224,7 @@ auto actor = co_await Spawn<MyActor>().WithConfig({.actor_name = "my_actor"});
 ```
 
 ```cpp
-// GOOD — works on all supported compilers
+// GOOD — works before GCC 13
 ex_actor::ActorConfig config{.actor_name = "my_actor"};
 auto actor = co_await Spawn<MyActor>().WithConfig(config);
 ```
@@ -238,7 +240,7 @@ co_await ex_actor::StartOrJoinCluster(ex_actor::ClusterConfig{
 ```
 
 ```cpp
-// GOOD — works on all supported compilers
+// GOOD — works before GCC 13
 ex_actor::ClusterConfig cluster_config{
     .listen_address = "tcp://127.0.0.1:5301",
     .contact_node_address = "tcp://127.0.0.1:5302",

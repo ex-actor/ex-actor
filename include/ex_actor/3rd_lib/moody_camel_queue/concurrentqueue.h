@@ -1811,13 +1811,16 @@ class ConcurrentQueue {
     inline index_t getTail() const { return tailIndex.load(std::memory_order_relaxed); }
 
    protected:
-    std::atomic<index_t> tailIndex;  // Where to enqueue to next
-    std::atomic<index_t> headIndex;  // Where to dequeue from next
+    // Keep producer-owned metadata off the consumer-written counter cache lines.
+    // Publishing tailIndex still shares data with consumers, but dequeuing must
+    // not invalidate the producer's cached tailIndex or tailBlock.
+    alignas(64) std::atomic<index_t> tailIndex;  // Where to enqueue to next
+    alignas(64) std::atomic<index_t> headIndex;  // Where to dequeue from next
 
     std::atomic<index_t> dequeueOptimisticCount;
     std::atomic<index_t> dequeueOvercommit;
 
-    Block* tailBlock;
+    alignas(64) Block* tailBlock;
 
    public:
     bool isExplicit;

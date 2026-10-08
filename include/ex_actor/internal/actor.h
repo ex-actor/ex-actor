@@ -42,16 +42,36 @@ struct MailboxPushEvent {
 }  // namespace ex_actor
 
 namespace ex_actor::internal {
-struct ActorMessage {
-  virtual ~ActorMessage() = default;
+struct TypeErasedActorMessage {
+  virtual ~TypeErasedActorMessage() = default;
   virtual void Execute() = 0;
+};
+
+template <class Receiver>
+struct ActorMessage : TypeErasedActorMessage {
+  explicit ActorMessage(Receiver receiver) : receiver(std::move(receiver)) {}
+
+  Receiver receiver;
+
+  void Execute() override {
+    auto stoken = ex::get_stop_token(ex::get_env(receiver));
+    if constexpr (ex::unstoppable_token<decltype(stoken)>) {
+      receiver.set_value();
+    } else {
+      if (stoken.stop_requested()) {
+        receiver.set_stopped();
+      } else {
+        receiver.set_value();
+      }
+    }
+  }
 };
 
 class TypeErasedActor {
  public:
   explicit TypeErasedActor(ActorConfig actor_config) : actor_config_(std::move(actor_config)) {}
   virtual ~TypeErasedActor() = default;
-  virtual void PushMessage(ActorMessage* task, size_t mailbox_index) = 0;
+  virtual void PushMessage(TypeErasedActorMessage* task, size_t mailbox_index) = 0;
   virtual ex::task<void> AsyncDestroy() = 0;
   virtual uint64_t GetActorTypeHash() const = 0;
   virtual const std::atomic_size_t& GetPendingMessageCountRef() const = 0;
@@ -111,31 +131,19 @@ struct StdExecSchedulerForActorMessageSubmission : public ex::scheduler_t {
   size_t mailbox_index;
 
   template <class Receiver>
-  struct ActorMessageSubmissionOperation : ActorMessage {
+  struct ActorMessageSubmissionOperation {
     TypeErasedActor* actor;
-    Receiver receiver;
+    ActorMessage<Receiver> actor_message;
     size_t mailbox_index;
     ActorMessageSubmissionOperation(TypeErasedActor* actor, Receiver receiver, size_t mailbox_index)
-        : actor(actor), receiver(std::move(receiver)), mailbox_index(mailbox_index) {}
-    void Execute() override {
-      auto stoken = ex::get_stop_token(ex::get_env(receiver));
-      if constexpr (ex::unstoppable_token<decltype(stoken)>) {
-        receiver.set_value();
-      } else {
-        if (stoken.stop_requested()) {
-          receiver.set_stopped();
-        } else {
-          receiver.set_value();
-        }
-      }
-    }
+        : actor(actor), actor_message(std::move(receiver)), mailbox_index(mailbox_index) {}
     void start() noexcept {
       // According to the standard, the operation state will be alive until the task is executed,
-      // so it's safe to push `this`.
+      // so it's safe to push the address of its `actor_message` member.
       try {
-        actor->PushMessage(this, mailbox_index);
+        actor->PushMessage(&actor_message, mailbox_index);
       } catch (...) {
-        receiver.set_error(std::current_exception());
+        actor_message.receiver.set_error(std::current_exception());
       }
     }
   };
@@ -181,25 +189,26 @@ class MailboxSet {
   explicit MailboxSet(const std::vector<MailboxConfig>& configs) : mailboxes_(configs.empty() ? 1 : configs.size()) {
     if (configs.empty()) {
       // Per ActorConfig::mailbox_configs contract: empty means one default UnboundedMailbox.
-      mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<ActorMessage*>>);
+      mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<TypeErasedActorMessage*>>);
       return;
     }
     for (const auto& cfg : configs) {
       std::visit(
           [&]<class T>(const T& mailbox_cfg) {
             if constexpr (std::is_same_v<T, UnboundedMailbox>) {
-              mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<ActorMessage*>>);
+              mailboxes_.EmplaceBack(std::in_place_type<LinearizableUnboundedMpscQueue<TypeErasedActorMessage*>>);
             } else if constexpr (std::is_same_v<T, UnsafeOneSlotMailbox>) {
-              mailboxes_.EmplaceBack(std::in_place_type<OneSlotUnsafeQueue<ActorMessage*>>);
+              mailboxes_.EmplaceBack(std::in_place_type<OneSlotUnsafeQueue<TypeErasedActorMessage*>>);
             } else if constexpr (std::is_same_v<T, BoundedMailbox>) {
-              mailboxes_.EmplaceBack(std::in_place_type<BoundedMpscQueue<ActorMessage*>>, mailbox_cfg.capacity);
+              mailboxes_.EmplaceBack(std::in_place_type<BoundedMpscQueue<TypeErasedActorMessage*>>,
+                                     mailbox_cfg.capacity);
             }
           },
           cfg);
     }
   }
 
-  void Push(size_t mailbox_index, ActorMessage* message) {
+  void Push(size_t mailbox_index, TypeErasedActorMessage* message) {
     std::visit(
         [&](auto& queue) {
           bool ok = queue.Push(message);
@@ -208,7 +217,7 @@ class MailboxSet {
         mailboxes_[mailbox_index]);
   }
 
-  std::optional<ActorMessage*> TryPop(size_t mailbox_index) {
+  std::optional<TypeErasedActorMessage*> TryPop(size_t mailbox_index) {
     return std::visit([&](auto& queue) { return queue.TryPop(); }, mailboxes_[mailbox_index]);
   }
 
@@ -217,8 +226,9 @@ class MailboxSet {
  private:
   // The MPSC queue's move/copy are deleted, which makes the variant non-movable. That's fine
   // here because FixedCapacityBuffer constructs elements in place and never relocates them.
-  using MailboxStorage = std::variant<LinearizableUnboundedMpscQueue<ActorMessage*>, OneSlotUnsafeQueue<ActorMessage*>,
-                                      BoundedMpscQueue<ActorMessage*>>;
+  using MailboxStorage =
+      std::variant<LinearizableUnboundedMpscQueue<TypeErasedActorMessage*>, OneSlotUnsafeQueue<TypeErasedActorMessage*>,
+                   BoundedMpscQueue<TypeErasedActorMessage*>>;
 
   FixedCapacityBuffer<MailboxStorage> mailboxes_;
 };
@@ -278,7 +288,7 @@ class Actor : public TypeErasedActor {
     co_await async_scope_.join();
   }
 
-  void PushMessage(ActorMessage* task, size_t mailbox_index) override {
+  void PushMessage(TypeErasedActorMessage* task, size_t mailbox_index) override {
     mailbox_set_.Push(mailbox_index, task);
     pending_message_count_.fetch_add(1, std::memory_order_release);
     if (ShouldActivate(MailboxPushEvent {.mailbox_index = mailbox_index})) {

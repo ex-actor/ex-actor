@@ -82,9 +82,14 @@
 #include <cstdlib>
 #include <limits>
 #include <mutex>   // used for thread exit synchronization
+#include <new>     // for hardware_destructive_interference_size
 #include <thread>  // partly for __WINPTHREADS_VERSION if on MinGW-w64 w/ POSIX threading
 #include <type_traits>
 #include <utility>
+
+#if !defined(__cpp_lib_hardware_interference_size)
+#include "ex_actor/3rd_lib/absl/base/optimization.h"
+#endif
 
 // Platform-specific definitions of a numeric thread ID type and an invalid value
 namespace ex_actor::embedded_3rd::moodycamel {
@@ -1811,16 +1816,31 @@ class ConcurrentQueue {
     inline index_t getTail() const { return tailIndex.load(std::memory_order_relaxed); }
 
    protected:
+#if defined(__cpp_lib_hardware_interference_size)
+    // The standard constant can vary with compiler tuning flags.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winterference-size"
+#endif
+    static constexpr std::size_t kCacheLineSize = std::hardware_destructive_interference_size;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+#else
+    // Older standard libraries do not expose the standard interference size.
+    static constexpr std::size_t kCacheLineSize = EX_ACTOR_ABSL_CACHELINE_SIZE;
+#endif
+
     // Keep producer-owned metadata off the consumer-written counter cache lines.
     // Publishing tailIndex still shares data with consumers, but dequeuing must
     // not invalidate the producer's cached tailIndex or tailBlock.
-    alignas(64) std::atomic<index_t> tailIndex;  // Where to enqueue to next
-    alignas(64) std::atomic<index_t> headIndex;  // Where to dequeue from next
+    alignas(kCacheLineSize) std::atomic<index_t> tailIndex;  // Where to enqueue to next
+    alignas(kCacheLineSize) std::atomic<index_t> headIndex;  // Where to dequeue from next
 
     std::atomic<index_t> dequeueOptimisticCount;
     std::atomic<index_t> dequeueOvercommit;
 
-    alignas(64) Block* tailBlock;
+    alignas(kCacheLineSize) Block* tailBlock;
 
    public:
     bool isExplicit;

@@ -87,10 +87,6 @@
 #include <type_traits>
 #include <utility>
 
-#if !defined(__cpp_lib_hardware_interference_size)
-#include "ex_actor/3rd_lib/absl/base/optimization.h"
-#endif
-
 // Platform-specific definitions of a numeric thread ID type and an invalid value
 namespace ex_actor::embedded_3rd::moodycamel {
 namespace details {
@@ -1828,7 +1824,7 @@ class ConcurrentQueue {
 #endif
 #else
     // Older standard libraries do not expose the standard interference size.
-    static constexpr std::size_t kCacheLineSize = EX_ACTOR_ABSL_CACHELINE_SIZE;
+    static constexpr std::size_t kCacheLineSize = 64;
 #endif
 
     // Keep producer-owned metadata off the consumer-written counter cache lines.

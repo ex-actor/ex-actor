@@ -323,7 +323,7 @@ struct Parser<capnproto::ReaderWithContext<ex_actor::internal::ActorRefSerdeCont
         Parser<capnproto::Reader, capnproto::Writer, ex_actor::internal::ActorRef<U>, ProcessorsType>::read(reader,
                                                                                                             var);
     if (!parse_res) {
-      return Unexpected {parse_res.error()};
+      return Unexpected<Error> {parse_res.error()};
     }
     auto actor_ref = parse_res.value();
     const auto& ctx = reader.ctx;

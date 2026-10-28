@@ -114,7 +114,12 @@ jobs:
 
       - name: Build
         # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+        # Limit GCC 11's concurrent template-heavy compilations to fit the hosted runner's memory.
+        # Log its peak memory usage to help diagnose runner shutdowns.
+        run: >
+          ${{ matrix.toolchain.compiler.cc == 'gcc-11' && '/usr/bin/time -v' || '' }}
+          cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+          ${{ matrix.toolchain.compiler.cc == 'gcc-11' && '--parallel 2' || '' }}
 
       - name: Test
         working-directory: ${{ steps.strings.outputs.build-output-dir }}

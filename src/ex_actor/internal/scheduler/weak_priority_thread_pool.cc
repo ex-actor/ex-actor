@@ -32,15 +32,25 @@ thread_local std::minstd_rand tl_rng {std::random_device {}()};
 static constexpr size_t kInitialSlotCapacity = 512;
 
 WeakPriorityThreadPool::WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues)
-    : thread_count_(thread_count),
-      num_sub_queues_(std::max<size_t>(2, num_sub_queues == 0 ? thread_count / 2 : num_sub_queues)),
+    : WeakPriorityThreadPool(Config {.thread_count = thread_count, .num_sub_queues = num_sub_queues}) {}
+
+WeakPriorityThreadPool::WeakPriorityThreadPool(Config config)
+    : config_(config),
+      num_sub_queues_(
+          std::max<size_t>(2, config_.num_sub_queues == 0 ? config_.thread_count / 2 : config_.num_sub_queues)),
       sub_queues_(num_sub_queues_) {
   for (auto& sq : sub_queues_) {
     for (auto& slot : sq.slots) {
       slot.reserve(kInitialSlotCapacity);
     }
   }
-  for (size_t i = 0; i < thread_count_; ++i) {
+  if (config_.start_workers_immediately) {
+    StartWorkers();
+  }
+}
+
+void WeakPriorityThreadPool::StartWorkers() {
+  for (size_t i = 0; i < config_.thread_count; ++i) {
     workers_.emplace_back([this](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token); });
   }
 }

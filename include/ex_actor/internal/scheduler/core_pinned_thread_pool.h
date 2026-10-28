@@ -27,7 +27,15 @@ class CorePinnedThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
+  struct Config {
+    size_t thread_count = 1;
+    bool start_workers_immediately = true;
+  };
+
   explicit CorePinnedThreadPool(size_t thread_count);
+  explicit CorePinnedThreadPool(Config config);
+
+  void StartWorkers();
 
   template <ex::receiver R>
   struct Operation : internal::SchedulerOperationBase<CorePinnedThreadPool, R> {
@@ -49,7 +57,7 @@ class CorePinnedThreadPool {
   void EnqueueOperation(TypeErasedOperation* operation, size_t core_index);
 
  private:
-  size_t thread_count_;
+  Config config_;
   std::vector<internal::UnboundedBlockingQueue<TypeErasedOperation*>> queues_;
   std::vector<std::jthread> workers_;
 

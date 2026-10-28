@@ -19,14 +19,17 @@
 namespace ex_actor {
 
 PriorityThreadPool::PriorityThreadPool(size_t thread_count, bool start_workers_immediately)
-    : thread_count_(thread_count) {
-  if (thread_count > 0 && start_workers_immediately) {
+    : PriorityThreadPool(
+          Config {.thread_count = thread_count, .start_workers_immediately = start_workers_immediately}) {}
+
+PriorityThreadPool::PriorityThreadPool(Config config) : config_(config) {
+  if (config_.start_workers_immediately) {
     StartWorkers();
   }
 }
 
 void PriorityThreadPool::StartWorkers() {
-  for (size_t i = 0; i < thread_count_; ++i) {
+  for (size_t i = 0; i < config_.thread_count; ++i) {
     workers_.emplace_back([this](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token); });
   }
 }

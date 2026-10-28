@@ -38,7 +38,17 @@ class WeakPriorityThreadPool {
 
   static constexpr size_t kMaxPriorityLevels = 64;
 
+  struct Config {
+    size_t thread_count = 1;
+    bool start_workers_immediately = true;
+    // Zero selects half the thread count, with a minimum of two sub-queues.
+    size_t num_sub_queues = 0;
+  };
+
   explicit WeakPriorityThreadPool(size_t thread_count, size_t num_sub_queues = 0);
+  explicit WeakPriorityThreadPool(Config config);
+
+  void StartWorkers();
 
   template <ex::receiver R>
   struct Operation : internal::SchedulerOperationBase<WeakPriorityThreadPool, R> {
@@ -66,7 +76,7 @@ class WeakPriorityThreadPool {
     std::array<std::vector<TypeErasedOperation*>, kMaxPriorityLevels> slots;
   };
 
-  size_t thread_count_;
+  Config config_;
   size_t num_sub_queues_;
   std::vector<SubQueue> sub_queues_;
   embedded_3rd::moodycamel::LightweightSemaphore sema_;

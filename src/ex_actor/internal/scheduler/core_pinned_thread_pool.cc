@@ -19,15 +19,24 @@
 
 namespace ex_actor {
 
-CorePinnedThreadPool::CorePinnedThreadPool(size_t thread_count) : thread_count_(thread_count), queues_(thread_count) {
-  EXA_THROW_CHECK(thread_count > 0) << "Thread count must be greater than 0";
-  for (size_t i = 0; i < thread_count; ++i) {
+CorePinnedThreadPool::CorePinnedThreadPool(size_t thread_count)
+    : CorePinnedThreadPool(Config {.thread_count = thread_count}) {}
+
+CorePinnedThreadPool::CorePinnedThreadPool(Config config) : config_(config), queues_(config_.thread_count) {
+  EXA_THROW_CHECK(config_.thread_count > 0) << "Thread count must be greater than 0";
+  if (config_.start_workers_immediately) {
+    StartWorkers();
+  }
+}
+
+void CorePinnedThreadPool::StartWorkers() {
+  for (size_t i = 0; i < config_.thread_count; ++i) {
     workers_.emplace_back([this, i](const std::stop_token& stop_token) { WorkerThreadLoop(stop_token, i); });
   }
 }
 
 void CorePinnedThreadPool::EnqueueOperation(TypeErasedOperation* operation, size_t core_index) {
-  size_t queue_idx = core_index % thread_count_;
+  size_t queue_idx = core_index % config_.thread_count;
   queues_[queue_idx].Push(operation);
 }
 

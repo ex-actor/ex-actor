@@ -15,6 +15,7 @@
 #pragma once
 
 #include <thread>
+#include <vector>
 
 #include "ex_actor/internal/alias.h"  // IWYU pragma: keep
 #include "ex_actor/internal/container.h"
@@ -27,7 +28,17 @@ class WorkSharingThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
+  struct Config {
+    size_t thread_count = 1;
+    bool start_workers_immediately = true;
+    // Poll continuously without sleeping when the queue is empty.
+    bool spin = false;
+    // Pin workers to these logical CPU indices round-robin. Empty leaves affinity unchanged.
+    std::vector<size_t> cores;
+  };
+
   explicit WorkSharingThreadPool(size_t thread_count, bool start_workers_immediately = true);
+  explicit WorkSharingThreadPool(Config config);
 
   void StartWorkers();
 
@@ -47,13 +58,13 @@ class WorkSharingThreadPool {
   void EnqueueOperation(TypeErasedOperation* operation);
 
  private:
-  size_t thread_count_;
+  Config config_;
   internal::UnboundedBlockingQueue<TypeErasedOperation*> queue_;
   std::vector<std::jthread> workers_;
   inline static thread_local TypeErasedOperation* local_slot_ = nullptr;
   inline static thread_local WorkSharingThreadPool* owning_pool_ = nullptr;
 
-  void WorkerThreadLoop(const std::stop_token& stop_token);
+  void WorkerThreadLoop(const std::stop_token& stop_token, size_t thread_index);
 };
 
 }  // namespace ex_actor

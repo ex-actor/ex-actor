@@ -300,6 +300,13 @@ template <class T>
 class UnboundedBlockingQueue {
  public:
   void Push(T value) { queue_.enqueue(std::move(value)); }
+  std::optional<T> TryPop() {
+    T value;
+    if (!queue_.try_dequeue(value)) {
+      return std::nullopt;
+    }
+    return value;
+  }
   std::optional<T> Pop(uint64_t timeout_ms) {
     T value;
     bool ok = queue_.wait_dequeue_timed(value, std::chrono::milliseconds(timeout_ms));

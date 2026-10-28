@@ -70,6 +70,19 @@ This scheduler is suitable for most cases. It's a classic thread pool with a glo
 
 It's also the default scheduler we use when you don't pass a scheduler to the `ex_actor::Init`.
 
+Optional configuration:
+
+```cpp
+ex_actor::WorkSharingThreadPool thread_pool({
+    .thread_count = 4,                  // Default: 1
+    .start_workers_immediately = true, // false defers startup until StartWorkers()
+    .spin = true,                     // Poll without sleeping; default: false
+    .cores = {0, 2},                   // Pin round-robin; default: empty (no pinning)
+});
+```
+
+Choose cores available to your process. macOS provides affinity hints only; failed affinity requests log a warning.
+
 
 ### Work-Stealing Thread Pool
 

@@ -32,6 +32,9 @@ namespace ex_actor::internal {
 bool SetThreadName(const std::string& name) { return pthread_setname_np(pthread_self(), name.c_str()) == 0; }
 
 bool SetThreadAffinity(size_t core_index) {
+  if (core_index >= CPU_SETSIZE) {
+    return false;
+  }
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
   CPU_SET(core_index, &cpuset);
@@ -59,7 +62,10 @@ bool SetThreadName(const std::string& name) {
 }
 
 bool SetThreadAffinity(size_t core_index) {
-  DWORD_PTR mask = 1ULL << core_index;
+  if (core_index >= sizeof(DWORD_PTR) * 8) {
+    return false;
+  }
+  DWORD_PTR mask = DWORD_PTR {1} << core_index;
   return SetThreadAffinityMask(GetCurrentThread(), mask) != 0;
 }
 

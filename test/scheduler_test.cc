@@ -1,7 +1,14 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <latch>
 #include <thread>
 #include <vector>
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 #include <gtest/gtest.h>
 
@@ -9,6 +16,97 @@
 #include "ex_actor/internal/actor_config.h"
 
 namespace ex = ex_actor::ex;
+
+class WorkSharingConfigTest : public testing::TestWithParam<bool> {};
+
+INSTANTIATE_TEST_SUITE_P(BlockingAndSpinning, WorkSharingConfigTest, testing::Bool());
+
+TEST(SchedulerTest, WorkSharingLegacyConstructorCanDeferStartup) {
+  ex_actor::WorkSharingThreadPool thread_pool(/*thread_count=*/1, /*start_workers_immediately=*/false);
+  std::atomic_bool executed = false;
+  stdexec::simple_counting_scope scope;
+  auto sender = ex::schedule(thread_pool.GetScheduler()) | ex::then([&]() { executed = true; });
+  stdexec::spawn(sender | ex_actor::DiscardResult(), scope.get_token());
+  EXPECT_FALSE(executed);
+  thread_pool.StartWorkers();
+  ex::sync_wait(scope.join());
+  EXPECT_TRUE(executed);
+}
+
+TEST_P(WorkSharingConfigTest, DeferredStartupAndLocalScheduling) {
+  ex_actor::WorkSharingThreadPool thread_pool(
+      {.thread_count = 1, .start_workers_immediately = false, .spin = GetParam()});
+  auto scheduler = thread_pool.GetScheduler();
+  std::atomic_int count = 0;
+  stdexec::simple_counting_scope scope;
+  auto sender = ex::schedule(scheduler) | ex::then([&]() { ++count; }) |
+                ex::let_value([&]() { return ex::schedule(scheduler) | ex::then([&]() { ++count; }); });
+  stdexec::spawn(sender | ex_actor::DiscardResult(), scope.get_token());
+  EXPECT_EQ(count, 0);
+  thread_pool.StartWorkers();
+  ex::sync_wait(scope.join());
+  EXPECT_EQ(count, 2);
+
+  // Exercise an empty queue followed by a new submission, then idle destruction.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  ex::sync_wait(ex::schedule(scheduler) | ex::then([&]() { ++count; }));
+  EXPECT_EQ(count, 3);
+}
+
+TEST_P(WorkSharingConfigTest, QueuedTasksCanBeStopped) {
+  ex_actor::WorkSharingThreadPool thread_pool(
+      {.thread_count = 1, .start_workers_immediately = false, .spin = GetParam()});
+  std::atomic_int count = 0;
+  stdexec::counting_scope scope;
+  auto sender = ex::schedule(thread_pool.GetScheduler()) | ex::then([&]() { ++count; });
+  for (int i = 0; i < 100; ++i) {
+    stdexec::spawn(sender | ex_actor::DiscardResult(), scope.get_token());
+  }
+  scope.request_stop();
+  thread_pool.StartWorkers();
+  ex::sync_wait(scope.join());
+  EXPECT_EQ(count, 0);
+}
+
+#if defined(__linux__)
+TEST_P(WorkSharingConfigTest, WorkersUseConfiguredCoresRoundRobin) {
+  cpu_set_t available_cores;
+  ASSERT_EQ(pthread_getaffinity_np(pthread_self(), sizeof(available_cores), &available_cores), 0);
+  std::vector<size_t> cores;
+  for (size_t core_index = 0; core_index < CPU_SETSIZE && cores.size() < 2; ++core_index) {
+    if (CPU_ISSET(core_index, &available_cores)) {
+      cores.push_back(core_index);
+    }
+  }
+  ASSERT_FALSE(cores.empty());
+  ex_actor::WorkSharingThreadPool thread_pool({.thread_count = 3, .spin = GetParam(), .cores = cores});
+  std::latch workers_ready(/*expected=*/3);
+  std::vector<int> worker_cores(/*count=*/3, /*value=*/-1);
+  stdexec::simple_counting_scope scope;
+  for (size_t task_index = 0; task_index < worker_cores.size(); ++task_index) {
+    auto sender = ex::schedule(thread_pool.GetScheduler()) | ex::then([&, task_index]() {
+                    cpu_set_t affinity;
+                    int result = pthread_getaffinity_np(pthread_self(), sizeof(affinity), &affinity);
+                    EXPECT_EQ(result, 0);
+                    if (result == 0) {
+                      EXPECT_EQ(CPU_COUNT(&affinity), 1);
+                    }
+                    worker_cores[task_index] = sched_getcpu();
+                    // Keep each worker occupied so every thread's affinity is checked.
+                    workers_ready.arrive_and_wait();
+                  });
+    stdexec::spawn(sender | ex_actor::DiscardResult(), scope.get_token());
+  }
+  ex::sync_wait(scope.join());
+  std::vector<int> expected_cores;
+  for (size_t thread_index = 0; thread_index < worker_cores.size(); ++thread_index) {
+    expected_cores.push_back(static_cast<int>(cores[thread_index % cores.size()]));
+  }
+  std::sort(worker_cores.begin(), worker_cores.end());
+  std::sort(expected_cores.begin(), expected_cores.end());
+  EXPECT_EQ(worker_cores, expected_cores);
+}
+#endif
 
 TEST(SchedulerTest, TaskInWorkSharingThreadPoolShouldBeStoppable) {
   ex_actor::WorkSharingThreadPool thread_pool(1);

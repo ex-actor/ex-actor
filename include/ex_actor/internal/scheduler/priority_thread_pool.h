@@ -28,7 +28,13 @@ class PriorityThreadPool {
  public:
   using TypeErasedOperation = internal::TypeErasedOperation;
 
+  struct Config {
+    size_t thread_count = 1;
+    bool start_workers_immediately = true;
+  };
+
   explicit PriorityThreadPool(size_t thread_count, bool start_workers_immediately = true);
+  explicit PriorityThreadPool(Config config);
 
   void StartWorkers();
 
@@ -52,7 +58,7 @@ class PriorityThreadPool {
   void EnqueueOperation(TypeErasedOperation* operation, uint32_t priority = 0);
 
  private:
-  size_t thread_count_;
+  Config config_;
   internal::UnboundedBlockingPriorityQueue<TypeErasedOperation*> queue_;
   std::vector<std::jthread> workers_;
 

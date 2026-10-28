@@ -17,6 +17,77 @@
 
 namespace ex = ex_actor::ex;
 
+template <class ThreadPool>
+class ThreadPoolConfigTest : public testing::Test {};
+
+using ConfigurableThreadPools = testing::Types<ex_actor::WorkSharingThreadPool, ex_actor::PriorityThreadPool,
+                                               ex_actor::CorePinnedThreadPool, ex_actor::WeakPriorityThreadPool>;
+TYPED_TEST_SUITE(ThreadPoolConfigTest, ConfigurableThreadPools);
+
+TYPED_TEST(ThreadPoolConfigTest, StartsWorkersByDefault) {
+  TypeParam thread_pool(typename TypeParam::Config {});
+  auto [worker_id] =
+      ex::sync_wait(ex::schedule(thread_pool.GetScheduler()) | ex::then([]() { return std::this_thread::get_id(); }))
+          .value();
+  EXPECT_NE(worker_id, std::this_thread::get_id());
+}
+
+TYPED_TEST(ThreadPoolConfigTest, DeferredStartupExecutesQueuedAndNewTasks) {
+  TypeParam thread_pool({.thread_count = 2, .start_workers_immediately = false});
+  std::atomic_int count = 0;
+  stdexec::simple_counting_scope scope;
+  std::latch workers_ready(/*expected=*/2);
+  for (size_t core_index = 0; core_index < 2; ++core_index) {
+    auto sender = ex::schedule(thread_pool.GetScheduler()) | ex::then([&]() {
+                    ++count;
+                    // Require both configured workers to run, including separate core-pinned queues.
+                    workers_ready.arrive_and_wait();
+                  }) |
+                  ex::write_env(ex::prop {ex_actor::get_core_index, core_index});
+    stdexec::spawn(sender | ex_actor::DiscardResult(), scope.get_token());
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  EXPECT_EQ(count, 0);
+  thread_pool.StartWorkers();
+  ex::sync_wait(scope.join());
+  EXPECT_EQ(count, 2);
+  ex::sync_wait(ex::schedule(thread_pool.GetScheduler()) | ex::then([&]() { ++count; }));
+  EXPECT_EQ(count, 3);
+}
+
+TYPED_TEST(ThreadPoolConfigTest, DeferredQueuedTasksCanBeStopped) {
+  TypeParam thread_pool({.thread_count = 1, .start_workers_immediately = false});
+  std::atomic_int count = 0;
+  stdexec::counting_scope scope;
+  auto sender = ex::schedule(thread_pool.GetScheduler()) | ex::then([&]() { ++count; });
+  stdexec::spawn(sender | ex_actor::DiscardResult(), scope.get_token());
+  scope.request_stop();
+  thread_pool.StartWorkers();
+  ex::sync_wait(scope.join());
+  EXPECT_EQ(count, 0);
+}
+
+TYPED_TEST(ThreadPoolConfigTest, CanBeDestroyedWithoutStartingWorkers) {
+  TypeParam thread_pool({.thread_count = 2, .start_workers_immediately = false});
+}
+
+TEST(SchedulerTest, WeakPrioritySubQueueConfiguration) {
+  for (size_t num_sub_queues : {0, 1, 7}) {
+    ex_actor::WeakPriorityThreadPool thread_pool(
+        {.thread_count = 1, .start_workers_immediately = false, .num_sub_queues = num_sub_queues});
+    std::atomic_int count = 0;
+    stdexec::simple_counting_scope scope;
+    for (uint32_t priority = 0; priority < ex_actor::WeakPriorityThreadPool::kMaxPriorityLevels; ++priority) {
+      auto sender = ex::schedule(thread_pool.GetScheduler()) | ex::then([&]() { ++count; }) |
+                    ex::write_env(ex::prop {ex_actor::get_priority, priority});
+      stdexec::spawn(sender | ex_actor::DiscardResult(), scope.get_token());
+    }
+    thread_pool.StartWorkers();
+    ex::sync_wait(scope.join());
+    EXPECT_EQ(count, ex_actor::WeakPriorityThreadPool::kMaxPriorityLevels);
+  }
+}
+
 class WorkSharingConfigTest : public testing::TestWithParam<bool> {};
 
 INSTANTIATE_TEST_SUITE_P(BlockingAndSpinning, WorkSharingConfigTest, testing::Bool());

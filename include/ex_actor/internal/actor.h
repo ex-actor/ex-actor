@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <utility>
 
@@ -89,7 +90,8 @@ class TypeErasedActor {
 class TypeErasedActorScheduler {
  public:
   virtual ~TypeErasedActorScheduler() = default;
-  virtual void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) = 0;
+  virtual void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token,
+                        PreallocSlot& spawn_state_storage) = 0;
   virtual std::unique_ptr<TypeErasedActorScheduler> Clone() const = 0;
 
   virtual const void* GetUnderlyingSchedulerPtr() const = 0;
@@ -99,13 +101,15 @@ template <ex::scheduler Scheduler>
 class AnyStdExecScheduler : public TypeErasedActorScheduler {
  public:
   explicit AnyStdExecScheduler(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
-  void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) override {
+  void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token,
+                PreallocSlot& spawn_state_storage) override {
     const auto& actor_config = actor->GetActorConfig();
     auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, actor_config.priority}) |
                   ex::write_env(ex::prop {ex_actor::get_scheduler_index, actor_config.scheduler_index}) |
                   ex::write_env(ex::prop {ex_actor::get_core_index, actor_config.core_index}) |
                   ex::then([actor] { actor->PullMailboxAndRun(); });
-    ex::spawn(std::move(sender) | DiscardResult(), scope_token);
+    ex::spawn(std::move(sender) | DiscardResult(), scope_token,
+              ex::env {ex::prop {ex::get_allocator, PreallocSlotAllocator<std::byte> {&spawn_state_storage}}});
   }
 
   std::unique_ptr<TypeErasedActorScheduler> Clone() const override {
@@ -299,6 +303,7 @@ class Actor : public TypeErasedActor {
   const std::atomic_size_t& GetPendingMessageCountRef() const override { return pending_message_count_; }
 
  private:
+  PreallocSlot spawn_state_storage_;
   std::unique_ptr<TypeErasedActorScheduler> scheduler_;
   MailboxSet mailbox_set_;
   std::atomic_size_t pending_message_count_ = 0;
@@ -335,7 +340,7 @@ class Actor : public TypeErasedActor {
     if (!changed) {
       return;
     }
-    scheduler_->Schedule(this, async_scope_.get_token());
+    scheduler_->Schedule(this, async_scope_.get_token(), spawn_state_storage_);
   }
 
   void PullMailboxAndRun() override {

@@ -65,3 +65,12 @@ cmake(
         "libzmq.a",
     ],
 )
+
+cc_test(
+    name = "prealloc_slot_allocator_test",
+    srcs = ["test/prealloc_slot_allocator_test.cc"],
+    deps = [
+        ":ex_actor",
+        "@googletest//:gtest_main",
+    ],
+)

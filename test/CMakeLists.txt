@@ -10,6 +10,7 @@ function(ex_actor_test NAME)
   set_tests_properties(${NAME} PROPERTIES TIMEOUT ${TEST_TIMEOUT})
 endfunction()
 
+ex_actor_test(prealloc_slot_allocator_test)
 ex_actor_test(basic_api_test)
 ex_actor_test(serialization_test)
 ex_actor_test(util_test)

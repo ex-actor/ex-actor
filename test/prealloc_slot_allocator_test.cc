@@ -1,5 +1,7 @@
 #include <barrier>
+#include <chrono>
 #include <cstdint>
+#include <iostream>
 #include <thread>
 #include <vector>
 
@@ -86,18 +88,25 @@ TEST(PreallocSlotAllocatorTest, ConcurrentRequestsNeverShareLiveStorage) {
   PreallocSlot<512> storage;
   std::barrier barrier(kThreads);
   std::vector<std::jthread> workers;
+  workers.reserve(kThreads);
+  const auto start = std::chrono::steady_clock::now();
   for (size_t thread = 0; thread < kThreads; ++thread) {
     workers.emplace_back([&, thread] {
       PreallocSlotAllocator<uint64_t, 512> allocator(&storage);
       for (uint64_t round = 0; round < 1000; ++round) {
         auto* value = allocator.allocate(/*count=*/1);
-        const auto expected = round * kThreads + thread;
+        const auto expected = (round * kThreads) + thread;
         *value = expected;
         barrier.arrive_and_wait();
         EXPECT_EQ(*value, expected);
         barrier.arrive_and_wait();
         allocator.deallocate(value, /*count=*/1);
         barrier.arrive_and_wait();
+        if (thread == 0 && (round + 1) % 100 == 0) {
+          const auto elapsed = std::chrono::steady_clock::now() - start;
+          std::cerr << "Completed " << round + 1 << " allocation rounds in "
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << " ms\n";
+        }
       }
     });
   }

@@ -111,7 +111,7 @@ class ActorActivationContext : public TypeErasedActorActivationContext {
   using Allocator = PreallocSlotAllocator<std::byte, kSlotSize>;
 
   template <size_t kSlotSize>
-  using SpawnEnv = decltype(ex::env {ex::prop {ex::get_allocator, std::declval<Allocator<kSlotSize>>()}});
+  using SpawnEnv = ex::prop<ex::get_allocator_t, Allocator<kSlotSize>>;
 
   // Match the pinned stdexec::spawn implementation, including its scope wrapper,
   // allocator environment, and bookkeeping, rather than just the connected sender.
@@ -131,8 +131,11 @@ class ActorActivationContext : public TypeErasedActorActivationContext {
 
   void Schedule(TypeErasedActor* actor, ScopeToken scope_token) override {
     auto sender = MakeSender(scheduler_, actor);
-    ex::spawn(std::move(sender), scope_token,
-              ex::env {ex::prop {ex::get_allocator, Allocator<kSpawnStateSize> {&spawn_state_storage_}}});
+    Allocator<kSpawnStateSize> allocator(&spawn_state_storage_);
+    // A property is already an environment. Clang 18 miscompiles an ex::env
+    // wrapper around this stateful allocator property.
+    auto env = ex::prop {ex::get_allocator, allocator};
+    ex::spawn(std::move(sender), scope_token, std::move(env));
   }
 
  private:

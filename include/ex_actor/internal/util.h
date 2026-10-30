@@ -184,7 +184,7 @@ class PreallocSlot {
   }
 
  private:
-  alignas(std::max_align_t) std::byte bytes_[kSlotSize];
+  alignas(std::max_align_t) std::byte bytes_[kSlotSize] {};
   std::atomic_bool in_use_ = false;
 };
 
@@ -193,16 +193,17 @@ class PreallocSlot {
 template <class T, size_t kSlotSize>
 class PreallocSlotAllocator {
  public:
-  using value_type = T;
+  using value_type = T;  // NOLINT(readability-identifier-naming) - required by std::allocator_traits
 
   template <class U>
-  struct rebind {
-    using other = PreallocSlotAllocator<U, kSlotSize>;
+  struct rebind {  // NOLINT(readability-identifier-naming) - required by std::allocator_traits
+    using other = PreallocSlotAllocator<U, kSlotSize>;  // NOLINT(readability-identifier-naming)
   };
 
   explicit PreallocSlotAllocator(PreallocSlot<kSlotSize>* storage) noexcept : storage_(storage) {}
 
   template <class U>
+  // NOLINTNEXTLINE(google-explicit-constructor) - allocator rebinding requires implicit conversion
   PreallocSlotAllocator(const PreallocSlotAllocator<U, kSlotSize>& other) noexcept : storage_(other.storage_) {}
 
   T* allocate(size_t count) {

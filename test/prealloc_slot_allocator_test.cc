@@ -11,8 +11,8 @@ namespace ex_actor {
 namespace {
 
 TEST(PreallocSlotAllocatorTest, ReusesSlotAndFallsBackWhileOccupied) {
-  PreallocSlot storage;
-  PreallocSlotAllocator<uint64_t> allocator(&storage);
+  PreallocSlot<512> storage;
+  PreallocSlotAllocator<uint64_t, 512> allocator(&storage);
   auto* first = allocator.allocate(/*count=*/1);
   auto* overlapping = allocator.allocate(/*count=*/1);
   EXPECT_NE(first, overlapping);
@@ -29,16 +29,17 @@ TEST(PreallocSlotAllocatorTest, ReusesSlotAndFallsBackWhileOccupied) {
 }
 
 TEST(PreallocSlotAllocatorTest, FallsBackForOversizedOveralignedAndMultipleObjects) {
+  constexpr size_t kSlotSize = 64;
   struct Large {
-    std::byte data[PreallocSlot::kSlotSize + 1];
+    std::byte data[kSlotSize + 1];
   };
   struct alignas(2 * alignof(std::max_align_t)) Overaligned {
     uint64_t value;
   };
-  PreallocSlot storage;
-  PreallocSlotAllocator<Large> large_allocator(&storage);
-  PreallocSlotAllocator<Overaligned> aligned_allocator(&storage);
-  PreallocSlotAllocator<uint64_t> array_allocator(&storage);
+  PreallocSlot<kSlotSize> storage;
+  PreallocSlotAllocator<Large, kSlotSize> large_allocator(&storage);
+  PreallocSlotAllocator<Overaligned, kSlotSize> aligned_allocator(&storage);
+  PreallocSlotAllocator<uint64_t, kSlotSize> array_allocator(&storage);
   auto* large = large_allocator.allocate(/*count=*/1);
   auto* aligned = aligned_allocator.allocate(/*count=*/1);
   auto* array = array_allocator.allocate(/*count=*/2);
@@ -56,8 +57,9 @@ TEST(PreallocSlotAllocatorTest, FallsBackForOversizedOveralignedAndMultipleObjec
 }
 
 TEST(PreallocSlotAllocatorTest, ReboundAllocatorSharesStorage) {
-  PreallocSlot storage;
-  PreallocSlotAllocator<std::byte> bytes(&storage);
+  constexpr size_t kSlotSize = 64;
+  PreallocSlot<kSlotSize> storage;
+  PreallocSlotAllocator<std::byte, kSlotSize> bytes(&storage);
   std::allocator_traits<decltype(bytes)>::rebind_alloc<uint64_t> words(bytes);
   EXPECT_EQ(bytes, words);
   auto* word = words.allocate(/*count=*/1);
@@ -69,8 +71,8 @@ TEST(PreallocSlotAllocatorTest, ReboundAllocatorSharesStorage) {
 }
 
 TEST(PreallocSlotAllocatorTest, CanDeallocateOnAnotherThread) {
-  PreallocSlot storage;
-  PreallocSlotAllocator<uint64_t> allocator(&storage);
+  PreallocSlot<512> storage;
+  PreallocSlotAllocator<uint64_t, 512> allocator(&storage);
   auto* first = allocator.allocate(/*count=*/1);
   std::thread worker([allocator, first]() mutable { allocator.deallocate(first, /*count=*/1); });
   worker.join();
@@ -81,12 +83,12 @@ TEST(PreallocSlotAllocatorTest, CanDeallocateOnAnotherThread) {
 
 TEST(PreallocSlotAllocatorTest, ConcurrentRequestsNeverShareLiveStorage) {
   constexpr size_t kThreads = 8;
-  PreallocSlot storage;
+  PreallocSlot<512> storage;
   std::barrier barrier(kThreads);
   std::vector<std::jthread> workers;
   for (size_t thread = 0; thread < kThreads; ++thread) {
     workers.emplace_back([&, thread] {
-      PreallocSlotAllocator<uint64_t> allocator(&storage);
+      PreallocSlotAllocator<uint64_t, 512> allocator(&storage);
       for (uint64_t round = 0; round < 1000; ++round) {
         auto* value = allocator.allocate(/*count=*/1);
         const auto expected = round * kThreads + thread;

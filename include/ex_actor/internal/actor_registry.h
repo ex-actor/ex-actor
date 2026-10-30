@@ -176,8 +176,8 @@ class ActorRegistryBackend {
   template <class UserClass, auto kCreateFn = nullptr, class... Args>
   ActorRef<UserClass> SpawnLocal(uint64_t node_id, ActorConfig config, Args... args) {
     auto actor_id = GenerateRandomActorId();
-    auto actor =
-        std::make_unique<Actor<UserClass, kCreateFn>>(user_actor_scheduler_->Clone(), config, std::move(args)...);
+    auto actor = std::make_unique<Actor<UserClass, kCreateFn>>(user_actor_scheduler_->CreateActivationContext(), config,
+                                                               std::move(args)...);
     auto handle = ActorRef<UserClass>(this_node_id_, node_id, actor_id, actor.get(), broker_actor_ref_);
     NotifyExActorOnSpawned<UserClass>(actor.get(), handle);
     if (config.actor_name.has_value()) {

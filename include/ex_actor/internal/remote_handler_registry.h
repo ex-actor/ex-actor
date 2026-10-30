@@ -43,7 +43,7 @@ class RemoteActorRequestHandlerRegistry {
   };
   struct RemoteActorCreationHandlerContext {
     ByteBuffer serialized_args;
-    std::unique_ptr<TypeErasedActorScheduler> scheduler;
+    std::unique_ptr<TypeErasedActorActivationContext> activation_context;
     ActorRefSerdeContext actor_ref_serde_ctx;
     uint64_t actor_id;
   };
@@ -132,7 +132,8 @@ class RemoteFuncHandlerRegistrar {
     ActorCreationArgs creation_args =
         DeserializeFnArgs<kCreateFn>(context.serialized_args, context.actor_ref_serde_ctx);
     std::unique_ptr<TypeErasedActor> actor = Actor<ActorClass, kCreateFn>::CreateUseArgTuple(
-        std::move(context.scheduler), std::move(creation_args.actor_config), std::move(creation_args.args_tuple));
+        std::move(context.activation_context), std::move(creation_args.actor_config),
+        std::move(creation_args.args_tuple));
     auto this_node_id = context.actor_ref_serde_ctx.this_node_id;
     auto actor_ref = ActorRef<ActorClass>(this_node_id, this_node_id, context.actor_id, actor.get(),
                                           context.actor_ref_serde_ctx.broker_actor_ref);

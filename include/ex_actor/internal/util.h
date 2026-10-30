@@ -158,10 +158,11 @@ namespace ex_actor {
 
 // One preallocated, reusable slot. The owner must keep this storage alive until
 // all allocations using it have been deallocated (including heap fallbacks).
+template <size_t kSlotSize>
 class PreallocSlot {
- public:
-  static constexpr size_t kSlotSize = 512;
+  static_assert(kSlotSize > 0);
 
+ public:
   void* TryAllocate(size_t size, size_t alignment) noexcept {
     if (size > kSlotSize || alignment > alignof(std::max_align_t)) {
       return nullptr;
@@ -189,15 +190,20 @@ class PreallocSlot {
 
 // Uses the slot for one object when size and alignment permit; otherwise falls
 // back to std::allocator, including when the slot is already occupied.
-template <class T>
+template <class T, size_t kSlotSize>
 class PreallocSlotAllocator {
  public:
   using value_type = T;
 
-  explicit PreallocSlotAllocator(PreallocSlot* storage) noexcept : storage_(storage) {}
+  template <class U>
+  struct rebind {
+    using other = PreallocSlotAllocator<U, kSlotSize>;
+  };
+
+  explicit PreallocSlotAllocator(PreallocSlot<kSlotSize>* storage) noexcept : storage_(storage) {}
 
   template <class U>
-  PreallocSlotAllocator(const PreallocSlotAllocator<U>& other) noexcept : storage_(other.storage_) {}
+  PreallocSlotAllocator(const PreallocSlotAllocator<U, kSlotSize>& other) noexcept : storage_(other.storage_) {}
 
   T* allocate(size_t count) {
     if (count == 1) {
@@ -214,16 +220,16 @@ class PreallocSlotAllocator {
     }
   }
 
-  template <class U>
+  template <class U, size_t>
   friend class PreallocSlotAllocator;
 
   template <class U>
-  bool operator==(const PreallocSlotAllocator<U>& other) const noexcept {
+  bool operator==(const PreallocSlotAllocator<U, kSlotSize>& other) const noexcept {
     return storage_ == other.storage_;
   }
 
  private:
-  PreallocSlot* storage_;
+  PreallocSlot<kSlotSize>* storage_;
 };
 
 /**

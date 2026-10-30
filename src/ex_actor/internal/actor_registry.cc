@@ -115,7 +115,7 @@ void ActorRegistryBackend::HandleActorCreationRequest(ActorCreationRequest msg, 
     uint64_t actor_id = GenerateRandomActorId();
     auto result = handler(RemoteActorRequestHandlerRegistry::RemoteActorCreationHandlerContext {
         .serialized_args = std::move(msg.serialized_args),
-        .scheduler = user_actor_scheduler_->Clone(),
+        .activation_context = user_actor_scheduler_->CreateActivationContext(),
         .actor_ref_serde_ctx = serde_ctx,
         .actor_id = actor_id});
     if (result.actor_name.has_value()) {
@@ -212,8 +212,8 @@ ActorRegistry::ActorRegistry(uint32_t thread_pool_size, std::unique_ptr<TypeEras
                                 ? std::move(scheduler)
                                 : std::make_unique<AnyStdExecScheduler<WorkSharingThreadPool::Scheduler>>(
                                       default_work_sharing_thread_pool_.GetScheduler())),
-      backend_actor_(system_actor_scheduler_->Clone(), ActorConfig {}, user_actor_scheduler_->Clone(), this_node_id_,
-                     broker_actor_ref_),
+      backend_actor_(system_actor_scheduler_->CreateActivationContext(), ActorConfig {}, user_actor_scheduler_->Clone(),
+                     this_node_id_, broker_actor_ref_),
       backend_actor_ref_(/*actor_id=*/UINT64_MAX, &backend_actor_) {
   log::Info("ActorRegistry created, node_id={:#x}", this_node_id_);
 }
@@ -223,8 +223,8 @@ ex::task<void> ActorRegistry::StartOrJoinCluster(const ClusterConfig& cluster_co
   EXA_THROW_CHECK(broker_actor_ref_.IsEmpty()) << "Already in distributed mode.";
   EXA_THROW_CHECK(!cluster_config.listen_address.empty()) << "listen_address must not be empty";
 
-  broker_actor_ = std::make_unique<Actor<MessageBroker>>(system_actor_scheduler_->Clone(), ActorConfig {},
-                                                         this_node_id_, cluster_config);
+  broker_actor_ = std::make_unique<Actor<MessageBroker>>(system_actor_scheduler_->CreateActivationContext(),
+                                                         ActorConfig {}, this_node_id_, cluster_config);
 
   broker_actor_ref_ = BasicActorRef<MessageBroker>(/*actor_id=*/UINT64_MAX, broker_actor_.get());
   NotifyExActorOnSpawned<MessageBroker>(broker_actor_.get(), broker_actor_ref_);

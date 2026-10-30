@@ -91,7 +91,7 @@ TEST(PreallocSlotAllocatorTest, ConcurrentRequestsNeverShareLiveStorage) {
   workers.reserve(kThreads);
   const auto start = std::chrono::steady_clock::now();
   for (size_t thread = 0; thread < kThreads; ++thread) {
-    workers.emplace_back([&, thread] {
+    workers.emplace_back([&, thread, start] {
       PreallocSlotAllocator<uint64_t, 512> allocator(&storage);
       for (uint64_t round = 0; round < 1000; ++round) {
         auto* value = allocator.allocate(/*count=*/1);

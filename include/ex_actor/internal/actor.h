@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <utility>
 
@@ -86,10 +87,68 @@ class TypeErasedActor {
   ActorConfig actor_config_;
 };
 
+class TypeErasedActorActivationContext {
+ public:
+  virtual ~TypeErasedActorActivationContext() = default;
+  virtual void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) = 0;
+};
+
+template <ex::scheduler Scheduler>
+class ActorActivationContext : public TypeErasedActorActivationContext {
+ private:
+  static auto MakeSender(Scheduler& scheduler, TypeErasedActor* actor) {
+    const auto& actor_config = actor->GetActorConfig();
+    return ex::schedule(scheduler) | ex::write_env(ex::prop {ex_actor::get_priority, actor_config.priority}) |
+           ex::write_env(ex::prop {ex_actor::get_scheduler_index, actor_config.scheduler_index}) |
+           ex::write_env(ex::prop {ex_actor::get_core_index, actor_config.core_index}) |
+           ex::then([actor] { actor->PullMailboxAndRun(); }) | DiscardResult();
+  }
+
+  using ScopeToken = ex::simple_counting_scope::token;
+  using Sender = decltype(MakeSender(std::declval<Scheduler&>(), std::declval<TypeErasedActor*>()));
+
+  template <size_t kSlotSize>
+  using Allocator = PreallocSlotAllocator<std::byte, kSlotSize>;
+
+  template <size_t kSlotSize>
+  using SpawnEnv = ex::prop<ex::get_allocator_t, Allocator<kSlotSize>>;
+
+  // Match the pinned stdexec::spawn implementation, including its scope wrapper,
+  // allocator environment, and bookkeeping, rather than just the connected sender.
+  template <size_t kSlotSize>
+  using SpawnState =
+      ex::__spawn::__spawn_state<Allocator<kSlotSize>, ScopeToken,
+                                 decltype(ex::write_env(std::declval<ScopeToken&>().wrap(std::declval<Sender>()),
+                                                        std::declval<SpawnEnv<kSlotSize>>()))>;
+
+  // The allocator only stores a pointer, so use a minimal slot to determine the
+  // state size, then verify that substituting the resulting capacity preserves it.
+  static constexpr size_t kSpawnStateSize = sizeof(SpawnState<sizeof(std::byte)>);
+  static_assert(sizeof(SpawnState<kSpawnStateSize>) == kSpawnStateSize);
+
+ public:
+  explicit ActorActivationContext(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
+
+  void Schedule(TypeErasedActor* actor, ScopeToken scope_token) override {
+    auto sender = MakeSender(scheduler_, actor);
+    Allocator<kSpawnStateSize> allocator(&spawn_state_storage_);
+    // A property is already an environment. Clang 18 miscompiles an ex::env
+    // wrapper around this stateful allocator property.
+    auto env = ex::prop {ex::get_allocator, allocator};
+    ex::spawn(std::move(sender), scope_token, std::move(env));
+  }
+
+ private:
+  // Owned by one actor and kept alive until its async scope has drained.
+  PreallocSlot<kSpawnStateSize> spawn_state_storage_;
+  Scheduler scheduler_;
+};
+
+// Lightweight scheduler prototypes create separate activation state for each actor.
 class TypeErasedActorScheduler {
  public:
   virtual ~TypeErasedActorScheduler() = default;
-  virtual void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) = 0;
+  virtual std::unique_ptr<TypeErasedActorActivationContext> CreateActivationContext() const = 0;
   virtual std::unique_ptr<TypeErasedActorScheduler> Clone() const = 0;
 
   virtual const void* GetUnderlyingSchedulerPtr() const = 0;
@@ -99,13 +158,9 @@ template <ex::scheduler Scheduler>
 class AnyStdExecScheduler : public TypeErasedActorScheduler {
  public:
   explicit AnyStdExecScheduler(Scheduler scheduler) : scheduler_(std::move(scheduler)) {}
-  void Schedule(TypeErasedActor* actor, ex::simple_counting_scope::token scope_token) override {
-    const auto& actor_config = actor->GetActorConfig();
-    auto sender = ex::schedule(scheduler_) | ex::write_env(ex::prop {ex_actor::get_priority, actor_config.priority}) |
-                  ex::write_env(ex::prop {ex_actor::get_scheduler_index, actor_config.scheduler_index}) |
-                  ex::write_env(ex::prop {ex_actor::get_core_index, actor_config.core_index}) |
-                  ex::then([actor] { actor->PullMailboxAndRun(); });
-    ex::spawn(std::move(sender) | DiscardResult(), scope_token);
+
+  std::unique_ptr<TypeErasedActorActivationContext> CreateActivationContext() const override {
+    return std::make_unique<ActorActivationContext<Scheduler>>(scheduler_);
   }
 
   std::unique_ptr<TypeErasedActorScheduler> Clone() const override {
@@ -239,9 +294,10 @@ template <class UserClass, auto kCreateFn = nullptr>
 class Actor : public TypeErasedActor {
  public:
   template <typename... Args>
-  explicit Actor(std::unique_ptr<TypeErasedActorScheduler> scheduler, ActorConfig actor_config, Args... args)
+  explicit Actor(std::unique_ptr<TypeErasedActorActivationContext> activation_context, ActorConfig actor_config,
+                 Args... args)
       : TypeErasedActor(std::move(actor_config)),
-        scheduler_(std::move(scheduler)),
+        activation_context_(std::move(activation_context)),
         mailbox_set_(actor_config_.mailbox_configs) {
     if constexpr (kCreateFn != nullptr) {
       using ReturnType = FnReturnType<kCreateFn>;
@@ -260,11 +316,13 @@ class Actor : public TypeErasedActor {
   }
 
   template <typename... Args>
-  static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(std::unique_ptr<TypeErasedActorScheduler> scheduler,
-                                                            ActorConfig actor_config, std::tuple<Args...> arg_tuple) {
+  static std::unique_ptr<TypeErasedActor> CreateUseArgTuple(
+      std::unique_ptr<TypeErasedActorActivationContext> activation_context, ActorConfig actor_config,
+      std::tuple<Args...> arg_tuple) {
     return std::apply(
-        [scheduler = std::move(scheduler), actor_config = std::move(actor_config)](auto&&... args) mutable {
-          return std::make_unique<Actor<UserClass, kCreateFn>>(std::move(scheduler), std::move(actor_config),
+        [activation_context = std::move(activation_context),
+         actor_config = std::move(actor_config)](auto&&... args) mutable {
+          return std::make_unique<Actor<UserClass, kCreateFn>>(std::move(activation_context), std::move(actor_config),
                                                                std::move(args)...);
         },
         std::move(arg_tuple));
@@ -299,7 +357,7 @@ class Actor : public TypeErasedActor {
   const std::atomic_size_t& GetPendingMessageCountRef() const override { return pending_message_count_; }
 
  private:
-  std::unique_ptr<TypeErasedActorScheduler> scheduler_;
+  std::unique_ptr<TypeErasedActorActivationContext> activation_context_;
   MailboxSet mailbox_set_;
   std::atomic_size_t pending_message_count_ = 0;
   std::unique_ptr<UserClass> user_class_instance_;
@@ -335,7 +393,7 @@ class Actor : public TypeErasedActor {
     if (!changed) {
       return;
     }
-    scheduler_->Schedule(this, async_scope_.get_token());
+    activation_context_->Schedule(this, async_scope_.get_token());
   }
 
   void PullMailboxAndRun() override {

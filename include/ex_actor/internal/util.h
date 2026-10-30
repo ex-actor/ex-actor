@@ -15,6 +15,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
+#include <memory>
 #include <mutex>
 #include <source_location>
 #include <type_traits>
@@ -153,6 +155,84 @@ struct SenderVariant : ex::sender_t {
 }  // namespace ex_actor::internal
 
 namespace ex_actor {
+
+// One preallocated, reusable slot. The owner must keep this storage alive until
+// all allocations using it have been deallocated (including heap fallbacks).
+template <size_t kSlotSize>
+class PreallocSlot {
+  static_assert(kSlotSize > 0);
+
+ public:
+  void* TryAllocate(size_t size, size_t alignment) noexcept {
+    if (size > kSlotSize || alignment > alignof(std::max_align_t)) {
+      return nullptr;
+    }
+    bool expected = false;
+    if (in_use_.compare_exchange_strong(expected, /*desired=*/true, /*success=*/std::memory_order_acquire,
+                                        /*failure=*/std::memory_order_relaxed)) {
+      return bytes_;
+    }
+    return nullptr;
+  }
+
+  bool TryDeallocate(void* ptr) noexcept {
+    if (ptr == bytes_) {
+      in_use_.store(false, std::memory_order_release);
+      return true;
+    }
+    return false;
+  }
+
+ private:
+  alignas(std::max_align_t) std::byte bytes_[kSlotSize] {};
+  std::atomic_bool in_use_ = false;
+};
+
+// Uses the slot for one object when size and alignment permit; otherwise falls
+// back to std::allocator, including when the slot is already occupied.
+template <class T, size_t kSlotSize>
+class PreallocSlotAllocator {
+ public:
+  using value_type = T;  // NOLINT(readability-identifier-naming) - required by std::allocator_traits
+
+  template <class U>
+  struct rebind {  // NOLINT(readability-identifier-naming) - required by std::allocator_traits
+    using other = PreallocSlotAllocator<U, kSlotSize>;  // NOLINT(readability-identifier-naming)
+  };
+
+  explicit PreallocSlotAllocator(PreallocSlot<kSlotSize>* storage) noexcept : storage_(storage) {}
+
+  template <class U>
+  // NOLINTNEXTLINE(google-explicit-constructor) - allocator rebinding requires implicit conversion
+  PreallocSlotAllocator(const PreallocSlotAllocator<U, kSlotSize>& other) noexcept : storage_(other.storage_) {}
+
+  T* allocate(size_t count) {
+    if (count == 1) {
+      if (void* ptr = storage_->TryAllocate(sizeof(T), alignof(T))) {
+        return static_cast<T*>(ptr);
+      }
+    }
+    return std::allocator<T> {}.allocate(count);
+  }
+
+  void deallocate(T* ptr, size_t count) noexcept {
+    if (!storage_->TryDeallocate(ptr)) {
+      std::allocator<T> {}.deallocate(ptr, count);
+    }
+  }
+
+  template <class U, size_t>
+  friend class PreallocSlotAllocator;
+
+  template <class U>
+  bool operator==(const PreallocSlotAllocator<U, kSlotSize>& other) const noexcept {
+    return storage_ == other.storage_;
+  }
+
+ private:
+  PreallocSlot<kSlotSize>* storage_;
+};
+
 /**
  * @brief A std::execution style semaphore. support on_negative sender.
  */

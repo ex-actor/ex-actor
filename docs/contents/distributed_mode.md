@@ -107,22 +107,6 @@ Both processes should print "All work done" log.
 
 The process will block on `ex_actor::WaitOsExitSignal()`. You should kill them manually by CTRL+C or kill command.
 
-## Message size and traversal limit
-
-Incoming Cap'n Proto messages use a traversal limit of 67,108,864 words (512 MiB),
-instead of Cap'n Proto's default of 64 MiB. To override it, set
-`EXA_CAPNP_TRAVERSAL_LIMIT_IN_WORDS` in each receiving process's environment:
-
-```bash
-export EXA_CAPNP_TRAVERSAL_LIMIT_IN_WORDS=134217728  # 1 GiB
-```
-
-The value is a decimal count of 8-byte words, not bytes. The limit applies to
-unpacked data and includes repeated traversal of the same data, so allow headroom
-above the message size. Both ordinary and context-aware deserialization use this
-setting. It is read when constructing each reader; unset or empty values use the
-512 MiB default.
-
 ## Fault tolerance
 
 We use heartbeat mechanism to detect node failures, if a node hasn't been heard from for a long time, it's considered dead, all in-flight remote calls will throw `ex_actor::NetworkError`, by catching this exception you can handle the failure gracefully.

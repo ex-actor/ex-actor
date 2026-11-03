@@ -1,8 +1,6 @@
 #include "ex_actor/internal/serialization.h"
 
 #include <cstdint>
-#include <cstdlib>
-#include <optional>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -24,35 +22,8 @@ struct ActorRefWrapper {
   ex_actor::ActorRef<Counter> ref;
 };
 
-constexpr const char* kTraversalLimitEnv = "EXA_CAPNP_TRAVERSAL_LIMIT_IN_WORDS";
-
-// Restore the process environment even when a test fails.
-class ScopedTraversalLimitEnv {
- public:
-  ScopedTraversalLimitEnv() {
-    if (const char* value = std::getenv(kTraversalLimitEnv)) {
-      original_value_ = value;
-    }
-    Set(nullptr);
-  }
-
-  ~ScopedTraversalLimitEnv() { Set(original_value_ ? original_value_->c_str() : nullptr); }
-
-  void Set(const char* value) {
-#ifdef _WIN32
-    EXPECT_EQ(_putenv_s(kTraversalLimitEnv, value ? value : ""), 0);
-#else
-    if (value) {
-      EXPECT_EQ(setenv(kTraversalLimitEnv, value, /*overwrite=*/1), 0);
-    } else {
-      EXPECT_EQ(unsetenv(kTraversalLimitEnv), 0);
-    }
-#endif
-  }
-
- private:
-  std::optional<std::string> original_value_;
-};
+// CTest supplies the expected value separately from the process environment.
+uint64_t expected_traversal_limit_in_words = 64ULL * 1024 * 1024;
 
 struct Payload {
   ex_actor::internal::ByteBuffer data;
@@ -68,8 +39,6 @@ class TraversalLimitTest : public testing::TestWithParam<bool> {
     }
     return ex_actor::internal::Deserialize<Payload>(serialized);
   }
-
-  ScopedTraversalLimitEnv env_;
 };
 
 }  // namespace
@@ -114,22 +83,27 @@ TEST_P(TraversalLimitTest, EnvironmentOverrideControlsBothReaders) {
   const Payload payload {.data = ex_actor::internal::ByteBuffer(4096, std::byte {0x5a})};
   const auto serialized = ex_actor::internal::Serialize(payload);
 
-  env_.Set("64");  // 512 bytes: too small for this message.
-  EXPECT_THROW(Read(serialized), kj::Exception);
-
-  env_.Set("4096");  // 32 KiB: enough for the message and repeated traversal.
-  EXPECT_EQ(ex_actor::internal::GetCapnpReaderOptions().traversalLimitInWords, 4096);
-  EXPECT_EQ(Read(serialized).data, payload.data);
-}
-
-TEST_P(TraversalLimitTest, EmptyEnvironmentUsesDefault) {
-  env_.Set("");
-  EXPECT_EQ(ex_actor::internal::GetCapnpReaderOptions().traversalLimitInWords, 64ULL * 1024 * 1024);
-  const Payload payload {.data = ex_actor::internal::ByteBuffer(4096, std::byte {0x5a})};
-  EXPECT_EQ(Read(ex_actor::internal::Serialize(payload)).data, payload.data);
+  EXPECT_EQ(ex_actor::internal::GetCapnpReaderOptions().traversalLimitInWords, expected_traversal_limit_in_words);
+  if (expected_traversal_limit_in_words == 64) {
+    // 512 bytes: too small for this message.
+    EXPECT_THROW(Read(serialized), kj::Exception);
+  } else {
+    // Both the 32 KiB override and the default allow this message.
+    EXPECT_EQ(Read(serialized).data, payload.data);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Serialization, TraversalLimitTest, testing::Bool(),
                          [](const testing::TestParamInfo<bool>& info) {
                            return info.param ? "WithContext" : "WithoutContext";
                          });
+
+int main(int argc, char** argv) {
+  testing::InitGoogleTest(&argc, argv);
+  if (argc == 2) {
+    expected_traversal_limit_in_words = std::stoull(argv[1]);
+  } else if (argc != 1) {
+    return 1;
+  }
+  return RUN_ALL_TESTS();
+}

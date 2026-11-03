@@ -34,7 +34,7 @@ namespace ex_actor::internal {
 
 inline capnp::ReaderOptions GetCapnpReaderOptions() {
   capnp::ReaderOptions options;
-  options.traversalLimitInWords = GetCapnpTraversalLimitInWords();
+  options.traversalLimitInWords = kCapnpTraversalLimitInWords;
   return options;
 }
 

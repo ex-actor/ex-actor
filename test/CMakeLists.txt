@@ -14,6 +14,22 @@ endfunction()
 ex_actor_test(prealloc_slot_allocator_test TIMEOUT 300)
 ex_actor_test(basic_api_test)
 ex_actor_test(serialization_test)
+# Environment-backed constants are initialized before main, so each scenario
+# runs in a fresh process. Keep inherited environment settings out of the default test.
+set_tests_properties(serialization_test PROPERTIES
+  ENVIRONMENT_MODIFICATION "EXA_CAPNP_TRAVERSAL_LIMIT_IN_WORDS=unset:")
+foreach(LIMIT IN ITEMS 64 4096)
+  add_test(NAME serialization_limit_${LIMIT}_test
+    COMMAND $<TARGET_FILE:serialization_test>
+      "--gtest_filter=*EnvironmentOverrideControlsBothReaders*" ${LIMIT})
+  set_tests_properties(serialization_limit_${LIMIT}_test PROPERTIES
+    ENVIRONMENT "EXA_CAPNP_TRAVERSAL_LIMIT_IN_WORDS=${LIMIT}"
+    TIMEOUT 10)
+endforeach()
+add_test(NAME serialization_limit_empty_test COMMAND $<TARGET_FILE:serialization_test>)
+set_tests_properties(serialization_limit_empty_test PROPERTIES
+  ENVIRONMENT "EXA_CAPNP_TRAVERSAL_LIMIT_IN_WORDS="
+  TIMEOUT 10)
 ex_actor_test(util_test)
 ex_actor_test(scheduler_test)
 ex_actor_test(static_scheduler_fiasco_test)

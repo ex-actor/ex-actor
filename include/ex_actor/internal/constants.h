@@ -47,6 +47,10 @@ constexpr size_t kEmptyActorRefHashVal = 10086;
 constexpr uint64_t kContactSocketRebuildCooldownMs = 1000;
 
 // Env-configurable constants
+// Cap'n Proto counts 8-byte words, including repeated traversal of the same data.
+inline const uint64_t kCapnpTraversalLimitInWords =
+    GetEnv<uint64_t>("EXA_CAPNP_TRAVERSAL_LIMIT_IN_WORDS", 64ULL * 1024 * 1024);  // 512 MiB
+
 inline const uint64_t kDefaultHeartbeatTimeoutMs = GetEnv<uint64_t>("EXA_HEARTBEAT_TIMEOUT_MS", 10000);
 inline const uint64_t kDefaultGossipIntervalMs = GetEnv<uint64_t>("EXA_GOSSIP_INTERVAL_MS", 500);
 inline const size_t kDefaultGossipFanout = GetEnv<size_t>("EXA_GOSSIP_FANOUT", 3);

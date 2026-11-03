@@ -27,7 +27,18 @@
 #include <spdlog/spdlog.h>
 
 #include "ex_actor/3rd_lib/absl/container/inlined_vector.h"
+#include "ex_actor/internal/constants.h"
 #include "ex_actor/internal/logging.h"
+
+namespace ex_actor::internal {
+
+inline capnp::ReaderOptions GetCapnpReaderOptions() {
+  capnp::ReaderOptions options;
+  options.traversalLimitInWords = kCapnpTraversalLimitInWords;
+  return options;
+}
+
+}  // namespace ex_actor::internal
 
 // ===================================================
 // Add external context support to rfl::capnproto
@@ -76,7 +87,7 @@ Result<internal::wrap_in_rfl_array_t<T>> read(const concepts::ByteLike auto* byt
                                               const Schema<T>& schema, const Ctx& ctx) {
   const auto array_ptr = kj::ArrayPtr<const kj::byte>(internal::ptr_cast<const kj::byte*>(bytes), size);
   auto input_stream = kj::ArrayInputStream(array_ptr);
-  auto message_reader = capnp::PackedMessageReader(input_stream);
+  auto message_reader = capnp::PackedMessageReader(input_stream, ex_actor::internal::GetCapnpReaderOptions());
   const auto root_name = get_root_name<std::remove_cv_t<T>, Ps...>();
   const auto root_schema = schema.value().getNested(root_name.c_str());
   const auto input_var = InputVarType {message_reader.getRoot<capnp::DynamicStruct>(root_schema.asStruct())};
@@ -198,7 +209,14 @@ ByteBuffer Serialize(const T& obj) {
 
 template <class T>
 T Deserialize(std::span<const std::byte> data) {
-  return rfl::capnproto::read<T>(reinterpret_cast<const char*>(data.data()), data.size(), GetCachedSchema<T>()).value();
+  const auto bytes = kj::ArrayPtr<const kj::byte>(reinterpret_cast<const kj::byte*>(data.data()), data.size());
+  auto input_stream = kj::ArrayInputStream(bytes);
+  auto message_reader = capnp::PackedMessageReader(input_stream, GetCapnpReaderOptions());
+  const auto root_name = rfl::capnproto::get_root_name<std::remove_cv_t<T>>();
+  const auto root_schema = GetCachedSchema<T>().value().getNested(root_name.c_str());
+  const auto input_var =
+      rfl::capnproto::InputVarType {message_reader.getRoot<capnp::DynamicStruct>(root_schema.asStruct())};
+  return rfl::capnproto::read<T>(input_var).value();
 }
 
 template <class T, class Ctx>

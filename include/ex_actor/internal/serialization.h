@@ -34,9 +34,7 @@ namespace ex_actor::internal {
 
 inline capnp::ReaderOptions GetCapnpReaderOptions() {
   capnp::ReaderOptions options;
-  // Cap'n Proto counts 8-byte words, including repeated traversal of the same data.
-  options.traversalLimitInWords =
-      GetEnv<uint64_t>("EXA_CAPNP_TRAVERSAL_LIMIT_IN_WORDS", 64ULL * 1024 * 1024);  // 512 MiB
+  options.traversalLimitInWords = GetCapnpTraversalLimitInWords();
   return options;
 }
 
